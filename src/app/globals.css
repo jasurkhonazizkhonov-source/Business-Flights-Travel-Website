@@ -1,0 +1,172 @@
+@import "tailwindcss";
+@import "react-phone-number-input/style.css";
+
+:root {
+  --color-navy-950: #0a1a30;
+  --color-navy-900: #0d2340;
+  --color-navy-800: #123152;
+  --color-navy-700: #1b4269;
+  --color-navy-600: #2a5686;
+  --color-navy-500: #3d6da3;
+
+  --color-gold-400: #e3b876;
+  --color-gold-500: #d29c4a;
+  /* Darkened from #b8842f — the original only reached ~3.1:1 contrast
+     against the cream backgrounds it's used as TEXT on (kicker labels,
+     required-field asterisks), short of WCAG AA's 4.5:1 for normal text.
+     This value clears ~4.7:1. gold-700 darkened to match — it's used as a
+     hover-darken from gold-600 in one place, and needs to stay visibly
+     darker than the new gold-600 to still read as a hover state.
+     Unaffected: every use of gold as a filled BUTTON background
+     (gold-400/gold-500) with dark/white text on top — a different contrast
+     pair, already compliant. */
+  --color-gold-600: #946824;
+  --color-gold-700: #76531d;
+
+  --color-cream-50: #fbf9f5;
+  --color-cream-100: #f5f1e8;
+
+  --background: var(--color-cream-50);
+  --foreground: var(--color-navy-950);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+
+  --color-navy-950: var(--color-navy-950);
+  --color-navy-900: var(--color-navy-900);
+  --color-navy-800: var(--color-navy-800);
+  --color-navy-700: var(--color-navy-700);
+  --color-navy-600: var(--color-navy-600);
+  --color-navy-500: var(--color-navy-500);
+
+  --color-gold-400: var(--color-gold-400);
+  --color-gold-500: var(--color-gold-500);
+  --color-gold-600: var(--color-gold-600);
+  --color-gold-700: var(--color-gold-700);
+
+  --color-cream-50: var(--color-cream-50);
+  --color-cream-100: var(--color-cream-100);
+
+  --font-display: var(--font-display);
+  --font-sans: var(--font-sans);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+}
+
+h1, h2, h3, h4, .font-display {
+  font-family: var(--font-display);
+}
+
+/* Respect the OS-level reduced-motion preference: collapse every
+   scroll-reveal / entrance transition to an instant, static state rather
+   than trying to disable each animation individually at the call site. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+::selection {
+  background: var(--color-gold-400);
+  color: var(--color-navy-950);
+}
+
+/* react-phone-number-input: restyle to match the form's premium field
+   chrome instead of the library's default plain-browser look. */
+.PhoneInput {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.PhoneInputInput {
+  border: none;
+  outline: none;
+  background: transparent;
+  font-size: inherit;
+  font-family: inherit;
+  color: inherit;
+  width: 100%;
+}
+.PhoneInputCountry {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.PhoneInputCountrySelect {
+  cursor: pointer;
+}
+.PhoneInputCountryIcon {
+  width: 1.4em;
+  height: 1.05em;
+  box-shadow: 0 0 0 1px rgba(10, 26, 48, 0.15);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+/* react-day-picker: brand the calendar to match the navy/gold palette. */
+.bfw-daypicker.rdp-root {
+  --rdp-accent-color: var(--color-navy-900);
+  --rdp-accent-background-color: var(--color-cream-100);
+  --rdp-today-color: var(--color-gold-600);
+  font-family: var(--font-sans);
+}
+.bfw-daypicker .rdp-day_button:hover:not([disabled]) {
+  background-color: var(--color-cream-100);
+}
+.bfw-daypicker .rdp-selected .rdp-day_button {
+  background-color: var(--color-navy-900);
+  color: white;
+  border-color: var(--color-navy-900);
+}
+
+/* Narrow phones (≤380px, e.g. iPhone SE / small Android): the default
+   44px day cells make the 7-column grid wider than the viewport itself.
+   Shrinking the cells keeps the whole calendar — and the popover it sits
+   in — inside the screen instead of forcing horizontal scroll. */
+@media (max-width: 380px) {
+  .bfw-daypicker.rdp-root {
+    --rdp-day-width: 34px;
+    --rdp-day-height: 34px;
+    --rdp-day_button-width: 32px;
+    --rdp-day_button-height: 32px;
+    font-size: 0.8rem;
+  }
+}
+
+/* Legal pages: plain semantic <ul>/<li>/<p>/<strong> markup, styled once
+   here rather than repeating utility classes on every list item. */
+.legal-content ul {
+  list-style: disc;
+  padding-left: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.legal-content strong {
+  color: var(--color-navy-950);
+  font-weight: 600;
+}
+.legal-content a {
+  color: var(--color-navy-800);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.legal-content a:hover {
+  color: var(--color-gold-600);
+}
+.legal-content h3 {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 1.05rem;
+  color: var(--color-navy-950);
+  margin-top: 0.25rem;
+}
