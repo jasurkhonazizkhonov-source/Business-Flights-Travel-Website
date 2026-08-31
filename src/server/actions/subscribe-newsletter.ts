@@ -5,7 +5,7 @@ import { headers } from "next/headers";
 import { prisma } from "@/lib/prisma";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { newsletterSchema, type NewsletterInput } from "@/lib/validations/newsletter";
-import { CRM_COMPANY_ID } from "@/lib/constants";
+import { getCrmCompanyId } from "@/server/crm-company";
 
 export type SubscribeNewsletterResult = { ok: true; alreadySubscribed: boolean } | { ok: false; error: string };
 
@@ -33,8 +33,10 @@ export async function subscribeToNewsletter(input: NewsletterInput): Promise<Sub
   }
 
   try {
+    const companyId = await getCrmCompanyId();
+
     const existing = await prisma.subscriber.findUnique({
-      where: { companyId_email: { companyId: CRM_COMPANY_ID, email: parsed.data.email } },
+      where: { companyId_email: { companyId, email: parsed.data.email } },
     });
 
     if (existing) {
@@ -52,7 +54,7 @@ export async function subscribeToNewsletter(input: NewsletterInput): Promise<Sub
 
     await prisma.subscriber.create({
       data: {
-        companyId: CRM_COMPANY_ID,
+        companyId,
         email: parsed.data.email,
         status: "SUBSCRIBED",
         source: "website",

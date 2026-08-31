@@ -6,7 +6,7 @@ import { checkRateLimit } from "@/lib/rate-limit";
 import { normalizePhoneNumber } from "@/lib/phone";
 import { contactMessageSchema, type ContactMessageInput } from "@/lib/validations/contact";
 import { resolveContact } from "@/server/contact";
-import { CRM_COMPANY_ID } from "@/lib/constants";
+import { getCrmCompanyId } from "@/server/crm-company";
 
 export type SubmitContactMessageResult = { ok: true } | { ok: false; error: string; fieldErrors?: Record<string, string> };
 
@@ -57,17 +57,20 @@ export async function submitContactMessage(input: ContactMessageInput): Promise<
   }
 
   try {
-    const contactId = await resolveContact({
-      firstName: data.firstName,
-      lastName: data.lastName,
-      e164Phone: phone.e164,
-      rawPhone: data.phone,
-      email: data.email,
-    });
+    const [contactId, companyId] = await Promise.all([
+      resolveContact({
+        firstName: data.firstName,
+        lastName: data.lastName,
+        e164Phone: phone.e164,
+        rawPhone: data.phone,
+        email: data.email,
+      }),
+      getCrmCompanyId(),
+    ]);
 
     const inquiry = await prisma.contactInquiry.create({
       data: {
-        companyId: CRM_COMPANY_ID,
+        companyId,
         firstName: data.firstName,
         lastName: data.lastName,
         email: data.email,

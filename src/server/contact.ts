@@ -1,7 +1,7 @@
 import "server-only";
 import { prisma } from "@/lib/prisma";
 import { Prisma } from "@/generated/prisma/client";
-import { CRM_COMPANY_ID } from "@/lib/constants";
+import { getCrmCompanyId } from "@/server/crm-company";
 
 // Shared by both lead-generation paths (the flight request form and the
 // general contact form) so a customer who submits both doesn't end up as
@@ -30,13 +30,15 @@ export async function resolveContact(input: {
   rawPhone?: string;
   email: string;
 }): Promise<string> {
+  const companyId = await getCrmCompanyId();
+
   const MAX_ATTEMPTS = 3;
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     try {
       return await prisma.$transaction(
         async (tx) => {
           const or = duplicateContactWhere(input.e164Phone, input.rawPhone, input.email);
-          const existing = or.length > 0 ? await tx.contact.findFirst({ where: { companyId: CRM_COMPANY_ID, OR: or } }) : null;
+          const existing = or.length > 0 ? await tx.contact.findFirst({ where: { companyId, OR: or } }) : null;
           if (existing) return existing.id;
 
           const storedPhone = input.e164Phone ?? input.rawPhone;
@@ -46,7 +48,7 @@ export async function resolveContact(input: {
               lastName: input.lastName,
               primaryPhone: storedPhone,
               primaryEmail: input.email,
-              companyId: CRM_COMPANY_ID,
+              companyId,
               ContactPhone: storedPhone ? { create: [{ number: storedPhone, type: "MOBILE", isPrimary: true }] } : undefined,
               ContactEmail: { create: [{ email: input.email, type: "PERSONAL", isPrimary: true }] },
             },

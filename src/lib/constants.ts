@@ -10,11 +10,11 @@ export const SITE_URL = "https://www.businessflights.travel";
 export const SITE_DESCRIPTION =
   "Business Flights Travel is a premium travel agency specializing in business-class, first-class, and international flights, with dedicated travel specialists handling every request personally.";
 
-// The CRM's Company row this website's leads are written against. This
-// database is shared with the "Compass Tools" CRM (see prisma/schema.prisma
-// header) and is currently single-tenant in practice, so this id is a fixed
-// constant rather than something end users ever choose.
-export const CRM_COMPANY_ID = "default-company";
+// The CRM's Company row this website's leads/inquiries/subscribers are
+// written against is resolved dynamically at runtime, NOT hard-coded here —
+// see src/server/crm-company.ts for why (the CRM auto-generates a random
+// cuid per database, so any literal id here would only work against one
+// specific database and break database portability).
 
 export const CONTACT_PHONE_DISPLAY = "+1 415 777 7788";
 export const CONTACT_PHONE_E164 = "+14157777788";
