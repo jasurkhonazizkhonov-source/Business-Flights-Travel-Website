@@ -42,10 +42,37 @@ function createPrismaClient() {
   return new PrismaClient({ adapter });
 }
 
-// Reused across hot-reloads in dev so each edit doesn't open a fresh pool
-// against the shared CRM database.
-export const prisma = globalForPrisma.prisma ?? createPrismaClient();
-
-if (process.env.NODE_ENV !== "production") {
-  globalForPrisma.prisma = prisma;
+function getPrismaClient(): PrismaClient {
+  if (globalForPrisma.prisma) return globalForPrisma.prisma;
+  const client = createPrismaClient();
+  // Reused across hot-reloads in dev so each edit doesn't open a fresh pool
+  // against the shared CRM database.
+  if (process.env.NODE_ENV !== "production") {
+    globalForPrisma.prisma = client;
+  }
+  return client;
 }
+
+// A lazy proxy, not `createPrismaClient()` called directly at module scope.
+// The previous eager version constructed (and, without DATABASE_URL, threw
+// from) the real client the moment this module was first imported —
+// including transitively, whenever a page bundled a "use server" action
+// that imports it (every form's src/server/actions/*.ts). That happens
+// during normal request handling and during `next build`'s page-data
+// collection alike, so a missing/unreachable database crashed the entire
+// page with Next's generic error overlay before any of the server actions'
+// own try/catch could run — even for a request that never actually
+// submitted a form, and even for pages whose visible content (like the
+// flight request form's application-owned airport autocomplete) has no
+// database dependency at all. Deferring construction until the first real
+// `prisma.<model>.<method>()` call means that failure now surfaces exactly
+// where it's already handled: inside the try/catch in each server action,
+// which returns the friendly, generic error message the security review
+// requires instead of leaking a stack trace.
+export const prisma = new Proxy({} as PrismaClient, {
+  get(_target, prop) {
+    const client = getPrismaClient();
+    const value = Reflect.get(client as object, prop);
+    return typeof value === "function" ? value.bind(client) : value;
+  },
+});

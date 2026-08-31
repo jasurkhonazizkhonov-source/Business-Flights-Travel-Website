@@ -1,9 +1,91 @@
 # Production Readiness Report — Business Flights Travel
 
-Four passes, 2026-08-28 through 2026-08-30. This report is honest about what
+Five passes, 2026-08-28 through 2026-08-31. This report is honest about what
 was verified and how, and calls out what still needs a human decision or a
 production-only step. It does not claim "everything is complete" — see
 **Remaining Issues** at the end.
+
+## Pass 5 — airport autocomplete fix, eliminating the last inappropriate Postgres dependency (2026-08-31)
+
+Reported symptom: airport suggestion/autocomplete broken in production, on
+both desktop and mobile. Root cause confirmed, not assumed — traced the full
+data flow (airport data → autocomplete → form → submission → CRM):
+
+- **Root cause**: `src/app/api/airports/search/route.ts` (the autocomplete's
+  backend) queried `DATABASE_URL`'s `Airport` table directly on every
+  keystroke. That table only happened to be pre-seeded with ~9,000 rows in
+  the specific Postgres instance used during development (see Pass 4's
+  removal of that credential from `.env`). The production `DATABASE_URL`
+  points at a different database whose `Airport` table isn't seeded the same
+  way, so every search silently returned zero results — no error, no console
+  warning, just a dropdown that never appeared, on every device. This was
+  exactly the architecture flagged as a deliberate exception in Pass 2
+  (Section 5, below) — it turned out to be the wrong call once a second,
+  differently-seeded database entered the picture.
+- **Fix — made airport data application-owned**: added
+  `src/data/airports.ts`, a curated dataset (~350 major commercial/
+  international airports covering every region) with a synchronous
+  `searchAirports()` function, exactly like `destinations.ts` and
+  `airlines.ts` already do for their own reference data.
+  `AirportAutocomplete.tsx` now filters this in-memory array directly —
+  no `fetch`, no debounce, no loading state, no network round trip at all.
+  Deleted `src/app/api/airports/search/route.ts` (now unused; it was the
+  only API route in the app, so `src/app/api` was removed entirely — every
+  other form uses a server action, not a route handler).
+- **Second, related bug found and fixed**: flight-request *submission*
+  (`submit-flight-request.ts`) had its own, independent Postgres dependency —
+  it called `prisma.airport.findUnique({ where: { iata } })` and rejected the
+  submission outright if that exact row wasn't already present in the
+  connected database's `Airport` table. Since `Lead` carries a real foreign
+  key to `Airport`, some row has to exist — but requiring it to *already*
+  exist made submission fail on any database that hadn't been pre-seeded
+  with that airport, even though the airport was validly selected from the
+  now-static autocomplete. Fixed by validating the submitted IATA code
+  against `src/data/airports.ts` (not the database) and then
+  `prisma.airport.upsert()`-ing the CRM's row from that canonical data — so
+  a first-time airport on a fresh database is created automatically instead
+  of blocking the customer's submission, and an existing row's
+  name/city/country is kept in sync with the app's own data. See
+  `findAirportByIata()` in `src/data/airports.ts` and the updated try block
+  in `submit-flight-request.ts`.
+- **Verified database-independent**: with `DATABASE_URL` empty (this
+  project's actual current local state), airport search in both the "From"
+  and "To" fields works identically for every example query tested — IATA
+  codes (LHR, JFK, CDG, DXB, DEL, BOM), city names (London, New York, Paris,
+  Dubai, Delhi, Mumbai), full airport names (Heathrow), and partial
+  strings — with no console or network errors, confirming the dropdown no
+  longer depends on Postgres being reachable or seeded at all.
+- **Audited every other DB-dependent surface** the user asked about
+  (destinations, airlines/logos, phone/country selector, IATA data,
+  dropdowns): all confirmed already application-owned and untouched by this
+  pass except the airport search and submission-time lookup described above.
+  See Sections 4–5 below, updated to reflect the current, fully
+  database-independent state of all static reference data.
+- **Third bug found while deliberately testing with `DATABASE_URL` unset**
+  (this project's actual current local state): submitting the flight-request
+  form crashed the *entire page* with Next's generic "A server error
+  occurred" overlay, not the friendly message `submit-flight-request.ts`'s
+  own `try`/`catch` already returns for exactly this case. Root cause:
+  `src/lib/prisma.ts` constructed the real Prisma client — and threw, if
+  `DATABASE_URL` was missing — eagerly at module-import time, not on first
+  actual use. Since every "use server" action module (including
+  `submit-flight-request.ts`) is bundled with the page that uses it, this
+  meant *any* page reachable from a form-carrying action failed outright the
+  moment `DATABASE_URL` was missing — well before that action's own error
+  handling could run. Fixed by making `prisma` a lazily-initialized proxy:
+  the client (and its DATABASE_URL check) is now only constructed on the
+  first real `prisma.<model>.<method>()` call, which happens inside the
+  already-correct `try`/`catch` in each server action. Verified: with
+  `DATABASE_URL` empty, `npm run build` now completes successfully (it
+  previously required a real `DATABASE_URL` — see Pass 4's build note,
+  superseded by this fix), the `/flights` page and its airport autocomplete
+  render and function correctly, and submitting the form now returns the
+  intended friendly error message instead of crashing the page. The same
+  proxy is shared by every server action (`submit-contact-message.ts`,
+  `subscribe-newsletter.ts`, `lead-distribution.ts`), so this fix applies to
+  all of them, not just the flight-request form.
+- No `git add`/`commit`/`push` and no deployment: all changes in this pass
+  are local-only, per the user's explicit instruction.
 
 ## Pass 4 — final launch audit, credential removal, deployment package (2026-08-30)
 
@@ -44,15 +126,18 @@ against the live database, not assumed:
   folder), confirmed `postinstall` fired and regenerated the client
   correctly, then ran `next build` to a clean, successful exit — the exact
   sequence Vercel performs.
-- **Discovered, and documented rather than "fixed" away:** `next build`
-  itself requires `DATABASE_URL` to be set, not just runtime request
-  handling — `src/lib/prisma.ts` fails fast at import time if it's missing,
-  and Next.js loads every route module (including the one that imports
-  Prisma) while collecting page data during the build, before serving a
-  single request. This is a deliberate, correct fail-fast design, not a
-  bug — but it means `DATABASE_URL` must be set in Vercel's project
-  settings *before* the first deploy, or that first build will fail. Now
-  documented explicitly in `docs/ENVIRONMENT.md`.
+- **Discovered, and at the time documented rather than "fixed" away:**
+  `next build` itself required `DATABASE_URL` to be set, not just runtime
+  request handling — `src/lib/prisma.ts` failed fast at import time if it
+  was missing, and Next.js loads every route module while collecting page
+  data during the build, before serving a single request. Treated as a
+  deliberate, correct fail-fast design at the time, not a bug. **Superseded
+  in Pass 5**: that same eager-throw-at-import design turned out to also
+  crash pages at *runtime* (not just fail the build) whenever
+  `DATABASE_URL` was missing — a real bug once it was actually exercised —
+  so it was replaced with a lazy client that only requires `DATABASE_URL`
+  when a form is actually submitted. `next build` no longer requires
+  `DATABASE_URL` at all. See Pass 5, above.
 - **The testing database credential removed from the project entirely.**
   Confirmed (via a repository-wide search for its host, username, and port,
   not just its full string) that it appeared in exactly one file, `.env` —
@@ -215,9 +300,10 @@ generated OG image all serve correctly outside dev mode.
   `https://www.businessflights.travel` whenever that variable is unset —
   which is the documented, correct state for a real deployment.
 - Re-confirmed the data-access layering audit from the prior pass still
-  holds after this session's changes: the only `prisma.*` call in
-  application code outside `src/generated/` and `src/server/` is the one
-  documented exception, `src/app/api/airports/search/route.ts`.
+  holds after this session's changes: as of Pass 5, every `prisma.*` call in
+  application code lives under `src/server/` — there is no longer any
+  exception (the former one, `src/app/api/airports/search/route.ts`, was
+  deleted in Pass 5 along with the rest of `src/app/api`).
 - Re-confirmed company info (name, phone, address) is centralized in
   `src/lib/constants.ts` and used consistently — no hardcoded duplicates
   found elsewhere.
@@ -259,12 +345,12 @@ generated OG image all serve correctly outside dev mode.
   rate limiter is in-memory per server instance, so it resets on redeploy
   and isn't shared across multiple instances — acceptable for the current
   scale, worth revisiting if traffic or abuse grows.
-- **Database failure handling**: `/api/airports/search` catches failures
-  and returns an empty result set with a 503 rather than surfacing a stack
-  trace; the three write actions (flight request, contact, newsletter) all
-  return a generic "something went wrong, please try again" message on
-  failure — no SQL error text, connection string, or stack trace ever
-  reaches the client.
+- **Database failure handling**: the three write actions (flight request,
+  contact, newsletter) all return a generic "something went wrong, please
+  try again" message on failure — no SQL error text, connection string, or
+  stack trace ever reaches the client. (As of Pass 5, airport search no
+  longer touches the database at all, so it has no database-failure mode to
+  handle.)
 - **Secrets**: `.env` and `.env.local` are gitignored (`.gitignore` excludes
   `.env*` except `.env.example`); `.env.example` documents variable names
   only. This project is not currently in a git repository, so there is no
@@ -297,19 +383,24 @@ data-flow explanation.
 
 ## 5. Static, application-owned operational data
 
-Per your deployment-independence requirement: destinations, airlines, and
-airline logos are **not** read from `DATABASE_URL`. They live in
-`src/data/destinations.ts`, `src/data/airlines.ts`, and
-`public/airlines/*.png`, checked into the repo. The site's core visual
-content (destination cards, the "Airlines Travelers May Consider" strip)
-renders correctly with zero database dependency.
+Per your deployment-independence requirement: destinations, airlines,
+airline logos, and (as of Pass 5) airports are **not** read from
+`DATABASE_URL`. They live in `src/data/destinations.ts`,
+`src/data/airlines.ts`, `src/data/airports.ts`, and `public/airlines/*.png`,
+checked into the repo. The site's core visual content (destination cards,
+the "Airlines Travelers May Consider" strip) and the flight-request form's
+origin/destination autocomplete all render and function correctly with zero
+database dependency.
 
-The one deliberate exception: `/api/airports/search` (the flight form's
-origin/destination autocomplete) still queries `DATABASE_URL`'s `Airport`
-table, because it needs ~9,000 airports worldwide — impractical to
-hand-maintain as a static file, and this data is foundational CRM
-infrastructure regardless of this website. It degrades to an empty result
-list, not an error, if the database is unavailable.
+There is no longer an exception: the flight form's autocomplete used to
+query `DATABASE_URL`'s `Airport` table directly, which is exactly what broke
+it in production (see Pass 5, above) — that endpoint has been removed in
+favor of a curated, application-owned dataset of ~350 major world airports,
+searched entirely client-side. The database's `Airport` table is still used
+at *submission* time, to satisfy `Lead`'s foreign key — but the row is
+`upsert`ed from the application's own canonical data rather than required to
+already exist, so submission also no longer depends on any specific
+database's pre-seeded contents.
 
 ## 6. Environment variables
 

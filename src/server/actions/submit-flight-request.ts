@@ -4,6 +4,7 @@ import { headers } from "next/headers";
 import { prisma } from "@/lib/prisma";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { normalizePhoneNumber } from "@/lib/phone";
+import { findAirportByIata } from "@/data/airports";
 import { flightRequestSchema, type FlightRequestInput } from "@/lib/validations/flight-request";
 import { distributeNewWebsiteLead } from "@/server/lead-distribution";
 import { resolveContact } from "@/server/contact";
@@ -79,13 +80,38 @@ export async function submitFlightRequest(input: FlightRequestInput): Promise<Su
 
   try {
     const firstSegment = data.segments[0];
-    const [fromAirport, toAirport] = await Promise.all([
-      prisma.airport.findUnique({ where: { iata: firstSegment.from.iata } }),
-      prisma.airport.findUnique({ where: { iata: firstSegment.to.iata } }),
-    ]);
-    if (!fromAirport || !toAirport) {
+
+    // Validate the submitted IATA codes against our own application-owned
+    // airport data (src/data/airports.ts) — the same dataset the
+    // autocomplete offered them from — rather than trusting client-supplied
+    // name/city/country text, or requiring the CRM's Postgres `Airport`
+    // table to already happen to contain these rows. `Lead` has a real
+    // foreign key to `Airport`, so a row still has to exist there; `upsert`
+    // creates it on demand (using our canonical data, not the client's) if
+    // this Postgres database hasn't seen this airport before, and keeps an
+    // existing row's name/city/country in sync with that same canonical
+    // data otherwise. This is what makes flight-request submission work
+    // against any compatible Postgres database — including a brand-new one
+    // with an empty `Airport` table — not just the specific instance that
+    // originally had it pre-seeded.
+    const canonicalFrom = findAirportByIata(firstSegment.from.iata);
+    const canonicalTo = findAirportByIata(firstSegment.to.iata);
+    if (!canonicalFrom || !canonicalTo) {
       return friendlyError("One of the selected airports could not be found. Please reselect your origin and destination.");
     }
+
+    const [fromAirport, toAirport] = await Promise.all([
+      prisma.airport.upsert({
+        where: { iata: canonicalFrom.iata },
+        create: canonicalFrom,
+        update: { name: canonicalFrom.name, city: canonicalFrom.city, country: canonicalFrom.country },
+      }),
+      prisma.airport.upsert({
+        where: { iata: canonicalTo.iata },
+        create: canonicalTo,
+        update: { name: canonicalTo.name, city: canonicalTo.city, country: canonicalTo.country },
+      }),
+    ]);
 
     const contactId = await resolveContact({
       firstName: data.firstName,

@@ -9,7 +9,7 @@ every `server/actions/*.ts` file are server-only).
 Copy `.env.example` to `.env` and fill in the real value, or set it directly
 in your hosting provider's environment variable settings for production.
 
-## Database — `DATABASE_URL` (required)
+## Database — `DATABASE_URL` (required for dynamic features only)
 
 The shared "Compass Tools" CRM's PostgreSQL connection string. This website
 writes directly into CRM tables — `Lead` for flight requests, `ContactInquiry`
@@ -17,14 +17,26 @@ for contact-form messages, `Subscriber` for newsletter signups (see the
 header comment in `prisma/schema.prisma`) — rather than a parallel database.
 Ask whoever administers the CRM database for this value.
 
-**Required at build time, not just at runtime.** `src/lib/prisma.ts`
-deliberately fails fast (a clear thrown error, not a silent fallback) if
-`DATABASE_URL` is missing, and Next.js loads every route module — including
-`/api/airports/search`, which imports it — while collecting page data
-during `next build`, before any request is ever served. On Vercel this
-means: set `DATABASE_URL` in the project's Environment Variables **before**
-triggering the first deploy, not after — a build started without it will
-fail, not just a request made without it.
+**Not required to build or serve the site — only to complete a form
+submission.** `src/lib/prisma.ts` exports `prisma` as a lazily-initialized
+proxy: importing it never touches `DATABASE_URL`, and constructing the real
+client (which throws a clear error if `DATABASE_URL` is missing) only
+happens the moment a server action actually calls a `prisma.*` method —
+inside that action's own `try`/`catch`, which turns it into the same
+friendly, generic error message any other database failure produces. This
+means `next build` succeeds and the site serves every static/reference-data
+page (including the flight request form's application-owned airport
+autocomplete) with `DATABASE_URL` completely unset; only submitting a form
+requires it, and only that submission fails — not the whole page.
+(Previously the client was constructed eagerly at module-import time, which
+made *any* page reachable from a "use server" action that imports
+`prisma.ts` — in effect, every page with a form — crash outright without
+`DATABASE_URL`, before that action's own error handling ever ran. Fixed as
+part of the database-portability work in this pass.)
+
+Still set `DATABASE_URL` in your hosting provider's environment variables
+before real customers can submit forms — there's just no build-time
+ordering requirement to worry about anymore.
 
 ## Production site URL — not an environment variable
 
@@ -59,7 +71,7 @@ let the policy drift out of sync with what the code actually does.
 
 ## Static operational reference data — no environment variable needed
 
-Destinations, airlines, and airline logos are **not** read from
+Destinations, airlines, airline logos, and airports are **not** read from
 `DATABASE_URL` — they're application-owned data, checked into the repo, so
 the site's core content renders correctly even before `DATABASE_URL` is
 configured, and continues to work if the app is ever pointed at a different
@@ -70,12 +82,25 @@ database. See:
 - `src/data/airlines.ts` — the airlines shown in the footer, with their
   logo paths
 - `public/airlines/*.png` — the actual logo image files
+- `src/data/airports.ts` — a curated list of major world airports (IATA
+  code, name, city, country) that powers the flight request form's
+  origin/destination search-as-you-type entirely client-side, with no
+  network request and no database involved. (This used to query the CRM's
+  `Airport` table directly over an API route — that broke autocomplete in
+  production the moment `DATABASE_URL` pointed at a database whose
+  `Airport` table wasn't seeded the same way as the original development
+  database. See the header comment in `src/data/airports.ts` for the full
+  history.)
 
-`DATABASE_URL`'s `Airport` table is still used for one thing: the flight
-request form's live origin/destination search-as-you-type (thousands of
-airports worldwide — impractical to hand-maintain as a static file). That
-endpoint (`src/app/api/airports/search/route.ts`) degrades to "no results"
-rather than erroring if the database is unavailable.
+`DATABASE_URL`'s `Airport` table is still used for one thing: `Lead` (and
+`FlightSegment`) rows have a real foreign key to it, so a submitted flight
+request still needs a matching `Airport` row to attach to. Rather than
+requiring that row to already exist, `submit-flight-request.ts` validates
+the submitted IATA code against `src/data/airports.ts` (not the database)
+and then `upsert`s the corresponding `Airport` row using that canonical
+data — so submission works against any compatible Postgres database,
+including a brand-new one with an empty `Airport` table, not just the one
+instance that happened to have it pre-seeded.
 
 ## How website submissions reach the CRM
 

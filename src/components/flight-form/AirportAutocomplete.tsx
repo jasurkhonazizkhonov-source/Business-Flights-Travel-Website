@@ -2,9 +2,10 @@
 
 import { useEffect, useId, useRef, useState } from "react";
 import { motion } from "framer-motion";
-import { PlaneTakeoff, PlaneLanding, Loader2 } from "lucide-react";
+import { PlaneTakeoff, PlaneLanding } from "lucide-react";
 import { useClickOutside } from "@/hooks/useClickOutside";
 import { cn } from "@/lib/cn";
+import { searchAirports } from "@/data/airports";
 import type { AirportOption } from "@/lib/validations/flight-request";
 
 function labelFor(airport: AirportOption | null): string {
@@ -29,7 +30,6 @@ export function AirportAutocomplete({
   const [query, setQuery] = useState(labelFor(value));
   const [results, setResults] = useState<AirportOption[]>([]);
   const [open, setOpen] = useState(false);
-  const [loading, setLoading] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const listboxId = useId();
 
@@ -48,25 +48,18 @@ export function AirportAutocomplete({
   const trimmedQuery = query.trim();
   const isSearchable = trimmedQuery.length >= 2 && query !== labelFor(value);
 
+  // Filtering an in-memory array of a few hundred airports (src/data/airports.ts)
+  // is effectively instant, so there's no network round trip, no debounce,
+  // no loading state — just a plain effect that recomputes `results`
+  // whenever the query changes. (Still an effect rather than inline
+  // during-render computation: `searchAirports` returns a new array each
+  // call, so comparing it against state by reference on every render would
+  // never converge.) This is also what makes airport search work
+  // identically no matter which PostgreSQL database — or none at all — the
+  // site is connected to.
   useEffect(() => {
-    // Nothing to search — leave `results` as-is; render only shows it when
-    // `isSearchable` is also true, so stale results are never displayed.
-    // (`loading` itself is set from the input's onChange, not here — see
-    // below — so this effect never calls setState outside the async fetch
-    // callback.)
     if (!isSearchable) return;
-    const timeoutId = setTimeout(async () => {
-      try {
-        const res = await fetch(`/api/airports/search?q=${encodeURIComponent(trimmedQuery)}`);
-        const data = await res.json();
-        setResults(data.results ?? []);
-      } catch {
-        setResults([]);
-      } finally {
-        setLoading(false);
-      }
-    }, 250);
-    return () => clearTimeout(timeoutId);
+    setResults(searchAirports(trimmedQuery));
   }, [trimmedQuery, isSearchable]);
 
   const showResults = open && isSearchable && results.length > 0;
@@ -88,13 +81,8 @@ export function AirportAutocomplete({
           placeholder={placeholder}
           onFocus={() => setOpen(true)}
           onChange={(e) => {
-            const next = e.target.value;
-            setQuery(next);
+            setQuery(e.target.value);
             setOpen(true);
-            // Flip the spinner on immediately in response to the keystroke
-            // (a real user event, not an effect) — the debounced effect
-            // below only ever turns it back off, once the fetch settles.
-            setLoading(next.trim().length >= 2 && next !== labelFor(value));
           }}
           className="w-full bg-transparent text-sm text-[var(--color-navy-950)] outline-none placeholder:text-[var(--color-navy-950)]/40"
           autoComplete="off"
@@ -103,7 +91,6 @@ export function AirportAutocomplete({
           aria-controls={listboxId}
           aria-autocomplete="list"
         />
-        {loading && <Loader2 size={15} className="animate-spin text-[var(--color-navy-950)]/40" aria-hidden="true" />}
       </div>
       {error && <p className="mt-1 text-xs text-red-600">{error}</p>}
 
