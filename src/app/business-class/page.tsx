@@ -72,6 +72,7 @@ export default function BusinessClassPage() {
             src="https://images.unsplash.com/photo-1517479149777-5f3b1511d5ad?q=80&w=2400&auto=format&fit=crop"
             alt=""
             fill
+            priority
             className="object-cover opacity-35"
             sizes="100vw"
           />

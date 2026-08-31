@@ -4,6 +4,7 @@ import { Header } from "@/components/layout/Header";
 import { Footer } from "@/components/layout/Footer";
 import { FloatingDealsButton } from "@/components/layout/FloatingDealsButton";
 import { MotionProvider } from "@/components/MotionProvider";
+import { getNavMenuRegions } from "@/data/destinations";
 import {
   SITE_DESCRIPTION,
   SITE_NAME,
@@ -87,13 +88,19 @@ const websiteJsonLd = {
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
+  // Computed server-side (this file has no "use client") and passed down as
+  // a small, already-derived prop — see the comment on getNavMenuRegions
+  // for why Header/DestinationsMegaMenu (both Client Components) must not
+  // import the full destinations dataset directly.
+  const navMenuRegions = getNavMenuRegions(5);
+
   return (
     <html lang="en" className={`${inter.variable} ${playfair.variable} h-full antialiased`}>
       <body className="flex min-h-full flex-col bg-[var(--color-cream-50)]">
         <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(organizationJsonLd) }} />
         <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(websiteJsonLd) }} />
         <MotionProvider>
-          <Header />
+          <Header navMenuRegions={navMenuRegions} />
           <main className="flex-1">{children}</main>
           <Footer />
           <FloatingDealsButton />

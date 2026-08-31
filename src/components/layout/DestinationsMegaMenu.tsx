@@ -4,13 +4,11 @@ import { useRef, useState } from "react";
 import Link from "next/link";
 import { motion } from "framer-motion";
 import { ChevronDown, ArrowRight } from "lucide-react";
-import { REGIONS, destinationPath, getDestinationsByRegion } from "@/data/destinations";
+import type { NavMenuRegion } from "@/data/destinations";
 import { useClickOutside } from "@/hooks/useClickOutside";
 import { cn } from "@/lib/cn";
 
-const PREVIEW_PER_REGION = 5;
-
-export function DestinationsMegaMenu({ active }: { active: boolean }) {
+export function DestinationsMegaMenu({ active, regions }: { active: boolean; regions: NavMenuRegion[] }) {
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -54,35 +52,25 @@ export function DestinationsMegaMenu({ active }: { active: boolean }) {
         className="absolute left-1/2 top-full z-40 mt-3 w-[min(56rem,calc(100vw-2rem))] -translate-x-1/2 rounded-2xl border border-[var(--color-navy-950)]/8 bg-white p-6 shadow-2xl"
       >
         <div className="grid grid-cols-2 gap-x-6 gap-y-6 sm:grid-cols-3 lg:grid-cols-7">
-          {REGIONS.map((region) => {
-            const regionDestinations = getDestinationsByRegion(region.slug);
-            const cities = [...regionDestinations]
-              .sort((a, b) => Number(b.featured) - Number(a.featured))
-              .slice(0, PREVIEW_PER_REGION);
-            if (cities.length === 0) return null;
-            return (
-              <div key={region.slug}>
-                <Link
-                  href={`/destinations#${region.slug}`}
-                  className="text-xs font-semibold tracking-[0.15em] text-[var(--color-gold-600)] hover:text-[var(--color-gold-700)]"
-                >
-                  {region.label.toUpperCase()}
-                </Link>
-                <ul className="mt-3 space-y-2">
-                  {cities.map((d) => (
-                    <li key={d.citySlug}>
-                      <Link
-                        href={destinationPath(d)}
-                        className="text-sm text-[var(--color-navy-800)] hover:text-[var(--color-gold-600)]"
-                      >
-                        {d.city}
-                      </Link>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            );
-          })}
+          {regions.map((region) => (
+            <div key={region.slug}>
+              <Link
+                href={`/destinations#${region.slug}`}
+                className="text-xs font-semibold tracking-[0.15em] text-[var(--color-gold-600)] hover:text-[var(--color-gold-700)]"
+              >
+                {region.label.toUpperCase()}
+              </Link>
+              <ul className="mt-3 space-y-2">
+                {region.cities.map((d) => (
+                  <li key={d.citySlug}>
+                    <Link href={d.path} className="text-sm text-[var(--color-navy-800)] hover:text-[var(--color-gold-600)]">
+                      {d.city}
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
         </div>
         <div className="mt-6 flex items-center justify-between border-t border-[var(--color-navy-950)]/8 pt-4">
           <p className="text-xs text-[var(--color-navy-950)]/65">Don&apos;t see your destination? We can search it for you.</p>

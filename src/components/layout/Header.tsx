@@ -7,11 +7,11 @@ import { AnimatePresence, motion } from "framer-motion";
 import { Menu, X, ChevronDown } from "lucide-react";
 import { Logo } from "@/components/brand/Logo";
 import { DestinationsMegaMenu } from "@/components/layout/DestinationsMegaMenu";
-import { REGIONS, destinationPath, getDestinationsByRegion } from "@/data/destinations";
+import type { NavMenuRegion } from "@/data/destinations";
 import { NAV_LINKS, PRIMARY_CTA_LABEL } from "@/lib/constants";
 import { cn } from "@/lib/cn";
 
-export function Header() {
+export function Header({ navMenuRegions }: { navMenuRegions: NavMenuRegion[] }) {
   const [scrolled, setScrolled] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [mobileDestOpen, setMobileDestOpen] = useState(false);
@@ -74,7 +74,7 @@ export function Header() {
           {NAV_LINKS.map((link) => {
             const active = pathname === link.href;
             if (link.href === "/destinations") {
-              return <DestinationsMegaMenu key={link.href} active={active} />;
+              return <DestinationsMegaMenu key={link.href} active={active} regions={navMenuRegions} />;
             }
             return (
               <Link
@@ -146,10 +146,12 @@ export function Header() {
                             transition={{ duration: 0.18 }}
                             className="overflow-hidden pl-3"
                           >
-                            {REGIONS.map((region) => {
-                              const cities = [...getDestinationsByRegion(region.slug)]
-                                .sort((a, b) => Number(b.featured) - Number(a.featured))
-                                .slice(0, 4);
+                            {navMenuRegions.map((region) => {
+                              // The server already limited this to the top 5
+                              // per region (see app/layout.tsx); the mobile
+                              // accordion shows one fewer than the desktop
+                              // mega-menu to keep the panel compact.
+                              const cities = region.cities.slice(0, 4);
                               if (cities.length === 0) return null;
                               return (
                                 <div key={region.slug} className="py-2">
@@ -160,7 +162,7 @@ export function Header() {
                                     {cities.map((d) => (
                                       <Link
                                         key={d.citySlug}
-                                        href={destinationPath(d)}
+                                        href={d.path}
                                         className="min-h-10 rounded-lg px-3 py-2 text-sm text-[var(--color-navy-800)] active:bg-[var(--color-navy-950)]/8"
                                       >
                                         {d.city}

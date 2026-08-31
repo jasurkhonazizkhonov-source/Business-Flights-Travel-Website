@@ -94,8 +94,10 @@ export async function submitFlightRequest(input: FlightRequestInput): Promise<Su
     // against any compatible Postgres database — including a brand-new one
     // with an empty `Airport` table — not just the specific instance that
     // originally had it pre-seeded.
-    const canonicalFrom = findAirportByIata(firstSegment.from.iata);
-    const canonicalTo = findAirportByIata(firstSegment.to.iata);
+    const [canonicalFrom, canonicalTo] = await Promise.all([
+      findAirportByIata(firstSegment.from.iata),
+      findAirportByIata(firstSegment.to.iata),
+    ]);
     if (!canonicalFrom || !canonicalTo) {
       return friendlyError("One of the selected airports could not be found. Please reselect your origin and destination.");
     }

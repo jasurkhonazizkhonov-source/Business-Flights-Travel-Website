@@ -2,10 +2,10 @@
 
 import { useEffect, useId, useRef, useState } from "react";
 import { motion } from "framer-motion";
-import { PlaneTakeoff, PlaneLanding } from "lucide-react";
+import { PlaneTakeoff, PlaneLanding, Loader2 } from "lucide-react";
 import { useClickOutside } from "@/hooks/useClickOutside";
 import { cn } from "@/lib/cn";
-import { searchAirports } from "@/data/airports";
+import { prefetchAirports, searchAirports } from "@/data/airports";
 import type { AirportOption } from "@/lib/validations/flight-request";
 
 function labelFor(airport: AirportOption | null): string {
@@ -30,6 +30,7 @@ export function AirportAutocomplete({
   const [query, setQuery] = useState(labelFor(value));
   const [results, setResults] = useState<AirportOption[]>([]);
   const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const listboxId = useId();
 
@@ -45,21 +46,54 @@ export function AirportAutocomplete({
 
   useClickOutside(containerRef, () => setOpen(false), open);
 
+  // Warm the lazy-loaded airport dataset shortly after mount, well after
+  // this field has had its chance to paint and become interactive, so it's
+  // typically already cached by the time the user focuses the field and
+  // starts typing. Both the "From" and "To" instances of this component
+  // call this independently — harmless, since the underlying load is
+  // memoized module-wide and only ever fetched once.
+  useEffect(() => {
+    if (typeof requestIdleCallback === "function") {
+      const idleId = requestIdleCallback(() => prefetchAirports());
+      return () => cancelIdleCallback(idleId);
+    }
+    const timeoutId = window.setTimeout(() => prefetchAirports(), 300);
+    return () => window.clearTimeout(timeoutId);
+  }, []);
+
   const trimmedQuery = query.trim();
   const isSearchable = trimmedQuery.length >= 2 && query !== labelFor(value);
 
-  // Filtering an in-memory array of a few hundred airports (src/data/airports.ts)
-  // is effectively instant, so there's no network round trip, no debounce,
-  // no loading state — just a plain effect that recomputes `results`
-  // whenever the query changes. (Still an effect rather than inline
-  // during-render computation: `searchAirports` returns a new array each
-  // call, so comparing it against state by reference on every render would
-  // never converge.) This is also what makes airport search work
-  // identically no matter which PostgreSQL database — or none at all — the
-  // site is connected to.
+  // The ~9,000-airport dataset (src/data/airports.ts) is code-split out of
+  // this page's initial bundle and only downloaded the first time a user
+  // focuses an airport field — see the comment in that file. That first
+  // search has a real (if small) async gap while the chunk loads and
+  // parses; every search after that resolves against the same in-memory
+  // index almost instantly. A short debounce avoids kicking off that work
+  // on every keystroke while still typing, and the requestId guard below
+  // discards a response that resolves out of order (a slower, older
+  // request completing after a newer one) rather than flashing stale
+  // results.
+  const requestIdRef = useRef(0);
   useEffect(() => {
     if (!isSearchable) return;
-    setResults(searchAirports(trimmedQuery));
+    const requestId = ++requestIdRef.current;
+    const timeoutId = setTimeout(() => {
+      setLoading(true);
+      searchAirports(trimmedQuery)
+        .then((found) => {
+          if (requestIdRef.current !== requestId) return; // superseded by a newer keystroke
+          setResults(found);
+        })
+        .catch(() => {
+          if (requestIdRef.current !== requestId) return;
+          setResults([]);
+        })
+        .finally(() => {
+          if (requestIdRef.current === requestId) setLoading(false);
+        });
+    }, 150);
+    return () => clearTimeout(timeoutId);
   }, [trimmedQuery, isSearchable]);
 
   const showResults = open && isSearchable && results.length > 0;
@@ -91,6 +125,7 @@ export function AirportAutocomplete({
           aria-controls={listboxId}
           aria-autocomplete="list"
         />
+        {loading && <Loader2 size={15} className="animate-spin text-[var(--color-navy-950)]/40" aria-hidden="true" />}
       </div>
       {error && <p className="mt-1 text-xs text-red-600">{error}</p>}
 

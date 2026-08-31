@@ -2289,3 +2289,30 @@ export function getFeaturedDestinations(limit?: number): Destination[] {
 export function getDestinationsByRegion(region: Region): Destination[] {
   return destinations.filter((d) => d.region === region);
 }
+
+// Slim shape for the header's destinations nav menu (desktop mega-menu and
+// mobile accordion) — just enough to render a link, none of a
+// Destination's full editorial content (overview, FAQs, etc.). Deliberately
+// computed HERE, server-side, and passed down as a prop from
+// app/layout.tsx to Header (a Client Component rendered on every page) —
+// see the comment on that prop for why: importing this whole module
+// directly from Header/DestinationsMegaMenu (both "use client") would ship
+// every destination's full page content, not just city names, as part of
+// the client JS bundle loaded on every single page of the site, header
+// included.
+export type NavMenuRegion = {
+  slug: Region;
+  label: string;
+  cities: { citySlug: string; city: string; path: string }[];
+};
+
+export function getNavMenuRegions(previewPerRegion: number): NavMenuRegion[] {
+  return REGIONS.map((region) => ({
+    slug: region.slug,
+    label: region.label,
+    cities: [...getDestinationsByRegion(region.slug)]
+      .sort((a, b) => Number(b.featured) - Number(a.featured))
+      .slice(0, previewPerRegion)
+      .map((d) => ({ citySlug: d.citySlug, city: d.city, path: destinationPath(d) })),
+  })).filter((r) => r.cities.length > 0);
+}
