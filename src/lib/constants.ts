@@ -2,7 +2,9 @@
 // copy and config don't drift between the nav, footer, and metadata.
 
 export const SITE_NAME = "Business Flights Travel";
-export const SITE_TAGLINE = "Premium Business-Class Flights & Personalized Travel Assistance";
+// The homepage <h1> (Hero.tsx) — the site name itself sits right above it
+// as a kicker, so this doesn't need to repeat "Business Flights Travel."
+export const SITE_TAGLINE = "Business-class and international flights, arranged personally";
 // Static — not read from an environment variable. Canonical URLs, the
 // sitemap, Open Graph tags, and structured data all derive from this, so
 // keep it as the one place that changes if the production domain ever does.

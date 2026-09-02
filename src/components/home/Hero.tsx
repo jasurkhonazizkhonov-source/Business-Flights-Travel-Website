@@ -30,8 +30,8 @@ export function Hero() {
           </Reveal>
           <Reveal delay={0.16}>
             <p className="mx-auto mt-5 max-w-xl text-balance text-base text-white/75 sm:text-lg">
-              Business class, first class, and international flights — requested in minutes, handled personally by a dedicated travel
-              specialist from search to booking.
+              Tell us your route and travel dates. A dedicated specialist reviews every request and follows up with fare options to
+              compare — no automated quote engine, no obligation to book.
             </p>
           </Reveal>
         </div>

@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { Loader2, CheckCircle2 } from "lucide-react";
+import { toast } from "sonner";
+import { Loader2 } from "lucide-react";
 import { subscribeToNewsletter } from "@/server/actions/subscribe-newsletter";
 import { cn } from "@/lib/cn";
 
@@ -9,35 +10,32 @@ export function NewsletterForm({ variant = "dark" }: { variant?: "dark" | "light
   const [email, setEmail] = useState("");
   const [website, setWebsite] = useState("");
   const [pending, startTransition] = useTransition();
-  const [status, setStatus] = useState<"idle" | "success" | "error">("idle");
-  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!email.trim()) return;
+    setError("");
     startTransition(async () => {
       const res = await subscribeToNewsletter({ email, website });
       if (res.ok) {
-        setStatus("success");
-        setMessage(res.alreadySubscribed ? "You're already on the list." : "You're subscribed.");
+        // A toast, not an inline swap that replaces this compact footer
+        // widget — the form (and its input) stays put, so a visitor who
+        // wants to subscribe a second address doesn't need to reload.
+        toast.success(res.alreadySubscribed ? "You're already on the list" : "You're subscribed", {
+          description: res.alreadySubscribed
+            ? "That email is already receiving our travel inspiration emails."
+            : "We'll send destination guides and business-class tips every so often.",
+        });
         setEmail("");
       } else {
-        setStatus("error");
-        setMessage(res.error);
+        setError(res.error);
+        toast.error("Subscription failed", { description: res.error });
       }
     });
   }
 
   const isDark = variant === "dark";
-
-  if (status === "success") {
-    return (
-      <div className={cn("flex items-center gap-2 text-sm", isDark ? "text-white" : "text-[var(--color-navy-950)]")}>
-        <CheckCircle2 size={18} className="shrink-0 text-[var(--color-gold-400)]" />
-        {message}
-      </div>
-    );
-  }
 
   return (
     <form onSubmit={handleSubmit} noValidate>
@@ -71,7 +69,7 @@ export function NewsletterForm({ variant = "dark" }: { variant?: "dark" | "light
           {pending ? <Loader2 size={16} className="animate-spin" /> : "Subscribe"}
         </button>
       </div>
-      {status === "error" && <p className="mt-2 text-xs text-red-400">{message}</p>}
+      {error && <p className="mt-2 text-xs text-red-400">{error}</p>}
       <p className={cn("mt-3 text-xs leading-relaxed", isDark ? "text-white/50" : "text-[var(--color-navy-950)]/65")}>
         By subscribing, you agree to our{" "}
         <a href="/terms-of-service" className="underline decoration-dotted underline-offset-2 hover:text-[var(--color-gold-400)]">

@@ -1,9 +1,10 @@
 import type { Metadata } from "next";
-import { Inter, Playfair_Display } from "next/font/google";
+import { Instrument_Sans, Playfair_Display } from "next/font/google";
 import { Header } from "@/components/layout/Header";
 import { Footer } from "@/components/layout/Footer";
 import { FloatingDealsButton } from "@/components/layout/FloatingDealsButton";
 import { MotionProvider } from "@/components/MotionProvider";
+import { Toaster } from "@/components/Toaster";
 import { getNavMenuRegions } from "@/data/destinations";
 import {
   SITE_DESCRIPTION,
@@ -15,7 +16,13 @@ import {
 } from "@/lib/constants";
 import "./globals.css";
 
-const inter = Inter({
+// Instrument Sans, not Inter — Inter is the de facto default of every
+// AI-generated and template-built site, and reads as such. Instrument Sans
+// has the same clean, highly-legible grotesque bones (safe for dense body
+// copy, form labels, and data) but with slightly warmer curves that sit
+// better next to Playfair Display's editorial serif than Inter's more
+// clinical, UI-chrome character does.
+const sans = Instrument_Sans({
   variable: "--font-sans",
   subsets: ["latin"],
   display: "swap",
@@ -95,7 +102,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
   const navMenuRegions = getNavMenuRegions(5);
 
   return (
-    <html lang="en" className={`${inter.variable} ${playfair.variable} h-full antialiased`}>
+    <html lang="en" className={`${sans.variable} ${playfair.variable} h-full antialiased`}>
       <body className="flex min-h-full flex-col bg-[var(--color-cream-50)]">
         <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(organizationJsonLd) }} />
         <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(websiteJsonLd) }} />
@@ -105,6 +112,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
           <Footer />
           <FloatingDealsButton />
         </MotionProvider>
+        <Toaster />
       </body>
     </html>
   );

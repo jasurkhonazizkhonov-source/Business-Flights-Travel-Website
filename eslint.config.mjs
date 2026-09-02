@@ -12,6 +12,14 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Vendored third-party skill/agent tooling (gitignored, not part of the
+    // deployable app) — linting it just surfaces hundreds of warnings from
+    // code this project doesn't own or ship.
+    ".claude/**",
+    ".agents/**",
+    // Playwright's own run output.
+    "test-results/**",
+    "playwright-report/**",
   ]),
 ]);
 

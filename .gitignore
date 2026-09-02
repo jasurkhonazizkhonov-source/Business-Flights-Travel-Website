@@ -12,6 +12,9 @@
 
 # testing
 /coverage
+/test-results/
+/playwright-report/
+/playwright/.cache/
 
 # next.js
 /.next/
@@ -56,13 +59,14 @@ next-env.d.ts
 # — never hand-edited, never committed.
 /src/generated/prisma
 
-# AI coding-assistant tooling (Claude Code, Windsurf) — editor/agent
-# configuration for this workspace, not part of the deployable app.
-# AGENTS.md/CLAUDE.md in particular are rewritten by `next dev` itself on
-# every run (see AGENTS.md's own note), so they'd never stay clean in git
-# even if tracked.
+# AI coding-assistant tooling (Claude Code, Codex CLI, Windsurf) —
+# editor/agent configuration for this workspace, not part of the deployable
+# app. AGENTS.md/CLAUDE.md in particular are rewritten by `next dev` itself
+# on every run (see AGENTS.md's own note), so they'd never stay clean in
+# git even if tracked.
 /.agents/
 /.claude/
+/.codex/
 /.windsurf/
 /AGENTS.md
 /CLAUDE.md

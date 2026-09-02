@@ -167,6 +167,12 @@ export function FlightRequestForm({
   return (
     <form
       onSubmit={handleSubmit}
+      // Without this, the browser's own native constraint validation (e.g.
+      // the type="email" field's built-in format check) intercepts the
+      // submit event before this handler ever runs — silently blocking
+      // submission and showing a native browser tooltip instead of the
+      // form's own styled, accessible inline error messages below.
+      noValidate
       className={cn(
         "w-full rounded-3xl border border-[var(--color-navy-950)]/8 bg-white/95 shadow-[0_20px_60px_-24px_rgba(10,26,48,0.35)]",
         compact ? "p-4 sm:p-5" : "p-5 sm:p-7",

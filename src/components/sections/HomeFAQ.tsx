@@ -89,14 +89,14 @@ const faqJsonLd = {
 
 export function HomeFAQ() {
   return (
-    <section className="mx-auto max-w-4xl px-4 py-14 sm:px-6 sm:py-20 lg:px-8">
+    <section className="mx-auto max-w-6xl px-4 py-14 sm:px-6 sm:py-20 lg:px-8">
       <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(faqJsonLd) }} />
-      <Reveal>
+      <Reveal className="mx-auto max-w-2xl text-center">
         <p className="text-xs font-semibold tracking-[0.25em] text-[var(--color-gold-600)]">QUESTIONS</p>
         <h2 className="mt-3 font-display text-2xl font-semibold text-[var(--color-navy-950)] sm:text-3xl">
           Frequently Asked Questions
         </h2>
-        <p className="mt-3 max-w-2xl text-[15px] leading-relaxed text-[var(--color-navy-950)]/70">
+        <p className="mt-3 text-[15px] leading-relaxed text-[var(--color-navy-950)]/70">
           Common questions about requesting a flight through {SITE_NAME}. Don&apos;t see yours?{" "}
           <a href="/contact" className="underline decoration-dotted underline-offset-2 hover:text-[var(--color-gold-600)]">
             Ask us directly
@@ -104,10 +104,14 @@ export function HomeFAQ() {
           .
         </p>
       </Reveal>
-      <div className="mt-8 space-y-3">
+      {/* A two-column grid, not an accordion — every answer stays visible
+          and searchable/indexable, and pairing questions side by side uses
+          the available desktop width instead of one long single-column
+          scroll for fourteen entries. */}
+      <div className="mt-10 grid grid-cols-1 gap-3 sm:grid-cols-2">
         {faqs.map((f, i) => (
           <Reveal key={f.question} delay={(i % 6) * 0.04}>
-            <div className="rounded-xl bg-[var(--color-cream-100)] p-5">
+            <div className="h-full rounded-xl bg-[var(--color-cream-100)] p-5">
               <h3 className="font-display text-base font-semibold text-[var(--color-navy-950)]">{f.question}</h3>
               <p className="mt-1.5 text-sm leading-relaxed text-[var(--color-navy-950)]/70">{f.answer}</p>
             </div>
