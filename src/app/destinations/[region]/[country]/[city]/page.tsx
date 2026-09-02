@@ -6,8 +6,16 @@ import { ArrowRight, MapPin, Clock, PlaneTakeoff, Info, Route as RouteIcon } fro
 import { Reveal } from "@/components/Reveal";
 import { DestinationCard } from "@/components/destinations/DestinationCard";
 import { destinations, destinationPath, getDestination, regionLabel } from "@/data/destinations";
+import { blogPosts } from "@/data/blog-posts";
 import { SITE_URL } from "@/lib/constants";
 import { FARE_DISCLAIMER, formatFareUSD } from "@/lib/fares";
+
+// A small, fixed set of guides genuinely relevant to planning ANY
+// international business-class trip — not destination-specific content,
+// but the right general reading for someone researching a destination page
+// (seat/cabin choice, lounge use, booking timing). Keeps destination pages
+// linking somewhere beyond "other destinations."
+const GENERAL_TRAVEL_GUIDE_SLUGS = ["how-to-choose-the-right-business-class-flight", "business-class-airport-lounge-guide", "when-to-book-international-business-class"];
 
 export function generateStaticParams() {
   return destinations.map((d) => ({ region: d.region, country: d.countrySlug, city: d.citySlug }));
@@ -232,6 +240,22 @@ export default async function DestinationPage({ params }: PageProps<"/destinatio
               >
                 Request a Fare to {destination.city}
               </Link>
+              <div className="border-t border-[var(--color-navy-950)]/8 pt-5">
+                <h3 className="text-xs font-semibold tracking-wide text-[var(--color-navy-700)]">PLANNING YOUR TRIP</h3>
+                <ul className="mt-2.5 space-y-2">
+                  {GENERAL_TRAVEL_GUIDE_SLUGS.map((slug) => {
+                    const post = blogPosts.find((p) => p.slug === slug);
+                    if (!post) return null;
+                    return (
+                      <li key={slug}>
+                        <Link href={`/blog/${slug}`} className="text-sm text-[var(--color-navy-800)] underline decoration-dotted underline-offset-2 hover:text-[var(--color-gold-600)]">
+                          {post.title}
+                        </Link>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
               <p className="text-[11px] leading-relaxed text-[var(--color-navy-950)]/65">*{FARE_DISCLAIMER}</p>
             </aside>
           </Reveal>

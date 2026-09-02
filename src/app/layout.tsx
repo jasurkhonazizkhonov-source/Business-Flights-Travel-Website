@@ -40,15 +40,30 @@ export const metadata: Metadata = {
     default: `${SITE_NAME} | Premium Business-Class Flights & Travel Assistance`,
     template: `%s | ${SITE_NAME}`,
   },
+  // A further, explicit "this site's name is X" signal alongside the
+  // title/OG siteName/JSON-LD below — browsers use it for tab groups and
+  // "install site" prompts, and it costs nothing to also give it to
+  // crawlers. None of these signals can force a specific Google search
+  // result presentation on their own, but consistently naming the brand
+  // the same way everywhere gives Google the clearest possible signal for
+  // what to call this business, versus the bare domain it falls back to
+  // when no strong signal is present.
+  applicationName: SITE_NAME,
   description: SITE_DESCRIPTION,
   keywords: [
     "business class flights",
     "business class flight tickets",
     "business class airfare",
+    "business class flight deals",
+    "discounted business class flights",
     "international business class flights",
-    "premium travel agency",
-    "corporate travel",
+    "international flights",
     "first class flights",
+    "premium cabin flights",
+    "long-haul business class",
+    "corporate travel",
+    "premium travel agency",
+    "business class travel agency",
   ],
   openGraph: {
     type: "website",
@@ -69,13 +84,24 @@ export const metadata: Metadata = {
   // { google: "..." }` field here if/when the domain is verified.
 };
 
+// A dedicated, genuinely square brand mark (src/app/brand-mark.png) for
+// `logo` — Google's own guidance for how a business's logo can appear in
+// the Knowledge Panel and other search surfaces asks for a square (1:1)
+// image; the site's real wordmark is a wide ~2.68:1 lockup, which a search
+// engine can't use the same way and may simply decline to show at all
+// (falling back to a bare, unbranded domain in the result instead). This
+// doesn't change the on-page logo anywhere — the header/footer still use
+// the full wordmark (public/brand/logo-navy.png, logo-white.png).
+const brandMarkUrl = `${SITE_URL}/brand-mark.png`;
+
 const organizationJsonLd = {
   "@context": "https://schema.org",
   "@type": "TravelAgency",
   name: SITE_NAME,
   url: SITE_URL,
   description: SITE_DESCRIPTION,
-  logo: `${SITE_URL}/brand/logo-navy.png`,
+  logo: brandMarkUrl,
+  image: brandMarkUrl,
   telephone: CONTACT_PHONE_E164,
   address: {
     "@type": "PostalAddress",
@@ -92,6 +118,10 @@ const websiteJsonLd = {
   "@type": "WebSite",
   name: SITE_NAME,
   url: SITE_URL,
+  // Ties the site to the same named Organization above, rather than
+  // leaving WebSite and Organization as two unconnected entities — another
+  // small, legitimate signal for what "businessflights.travel" actually is.
+  publisher: { "@type": "Organization", name: SITE_NAME, logo: brandMarkUrl },
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

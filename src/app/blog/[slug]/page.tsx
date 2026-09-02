@@ -4,9 +4,11 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Reveal } from "@/components/Reveal";
 import { PostCard } from "@/components/blog/PostCard";
+import { RichContent } from "@/components/blog/RichContent";
 import { CTASection } from "@/components/sections/CTASection";
 import { blogPosts, getBlogPostBySlug } from "@/data/blog-posts";
 import { SITE_NAME, SITE_URL } from "@/lib/constants";
+import { formatIsoDate } from "@/lib/format-date";
 
 export function generateStaticParams() {
   return blogPosts.map((p) => ({ slug: p.slug }));
@@ -57,9 +59,25 @@ export default async function BlogPostPage({ params }: PageProps<"/blog/[slug]">
     mainEntityOfPage: `${SITE_URL}/blog/${post.slug}`,
   };
 
+  // Only emitted when the article body actually contains that exact Q&A
+  // content (post.faqs) — never added purely to qualify for a rich result.
+  const faqJsonLd =
+    post.faqs && post.faqs.length > 0
+      ? {
+          "@context": "https://schema.org",
+          "@type": "FAQPage",
+          mainEntity: post.faqs.map((f) => ({
+            "@type": "Question",
+            name: f.question,
+            acceptedAnswer: { "@type": "Answer", text: f.answer },
+          })),
+        }
+      : null;
+
   return (
     <>
       <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(articleJsonLd) }} />
+      {faqJsonLd && <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(faqJsonLd) }} />}
 
       <article className="mx-auto max-w-3xl px-4 py-16 sm:px-6 lg:px-8 lg:py-24">
         <Reveal>
@@ -71,9 +89,7 @@ export default async function BlogPostPage({ params }: PageProps<"/blog/[slug]">
           <div className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-[var(--color-navy-950)]/55">
             <span>{post.author}</span>
             <span aria-hidden="true">·</span>
-            <time dateTime={post.publishedAt}>
-              {new Date(post.publishedAt).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}
-            </time>
+            <time dateTime={post.publishedAt}>{formatIsoDate(post.publishedAt)}</time>
           </div>
         </Reveal>
 
@@ -84,13 +100,23 @@ export default async function BlogPostPage({ params }: PageProps<"/blog/[slug]">
         </Reveal>
 
         <Reveal delay={0.12}>
-          <div className="prose-content mt-8 space-y-5 text-[var(--color-navy-950)]/80">
-            {post.content.map((paragraph, i) => (
-              <p key={i} className="leading-relaxed">
-                {paragraph}
-              </p>
-            ))}
+          <div className="mt-8">
+            <RichContent blocks={post.content} />
           </div>
+
+          {post.faqs && post.faqs.length > 0 && (
+            <div className="mt-10 border-t border-[var(--color-navy-950)]/8 pt-8">
+              <h2 className="font-display text-xl font-semibold text-[var(--color-navy-950)] sm:text-2xl">Frequently Asked Questions</h2>
+              <div className="mt-5 space-y-4">
+                {post.faqs.map((f) => (
+                  <div key={f.question} className="rounded-xl bg-[var(--color-cream-100)] p-5">
+                    <h3 className="font-display text-base font-semibold text-[var(--color-navy-950)]">{f.question}</h3>
+                    <p className="mt-1.5 text-sm leading-relaxed text-[var(--color-navy-950)]/70">{f.answer}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           <div className="mt-8 flex flex-wrap gap-2">
             {post.tags.map((tag) => (

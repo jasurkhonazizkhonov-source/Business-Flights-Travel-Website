@@ -5,7 +5,9 @@ import { PostCard } from "@/components/blog/PostCard";
 import { blogPosts } from "@/data/blog-posts";
 
 export function BlogPreview() {
-  const featured = blogPosts.slice(0, 3);
+  // Sorted by publish date rather than array order — see the same fix in
+  // app/blog/page.tsx.
+  const featured = [...blogPosts].sort((a, b) => (a.publishedAt < b.publishedAt ? 1 : -1)).slice(0, 3);
   return (
     <section className="mx-auto max-w-7xl px-4 py-14 sm:px-6 sm:py-20 lg:px-8">
       <Reveal>

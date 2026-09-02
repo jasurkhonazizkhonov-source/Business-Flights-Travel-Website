@@ -1,6 +1,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import type { BlogPost } from "@/data/blog-posts";
+import { formatIsoDate } from "@/lib/format-date";
 
 export function PostCard({ post }: { post: BlogPost }) {
   return (
@@ -20,9 +21,7 @@ export function PostCard({ post }: { post: BlogPost }) {
           {post.title}
         </h3>
         <p className="mt-2 line-clamp-2 text-sm text-[var(--color-navy-950)]/65">{post.excerpt}</p>
-        <p className="mt-3 text-xs text-[var(--color-navy-950)]/65">
-          {new Date(post.publishedAt).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}
-        </p>
+        <p className="mt-3 text-xs text-[var(--color-navy-950)]/65">{formatIsoDate(post.publishedAt)}</p>
       </div>
     </Link>
   );

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { Reveal } from "@/components/Reveal";
 import { PostCard } from "@/components/blog/PostCard";
 import { blogPosts } from "@/data/blog-posts";
+import { formatIsoDate } from "@/lib/format-date";
 
 export const metadata: Metadata = {
   title: "Business Travel Journal",
@@ -13,7 +14,11 @@ export const metadata: Metadata = {
 };
 
 export default function BlogIndexPage() {
-  const [featured, ...rest] = blogPosts;
+  // Sorted by publish date rather than relying on array order — the most
+  // recently published article is "featured" regardless of where it was
+  // inserted into blogPosts.
+  const sorted = [...blogPosts].sort((a, b) => (a.publishedAt < b.publishedAt ? 1 : -1));
+  const [featured, ...rest] = sorted;
   const categories = Array.from(new Set(blogPosts.map((p) => p.category)));
 
   return (
@@ -59,9 +64,7 @@ export default function BlogIndexPage() {
                 {featured.title}
               </h2>
               <p className="mt-3 text-[15px] leading-relaxed text-[var(--color-navy-950)]/65">{featured.excerpt}</p>
-              <p className="mt-4 text-xs text-[var(--color-navy-950)]/65">
-                {new Date(featured.publishedAt).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}
-              </p>
+              <p className="mt-4 text-xs text-[var(--color-navy-950)]/65">{formatIsoDate(featured.publishedAt)}</p>
             </div>
           </Link>
         </Reveal>

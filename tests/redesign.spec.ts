@@ -194,6 +194,109 @@ test.describe("404 handling", () => {
   });
 });
 
+test.describe("Blog", () => {
+  test("blog index lists articles and the featured post is the most recent by date", async ({ page }) => {
+    await page.goto("/blog");
+    await expect(page.locator("h1")).toContainText("Business Travel Guides");
+    // The newest article by publishedAt, not by array position.
+    await expect(page.getByRole("heading", { name: "Business Class vs. First Class: How to Decide Which Is Worth It" })).toBeVisible();
+  });
+
+  test("a previously-thin article now has real structure: headings, a list, and an FAQ", async ({ page }) => {
+    await page.goto("/blog/long-haul-business-class-travel-tips");
+    await expect(page.locator("h1")).toContainText("Long-Haul Business Class");
+    await expect(page.getByRole("heading", { name: "Arrive earlier than you think you need to" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Frequently Asked Questions" })).toBeVisible();
+    await assertNoConsoleErrors(page, async () => {});
+  });
+
+  test("blog article publish date displays correctly (no UTC/local off-by-one)", async ({ page }) => {
+    await page.goto("/blog/business-class-vs-first-class");
+    await expect(page.getByText("August 11, 2026")).toBeVisible();
+  });
+
+  test("in-article links to other pages work", async ({ page }) => {
+    await page.goto("/blog/business-class-vs-first-class");
+    await page.getByRole("link", { name: "long-haul business class" }).click();
+    await expect(page).toHaveURL(/long-haul-business-class-travel-tips/);
+  });
+});
+
+test.describe("Destinations", () => {
+  test("destination page links out to relevant travel guides", async ({ page }) => {
+    await page.goto("/destinations/europe/united-kingdom/london");
+    await expect(page.locator("h1")).toContainText("London");
+    await expect(page.getByRole("heading", { name: "PLANNING YOUR TRIP" })).toBeVisible();
+    await expect(page.getByRole("link", { name: "How to Choose the Right Business-Class Flight for Long-Haul Travel" })).toBeVisible();
+  });
+
+  test("destinations listing page loads with no console errors", async ({ page }) => {
+    await assertNoConsoleErrors(page, async () => {
+      await page.goto("/destinations");
+      await expect(page.locator("h1")).toBeVisible();
+    });
+  });
+});
+
+test.describe("Business Class and About pages", () => {
+  test("business-class page loads with no console errors or overflow", async ({ page }) => {
+    await assertNoConsoleErrors(page, async () => {
+      await page.goto("/business-class");
+      await expect(page.locator("h1")).toBeVisible();
+    });
+    await assertNoHorizontalOverflow(page);
+  });
+
+  test("about page loads with no console errors", async ({ page }) => {
+    await assertNoConsoleErrors(page, async () => {
+      await page.goto("/about");
+      await expect(page.locator("h1")).toBeVisible();
+    });
+  });
+});
+
+test.describe("Keyboard accessibility", () => {
+  test("skip-to-content or first focusable element is reachable via keyboard from page load", async ({ page }) => {
+    await page.goto("/");
+    await page.keyboard.press("Tab");
+    const active = await page.evaluate(() => document.activeElement?.tagName);
+    expect(active).not.toBe("BODY");
+  });
+
+  test("mobile menu button is keyboard-operable", async ({ page }) => {
+    await page.setViewportSize({ width: 375, height: 812 });
+    await page.goto("/");
+    const menuButton = page.getByRole("button", { name: "Open menu" });
+    await menuButton.focus();
+    await page.keyboard.press("Enter");
+    await expect(page.getByRole("navigation", { name: "Mobile" })).toBeVisible();
+  });
+});
+
+test.describe("Brand and SEO assets", () => {
+  test("square brand mark renders for structured-data logo use", async ({ page }) => {
+    const response = await page.goto("/brand-mark.png");
+    expect(response?.status()).toBe(200);
+    expect(response?.headers()["content-type"]).toContain("image/png");
+  });
+
+  test("web manifest is valid JSON with the correct brand name", async ({ page }) => {
+    const response = await page.goto("/manifest.webmanifest");
+    const body = await response?.json();
+    expect(body.name).toBe("Business Flights Travel");
+    expect(body.icons.length).toBeGreaterThan(0);
+  });
+
+  test("homepage Organization structured data uses the square brand mark, not the wide wordmark", async ({ page }) => {
+    await page.goto("/");
+    const logos = await page.evaluate(() =>
+      Array.from(document.querySelectorAll('script[type="application/ld+json"]')).map((s) => JSON.parse(s.textContent || "{}").logo).filter(Boolean),
+    );
+    expect(logos.length).toBeGreaterThan(0);
+    for (const logo of logos) expect(logo).toContain("/brand-mark.png");
+  });
+});
+
 for (const width of [320, 375, 390]) {
   test.describe(`Mobile ${width}px`, () => {
     test.use({ viewport: { width, height: 812 } });
