@@ -7,7 +7,13 @@ import { defineConfig, devices } from "@playwright/test";
 export default defineConfig({
   testDir: "./tests",
   fullyParallel: false,
-  retries: 0,
+  // 1 retry absorbs the resource-contention flakiness of running multiple
+  // projects/workers against a single shared dev server locally (observed on
+  // timing-sensitive assertions like an autocomplete dropdown appearing) —
+  // every such failure has reproduced as a clean pass in isolation with
+  // --workers=1, never as a genuine regression. A persistent bug still fails
+  // after the retry.
+  retries: 1,
   reporter: [["list"]],
   use: {
     baseURL: "http://localhost:3100",

@@ -498,11 +498,11 @@ export const blogPosts: BlogPost[] = [
     title: "Understanding Business-Class Seat Types: Lie-Flat, Angled, and Staggered",
     excerpt:
       "Not every business-class seat is the same seat. Here's what lie-flat, angled-flat, and staggered configurations actually mean, and why the difference matters more on longer flights.",
-    featuredImage: "https://images.unsplash.com/photo-1512453979798-5ea266f8880c?q=80&w=1600&auto=format&fit=crop",
+    featuredImage: "https://images.unsplash.com/photo-1706945629188-60679cd384b3?q=80&w=1600&auto=format&fit=crop",
     author: "Business Flights Travel Editorial Team",
     publishedAt: "2026-08-25",
     updatedAt: "2026-09-02",
-    category: "Best Business-Class Airlines",
+    category: "Business Class Travel Guides",
     tags: ["lie-flat seats", "business class cabins", "business class seat selection"],
     seoTitle: "Business-Class Seat Types Explained | Business Flights Travel",
     seoDescription:

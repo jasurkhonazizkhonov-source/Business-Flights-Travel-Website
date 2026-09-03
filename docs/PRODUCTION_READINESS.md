@@ -433,15 +433,33 @@ Being explicit, as asked, rather than declaring this "fully complete":
   (legal pages, blog, about, how-it-works). A full manual click-through of
   every nav item and every destination detail page has not happened.
 - **3 orphaned database tables** (`SheetSyncRecord`, `SubmissionSequence`,
-  `NewsletterSubscriber`) remain in the shared Postgres database from the
-  removed Google Sheets integration. They are harmless — nothing in
-  `schema.prisma` or application code references them — but Prisma's own
-  AI-agent safety gate blocks an automated `db push --accept-data-loss`
-  even with your consent. To remove them, run this yourself in a terminal
-  with a current backup/confidence in the CRM's state:
-  ```bash
-  npx prisma db push --accept-data-loss
-  ```
+  `NewsletterSubscriber`), previously reported as remaining in the shared
+  Postgres database from the removed Google Sheets integration, **no longer
+  appear in `schema.prisma`** as of this file's most recent re-pull header
+  comment (2026-08-22) — none of the three model names are present anywhere
+  in the current schema. This suggests the CRM team may have already
+  dropped them on the database side. **This has not been independently
+  re-confirmed against the live database this session**: a fresh, read-only
+  `npx prisma db pull --print` was attempted specifically to check, but this
+  sandboxed environment blocks reading/using `DATABASE_URL` directly, so the
+  command failed before reaching the database (`P1013: datasource.url must
+  not be an empty string`). Do not treat their absence from this file as
+  proof they are gone from the database — confirm with a direct, read-only
+  check (e.g. `\dt` in `psql`, or a fresh `prisma db pull --print` run from
+  an environment with real `DATABASE_URL` access) before considering this
+  closed.
+  If, after that check, any of the three tables are confirmed to still
+  exist: given this is a live, actively-changing shared CRM database (this
+  same schema has already grown `ContactInquiry`, `Subscriber`, and
+  `MarketingCampaign`/`MarketingCampaignSend` since an earlier pull), do
+  **not** run `prisma db push --accept-data-loss` against a schema that
+  might now be stale relative to the live database — that command syncs the
+  *entire* database to match the local `schema.prisma` file and would drop
+  *any* table the file doesn't know about, not just these three. Re-pull
+  first (`npx prisma db pull`, safe/read-only) to confirm the file is
+  current, review the resulting diff carefully, and only then consider a
+  scoped, manual `DROP TABLE` for the specific orphaned tables rather than
+  a blanket `db push --accept-data-loss`.
 - **IATA/ARC/BBB accreditation and "24/7 service" are not claimed anywhere**
   (per your confirmation that neither is currently true) — the footer's
   `TRUST_BADGES` array is empty and ready to populate once/if those become

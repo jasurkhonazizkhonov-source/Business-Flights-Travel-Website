@@ -39,7 +39,7 @@ function DiscoverMark() {
   return (
     <svg viewBox="0 0 48 32" width="40" height="27" role="img" aria-label="Discover">
       <rect width="48" height="32" rx="4" fill="#ffffff" stroke="currentColor" strokeOpacity="0.12" />
-      <text x="20" y="20" textAnchor="middle" fontFamily="Arial, sans-serif" fontWeight="700" fontSize="8" fill="#1a1a1a">
+      <text x="17" y="20" textAnchor="middle" fontFamily="Arial, sans-serif" fontWeight="700" fontSize="6.5" fill="#1a1a1a">
         DISCOVER
       </text>
       <circle cx="41" cy="19" r="5" fill="#f68121" />
