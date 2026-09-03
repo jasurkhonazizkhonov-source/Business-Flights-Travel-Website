@@ -1,26 +1,18 @@
 import { z } from "zod";
+import { CONTACT_SUBJECT_VALUES, CONTACT_SUBJECT_OPTIONS, type ContactSubject } from "./contact-options";
 
 // Values match the CRM's InquirySubject enum (ContactInquiry model,
 // prisma/schema.prisma) exactly, as plain string literals rather than an
-// import from the generated Prisma client — this file is shared with the
-// client-side contact form, and importing the generated client into a
-// browser bundle pulls in Node-only internals that break the build.
-export const CONTACT_SUBJECT_VALUES = [
-  "GENERAL_INQUIRY",
-  "FLIGHT_REQUEST_HELP",
-  "EXISTING_BOOKING",
-  "CORPORATE_TRAVEL",
-  "OTHER",
-] as const;
-export type ContactSubject = (typeof CONTACT_SUBJECT_VALUES)[number];
-
-export const CONTACT_SUBJECT_OPTIONS: { value: ContactSubject; label: string }[] = [
-  { value: "GENERAL_INQUIRY", label: "General Inquiry" },
-  { value: "FLIGHT_REQUEST_HELP", label: "Flight Request Help" },
-  { value: "EXISTING_BOOKING", label: "Existing Booking" },
-  { value: "CORPORATE_TRAVEL", label: "Corporate Travel" },
-  { value: "OTHER", label: "Other" },
-];
+// import from the generated Prisma client — importing the generated client
+// into a browser bundle pulls in Node-only internals that break the build.
+//
+// CONTACT_SUBJECT_VALUES/OPTIONS live in contact-options.ts (no zod import)
+// and are re-exported here so this stays the one canonical import path for
+// server code and for types — but the client-side contact form should
+// import them from contact-options directly (see the comment there) rather
+// than from this file, or it'll pull the zod schema below into its bundle
+// for nothing.
+export { CONTACT_SUBJECT_VALUES, CONTACT_SUBJECT_OPTIONS, type ContactSubject };
 
 export const contactMessageSchema = z.object({
   firstName: z.string().trim().min(1, "First name is required").max(80),

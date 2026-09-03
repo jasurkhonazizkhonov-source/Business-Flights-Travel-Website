@@ -1,13 +1,19 @@
 import { z } from "zod";
+import { TRIP_TYPES, CABIN_CLASSES } from "./flight-request-options";
 
 // Shared between the client form (react-hook-free controlled state, see
 // components/flight-form/FlightRequestForm.tsx) and the server action
 // (server/actions/submit-flight-request.ts). The server re-validates
 // everything here regardless of what client-side checks already passed —
 // FormData/JSON from the client is always untrusted.
-
-export const TRIP_TYPES = ["ONE_WAY", "ROUND_TRIP", "MULTI_CITY"] as const;
-export const CABIN_CLASSES = ["ECONOMY", "PREMIUM_ECONOMY", "BUSINESS", "FIRST"] as const;
+//
+// TRIP_TYPES/CABIN_CLASSES live in flight-request-options.ts (no zod
+// import) and are re-exported here so this stays the one canonical import
+// path for server code and for types — but client components that only
+// need those two constants should import them from flight-request-options
+// directly (see the comment there) rather than from this file, or they'll
+// pull the zod schema below into their bundle for nothing.
+export { TRIP_TYPES, CABIN_CLASSES };
 
 export const airportSchema = z.object({
   iata: z.string().length(3).toUpperCase(),

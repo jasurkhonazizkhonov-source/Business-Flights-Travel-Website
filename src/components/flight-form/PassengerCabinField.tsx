@@ -5,7 +5,11 @@ import { motion } from "framer-motion";
 import { Users, Minus, Plus } from "lucide-react";
 import { useClickOutside } from "@/hooks/useClickOutside";
 import { usePopoverAlign } from "@/hooks/usePopoverAlign";
-import { CABIN_CLASSES } from "@/lib/validations/flight-request";
+// Imported from the zod-free options module, not from
+// @/lib/validations/flight-request, so this client component's bundle
+// doesn't pull in zod and the full validation schema — see the comment in
+// flight-request-options.ts.
+import { CABIN_CLASSES } from "@/lib/validations/flight-request-options";
 import { cn } from "@/lib/cn";
 
 const CABIN_LABELS: Record<(typeof CABIN_CLASSES)[number], string> = {

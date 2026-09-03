@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
 import { subscribeToNewsletter } from "@/server/actions/subscribe-newsletter";
 import { cn } from "@/lib/cn";
+import { isValidEmail } from "@/lib/validate";
 
 export function NewsletterForm({ variant = "dark" }: { variant?: "dark" | "light" }) {
   const [email, setEmail] = useState("");
@@ -14,7 +15,14 @@ export function NewsletterForm({ variant = "dark" }: { variant?: "dark" | "light
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!email.trim()) return;
+    // Matches the instant-feedback pattern already used in
+    // FlightRequestForm/ContactForm — catches a malformed address (missing
+    // "@", no TLD, etc.) without a round trip to the server, which
+    // previously only caught this via subscribeToNewsletter's zod check.
+    if (!isValidEmail(email)) {
+      setError("Please enter a valid email address.");
+      return;
+    }
     setError("");
     startTransition(async () => {
       const res = await subscribeToNewsletter({ email, website });

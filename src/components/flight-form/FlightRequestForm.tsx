@@ -8,11 +8,12 @@ import { SegmentRow, type SegmentState } from "./SegmentRow";
 import { DateField } from "./DateField";
 import { PassengerCabinField } from "./PassengerCabinField";
 import { submitFlightRequest } from "@/server/actions/submit-flight-request";
-import {
-  TRIP_TYPES,
-  type AirportOption,
-  type FlightRequestInput,
-} from "@/lib/validations/flight-request";
+import type { AirportOption, FlightRequestInput } from "@/lib/validations/flight-request";
+// Imported from the zod-free options module, not from
+// @/lib/validations/flight-request, so this client component's bundle
+// doesn't pull in zod and the full validation schema — see the comment in
+// flight-request-options.ts.
+import { TRIP_TYPES } from "@/lib/validations/flight-request-options";
 import { cn } from "@/lib/cn";
 import { PRIMARY_CTA_LABEL } from "@/lib/constants";
 import { isValidEmail } from "@/lib/validate";
@@ -99,8 +100,20 @@ export function FlightRequestForm({
       if (!s.from) e[`segments.${i}.from`] = "Select an origin";
       if (!s.to) e[`segments.${i}.to`] = "Select a destination";
       if (!s.departureDate) e[`segments.${i}.departureDate`] = "Select a date";
+      // Mirrors the server's segmentSchema refine (flight-request.ts) so
+      // this catches an identical origin/destination instantly instead of
+      // only after a round trip to the server — same error message and
+      // field so the two paths are indistinguishable to the user.
+      if (s.from && s.to && s.from.iata === s.to.iata) {
+        e[`segments.${i}.to`] = "Origin and destination must be different";
+      }
     });
     if (tripType === "ROUND_TRIP" && !returnDate) e.returnDate = "Select a return date";
+    // Mirrors the server's top-level refine comparing returnDate against
+    // the first segment's departureDate.
+    if (tripType === "ROUND_TRIP" && returnDate && segments[0]?.departureDate && returnDate < segments[0].departureDate) {
+      e.returnDate = "Return date must be on or after the departure date";
+    }
     if (!firstName.trim()) e.firstName = "First name is required";
     if (!lastName.trim()) e.lastName = "Last name is required";
     if (!isValidEmail(email)) {
@@ -155,6 +168,14 @@ export function FlightRequestForm({
         setResult({ status: "success", summary: res.summary });
       } else {
         setErrors(res.fieldErrors ?? {});
+        // The client-validation branch above scrolls to the first errored
+        // field; a server-side rejection (e.g. a check this form can't
+        // duplicate, like the honeypot or rate limit) needs the same
+        // treatment so a field error below the fold isn't silently missed.
+        const firstServerKey = Object.keys(res.fieldErrors ?? {})[0];
+        if (firstServerKey) {
+          document.getElementById(`field-${firstServerKey}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+        }
         setResult({ status: "error", message: res.error });
       }
     });

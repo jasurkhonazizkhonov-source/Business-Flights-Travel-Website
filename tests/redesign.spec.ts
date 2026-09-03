@@ -271,6 +271,21 @@ test.describe("Keyboard accessibility", () => {
     await page.keyboard.press("Enter");
     await expect(page.getByRole("navigation", { name: "Mobile" })).toBeVisible();
   });
+
+  test("airport autocomplete is selectable with ArrowDown + Enter alone, no mouse", async ({ page }) => {
+    // Regression test for a real bug: the combobox had role="combobox" /
+    // role="option" / role="listbox" but no keyboard handling at all, so a
+    // keyboard-only user could type a query and see the listbox but had no
+    // way to actually select an option and populate the field.
+    await page.goto("/flights");
+    const fromField = page.getByPlaceholder("City or airport code").first();
+    await fromField.click();
+    await fromField.fill("LHR");
+    await expect(page.getByRole("option").filter({ hasText: "LHR" }).first()).toBeVisible();
+    await page.keyboard.press("ArrowDown");
+    await page.keyboard.press("Enter");
+    await expect(fromField).toHaveValue(/LHR/);
+  });
 });
 
 test.describe("Brand and SEO assets", () => {

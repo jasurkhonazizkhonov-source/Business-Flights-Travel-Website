@@ -5,7 +5,11 @@ import { motion } from "framer-motion";
 import { CheckCircle2, AlertTriangle, Loader2 } from "lucide-react";
 import { PhoneNumberField } from "@/components/forms/PhoneNumberField";
 import { submitContactMessage } from "@/server/actions/submit-contact-message";
-import { CONTACT_SUBJECT_OPTIONS, type ContactSubject } from "@/lib/validations/contact";
+// Imported from the zod-free options module, not from
+// @/lib/validations/contact, so this client component's bundle doesn't
+// pull in zod and the full validation schema — see the comment in
+// contact-options.ts.
+import { CONTACT_SUBJECT_OPTIONS, type ContactSubject } from "@/lib/validations/contact-options";
 import { isValidEmail } from "@/lib/validate";
 import { isValidPhoneNumber } from "@/lib/phone";
 import { cn } from "@/lib/cn";

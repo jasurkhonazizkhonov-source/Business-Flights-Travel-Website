@@ -31,8 +31,38 @@ export function AirportAutocomplete({
   const [results, setResults] = useState<AirportOption[]>([]);
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
+  // -1 = no option highlighted (plain typing). Set by ArrowUp/ArrowDown,
+  // consumed by Enter — the keyboard half of this combobox, which previously
+  // had none: the roles/aria attributes below described a combobox, but
+  // there was no way to reach or choose an option without a mouse.
+  const [highlightedIndex, setHighlightedIndex] = useState(-1);
   const containerRef = useRef<HTMLDivElement>(null);
   const listboxId = useId();
+
+  function selectOption(option: AirportOption) {
+    onChange(option);
+    setQuery(`${option.city} (${option.iata})`);
+    setOpen(false);
+    setHighlightedIndex(-1);
+  }
+
+  function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (!showResults) return;
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setHighlightedIndex((i) => (i + 1) % results.length);
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setHighlightedIndex((i) => (i <= 0 ? results.length - 1 : i - 1));
+    } else if (e.key === "Enter") {
+      if (highlightedIndex < 0) return; // let the form submit normally when nothing is highlighted
+      e.preventDefault();
+      selectOption(results[highlightedIndex]);
+    } else if (e.key === "Escape") {
+      setOpen(false);
+      setHighlightedIndex(-1);
+    }
+  }
 
   // Adjusting state during render (React's recommended alternative to an
   // effect for "sync local state when a prop changes") — a parent-driven
@@ -96,6 +126,18 @@ export function AirportAutocomplete({
     return () => clearTimeout(timeoutId);
   }, [trimmedQuery, isSearchable]);
 
+  // A new result set invalidates whatever index was highlighted for the
+  // previous one — without this, e.g. index 2 could stay "highlighted" into
+  // a shorter new list (or point at a completely different airport) as the
+  // user keeps typing. Same "adjust state during render" idiom already used
+  // above for prevValue/query, rather than a useEffect (which would add an
+  // extra cascading render for what's really a synchronous derivation).
+  const [prevResults, setPrevResults] = useState(results);
+  if (results !== prevResults) {
+    setPrevResults(results);
+    setHighlightedIndex(-1);
+  }
+
   const showResults = open && isSearchable && results.length > 0;
   const Icon = icon === "from" ? PlaneTakeoff : PlaneLanding;
 
@@ -118,12 +160,14 @@ export function AirportAutocomplete({
             setQuery(e.target.value);
             setOpen(true);
           }}
+          onKeyDown={handleKeyDown}
           className="w-full bg-transparent text-sm text-[var(--color-navy-950)] outline-none placeholder:text-[var(--color-navy-950)]/40"
           autoComplete="off"
           role="combobox"
           aria-expanded={showResults}
           aria-controls={listboxId}
           aria-autocomplete="list"
+          aria-activedescendant={highlightedIndex >= 0 ? `${listboxId}-option-${highlightedIndex}` : undefined}
         />
         {loading && <Loader2 size={15} className="animate-spin text-[var(--color-navy-950)]/40" aria-hidden="true" />}
       </div>
@@ -150,18 +194,19 @@ export function AirportAutocomplete({
             className="absolute z-30 mt-2 max-h-72 w-full max-w-[calc(100vw-2.5rem)] overflow-auto rounded-xl border border-[var(--color-navy-950)]/10 bg-white py-1.5 shadow-xl"
             role="listbox"
           >
-            {results.map((r) => (
+            {results.map((r, i) => (
               <li key={r.iata}>
                 <button
+                  id={`${listboxId}-option-${i}`}
                   type="button"
                   role="option"
                   aria-selected={value?.iata === r.iata}
-                  onClick={() => {
-                    onChange(r);
-                    setQuery(`${r.city} (${r.iata})`);
-                    setOpen(false);
-                  }}
-                  className="flex w-full items-center justify-between gap-3 px-4 py-2.5 text-left text-sm hover:bg-[var(--color-cream-100)]"
+                  onClick={() => selectOption(r)}
+                  onMouseEnter={() => setHighlightedIndex(i)}
+                  className={cn(
+                    "flex w-full items-center justify-between gap-3 px-4 py-2.5 text-left text-sm hover:bg-[var(--color-cream-100)]",
+                    highlightedIndex === i && "bg-[var(--color-cream-100)]",
+                  )}
                 >
                   <span className="min-w-0">
                     <span className="block truncate text-[var(--color-navy-950)]">
