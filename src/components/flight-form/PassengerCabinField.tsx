@@ -110,8 +110,13 @@ export function PassengerCabinField({
           the comment in DateField.tsx for why a conditionally-*mounted*
           popover makes `inert={!open}` a tautology once framer-motion's
           exit-clone freezes it. */}
+      {/* Opacity-only entrance — no `y`/`scale` — for the same reason the
+          mega menu's panel is opacity-only (see DestinationsMegaMenu.tsx):
+          a transform on this wrapper shifts every button's real
+          rendered/hit-tested position for the whole transition, so a click
+          landing early in that window can miss its target. */}
       <motion.div
-        animate={open ? { opacity: 1, y: 0, scale: 1 } : { opacity: 0, y: -6, scale: 0.98 }}
+        animate={open ? { opacity: 1 } : { opacity: 0 }}
         initial={false}
         transition={{ duration: 0.16, ease: "easeOut" }}
         role="dialog"

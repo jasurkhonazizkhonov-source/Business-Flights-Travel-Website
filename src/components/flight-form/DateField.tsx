@@ -78,8 +78,14 @@ export function DateField({
           even if that part weren't frozen. A persistently-mounted element
           has neither problem: every prop, `inert` included, re-evaluates on
           every real render, and `inert` overrides descendant CSS entirely. */}
+      {/* Opacity-only entrance — no `y`/`scale` — for the same reason the
+          mega menu's panel is opacity-only (see DestinationsMegaMenu.tsx):
+          a transform on this wrapper shifts every day button's real
+          rendered/hit-tested position for the whole transition, so a click
+          landing early in that window can miss the day it visually
+          appears to be on. */}
       <motion.div
-        animate={open ? { opacity: 1, y: 0, scale: 1 } : { opacity: 0, y: -6, scale: 0.98 }}
+        animate={open ? { opacity: 1 } : { opacity: 0 }}
         initial={false}
         transition={{ duration: 0.16, ease: "easeOut" }}
         role="dialog"

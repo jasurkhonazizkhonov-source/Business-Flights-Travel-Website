@@ -83,12 +83,42 @@ export function AirportAutocomplete({
   // call this independently — harmless, since the underlying load is
   // memoized module-wide and only ever fetched once.
   useEffect(() => {
-    if (typeof requestIdleCallback === "function") {
-      const idleId = requestIdleCallback(() => prefetchAirports());
-      return () => cancelIdleCallback(idleId);
+    // This form renders directly in the homepage hero (Hero.tsx), so this
+    // effect runs on the site's single most-visited page. requestIdleCallback
+    // alone isn't a strong enough guarantee that the ~770KB airports.json
+    // fetch+parse (the largest single chunk in the app) stays out of the
+    // window performance tools measure Total Blocking Time over: the browser
+    // can report an idle gap between early paint frames well before other
+    // startup work (image decode, hydration) has actually settled. Waiting
+    // for the page's `load` event first, on top of requestIdleCallback,
+    // keeps this speculative fetch from competing with that critical work —
+    // it still typically completes well before a real user finishes reading
+    // the hero and focuses the field, which is all this is for.
+    let cancelled = false;
+    let cancelIdle: (() => void) | undefined;
+
+    function schedule() {
+      if (cancelled) return;
+      if (typeof requestIdleCallback === "function") {
+        const idleId = requestIdleCallback(() => prefetchAirports(), { timeout: 4000 });
+        cancelIdle = () => cancelIdleCallback(idleId);
+      } else {
+        const timeoutId = window.setTimeout(() => prefetchAirports(), 1500);
+        cancelIdle = () => window.clearTimeout(timeoutId);
+      }
     }
-    const timeoutId = window.setTimeout(() => prefetchAirports(), 300);
-    return () => window.clearTimeout(timeoutId);
+
+    if (document.readyState === "complete") {
+      schedule();
+    } else {
+      window.addEventListener("load", schedule, { once: true });
+    }
+
+    return () => {
+      cancelled = true;
+      window.removeEventListener("load", schedule);
+      cancelIdle?.();
+    };
   }, []);
 
   const trimmedQuery = query.trim();
@@ -187,7 +217,12 @@ export function AirportAutocomplete({
       {results.length > 0 && (
           <motion.ul
             id={listboxId}
-            animate={showResults ? { opacity: 1, y: 0 } : { opacity: 0, y: -6 }}
+            // Opacity-only — no `y` — for the same reason as the mega menu's
+            // panel (see DestinationsMegaMenu.tsx): a transform on this
+            // wrapper shifts every option's real rendered/hit-tested
+            // position for the whole transition, so a click landing early
+            // in that window can miss its target.
+            animate={showResults ? { opacity: 1 } : { opacity: 0 }}
             initial={false}
             transition={{ duration: 0.14 }}
             inert={!showResults}

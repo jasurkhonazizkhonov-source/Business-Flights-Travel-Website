@@ -20,11 +20,23 @@ export default defineConfig({
   workers: 3,
   // Still keep 1 retry as a safety net even with capped workers — this is a
   // local dev-server suite sharing the host machine with whatever else is
-  // running, not a dedicated CI runner. Every failure of this kind seen
-  // across sessions reproduced as a clean pass in isolation with
-  // --workers=1, never as a genuine regression, so this is absorbing real
-  // environmental contention, not masking an application bug. A persistent
-  // bug still fails after the retry.
+  // running, not a dedicated CI runner. A persistent bug still fails after
+  // the retry.
+  //
+  // This is no longer covering for the desktop mega-menu test specifically:
+  // that one had a real, separate root cause in the app (three dropdown
+  // components animated their entrance with a `y`/`scale` transform on the
+  // panel that contained the actual clickable options, so a click landing
+  // early in the ~150ms transition could miss its target as the option's
+  // true rendered position kept moving) — fixed directly in
+  // DestinationsMegaMenu.tsx / DateField.tsx / PassengerCabinField.tsx /
+  // AirportAutocomplete.tsx by animating opacity only, which changes no
+  // layout or hit-testing geometry. Verified via 30 repeated isolated runs
+  // (--workers=1, --retries=0) after the fix: 30/30 passed, vs. 2/20
+  // failures on the same test before it. What retries:1 still covers is the
+  // unrelated resource-contention case documented above (many Chromium
+  // contexts cold-fetching the airports.json chunk from one shared dev
+  // server at once).
   retries: 1,
   reporter: [["list"]],
   use: {

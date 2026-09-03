@@ -41,11 +41,26 @@ export function DestinationsMegaMenu({ active, regions }: { active: boolean; reg
       {/* Always mounted; visibility/interactivity driven by `animate`/`inert`
           rather than mount-unmount — see the note in DateField.tsx for why a
           conditionally-mounted popover makes `inert={!open}` a tautology
-          once framer-motion's exit-clone freezes it. */}
+          once framer-motion's exit-clone freezes it.
+
+          Opacity-only entrance, deliberately not also `y`/`scale`: a
+          transform on this wrapper shifts the actual rendered (and
+          hit-tested) position of every link inside it for the whole
+          transition — a real click landing early in that ~160ms window,
+          mouse or touch, can miss its target as the link's true pixel
+          position keeps moving out from under it. Root-caused via a
+          reproducible ~10% Playwright flake (clicking "London" a moment
+          after the menu opened intermittently hit nothing and never
+          navigated) that traced to exactly this: the link's bounding box
+          moving between the actionability check and the actual click.
+          Opacity alone changes no layout or hit-testing geometry, so a
+          click is always exactly where it visually appears from the first
+          frame — fixing the flake and the same latent risk for a real fast
+          click, not just papering over the test. */}
       <motion.div
         role="menu"
         aria-label="Popular destinations"
-        animate={open ? { opacity: 1, y: 0, scale: 1 } : { opacity: 0, y: -6, scale: 0.98 }}
+        animate={open ? { opacity: 1 } : { opacity: 0 }}
         initial={false}
         transition={{ duration: 0.16, ease: "easeOut" }}
         inert={!open}

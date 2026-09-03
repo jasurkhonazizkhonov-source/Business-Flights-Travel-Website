@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { Instrument_Sans, Playfair_Display } from "next/font/google";
 import { Header } from "@/components/layout/Header";
 import { Footer } from "@/components/layout/Footer";
-import { FloatingDealsButton } from "@/components/layout/FloatingDealsButton";
+import { DeferredFloatingDealsButton } from "@/components/layout/DeferredFloatingDealsButton";
 import { MotionProvider } from "@/components/MotionProvider";
 import { Toaster } from "@/components/Toaster";
 import { getNavMenuRegions } from "@/data/destinations";
@@ -140,7 +140,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
           <Header navMenuRegions={navMenuRegions} />
           <main className="flex-1">{children}</main>
           <Footer />
-          <FloatingDealsButton />
+          <DeferredFloatingDealsButton />
         </MotionProvider>
         <Toaster />
       </body>
