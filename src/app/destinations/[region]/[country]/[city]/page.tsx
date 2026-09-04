@@ -17,6 +17,21 @@ import { FARE_DISCLAIMER, formatFareUSD } from "@/lib/fares";
 // linking somewhere beyond "other destinations."
 const GENERAL_TRAVEL_GUIDE_SLUGS = ["how-to-choose-the-right-business-class-flight", "business-class-airport-lounge-guide", "when-to-book-international-business-class"];
 
+// Region- or city-specific guides, shown ahead of the general list above
+// when one genuinely exists for this destination — city match takes
+// priority over the broader regional cluster article. Deliberately not
+// exhaustive: only added where a real, non-thin article exists for that
+// specific place, rather than forcing every destination to have one.
+const CITY_TRAVEL_GUIDE_SLUGS: Record<string, string> = {
+  tokyo: "business-class-flights-to-japan",
+  dubai: "business-class-flights-to-dubai",
+};
+const REGION_TRAVEL_GUIDE_SLUGS: Record<string, string> = {
+  europe: "planning-a-business-class-trip-to-europe",
+  asia: "business-class-flights-to-asia-planning",
+  "middle-east": "business-class-flights-to-the-middle-east",
+};
+
 export function generateStaticParams() {
   return destinations.map((d) => ({ region: d.region, country: d.countrySlug, city: d.citySlug }));
 }
@@ -52,6 +67,15 @@ export default async function DestinationPage({ params }: PageProps<"/destinatio
     related.length >= 4 ? related : [...related, ...destinations.filter((d) => d.citySlug !== destination.citySlug && !related.includes(d))].slice(0, 4);
 
   const quoteHref = `/flights?to=${destination.iata}`;
+
+  // City-specific guide first (if one exists for this exact destination),
+  // then the regional cluster guide (if one exists for this region), then
+  // the fixed general reading list — deduplicated, so a destination that
+  // has both a city and region guide doesn't show the same topic twice.
+  const specificGuideSlugs = [CITY_TRAVEL_GUIDE_SLUGS[destination.citySlug], REGION_TRAVEL_GUIDE_SLUGS[destination.region]].filter(
+    (slug): slug is string => Boolean(slug),
+  );
+  const travelGuideSlugs = [...new Set([...specificGuideSlugs, ...GENERAL_TRAVEL_GUIDE_SLUGS])];
 
   const breadcrumbJsonLd = {
     "@context": "https://schema.org",
@@ -243,7 +267,7 @@ export default async function DestinationPage({ params }: PageProps<"/destinatio
               <div className="border-t border-[var(--color-navy-950)]/8 pt-5">
                 <h3 className="text-xs font-semibold tracking-wide text-[var(--color-navy-700)]">PLANNING YOUR TRIP</h3>
                 <ul className="mt-2.5 space-y-2">
-                  {GENERAL_TRAVEL_GUIDE_SLUGS.map((slug) => {
+                  {travelGuideSlugs.map((slug) => {
                     const post = blogPosts.find((p) => p.slug === slug);
                     if (!post) return null;
                     return (
