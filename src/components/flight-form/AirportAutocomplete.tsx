@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useId, useRef, useState } from "react";
-import { motion } from "framer-motion";
+import { m } from "framer-motion";
 import { PlaneTakeoff, PlaneLanding, Loader2 } from "lucide-react";
 import { useClickOutside } from "@/hooks/useClickOutside";
 import { cn } from "@/lib/cn";
@@ -38,6 +38,7 @@ export function AirportAutocomplete({
   const [highlightedIndex, setHighlightedIndex] = useState(-1);
   const containerRef = useRef<HTMLDivElement>(null);
   const listboxId = useId();
+  const labelId = useId();
 
   function selectOption(option: AirportOption) {
     onChange(option);
@@ -173,7 +174,9 @@ export function AirportAutocomplete({
 
   return (
     <div className="relative" ref={containerRef}>
-      <label className="mb-1.5 block text-xs font-semibold tracking-wide text-[var(--color-navy-700)]">{label}</label>
+      <label id={labelId} className="mb-1.5 block text-xs font-semibold tracking-wide text-[var(--color-navy-700)]">
+        {label}
+      </label>
       <div
         className={cn(
           "flex items-center gap-2.5 rounded-xl border bg-white px-3.5 py-3 transition-colors",
@@ -194,6 +197,7 @@ export function AirportAutocomplete({
           className="w-full bg-transparent text-sm text-[var(--color-navy-950)] outline-none placeholder:text-[var(--color-navy-950)]/40"
           autoComplete="off"
           role="combobox"
+          aria-labelledby={labelId}
           aria-expanded={showResults}
           aria-controls={listboxId}
           aria-autocomplete="list"
@@ -215,7 +219,7 @@ export function AirportAutocomplete({
           persistently-mounted element has no such freeze: every prop,
           `inert` included, re-evaluates on every real render. */}
       {results.length > 0 && (
-          <motion.ul
+          <m.ul
             id={listboxId}
             // Opacity-only — no `y` — for the same reason as the mega menu's
             // panel (see DestinationsMegaMenu.tsx): a transform on this
@@ -255,7 +259,7 @@ export function AirportAutocomplete({
                 </button>
               </li>
             ))}
-          </motion.ul>
+          </m.ul>
       )}
     </div>
   );

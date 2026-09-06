@@ -1,4 +1,9 @@
 import type { NextConfig } from "next";
+import bundleAnalyzer from "@next/bundle-analyzer";
+
+// Diagnostic-only — inert unless ANALYZE=true is set (`npm run analyze`),
+// so it never affects a normal `next build`/production deploy.
+const withBundleAnalyzer = bundleAnalyzer({ enabled: process.env.ANALYZE === "true" });
 
 // A CSP strict enough to matter, without breaking Next.js's own hydration
 // script or the JSON-LD <script> tags rendered inline throughout the app
@@ -60,4 +65,4 @@ const nextConfig: NextConfig = {
   },
 };
 
-export default nextConfig;
+export default withBundleAnalyzer(nextConfig);

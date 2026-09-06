@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { PhoneCall } from "lucide-react";
-import { motion } from "framer-motion";
+import { m } from "framer-motion";
 import { CONTACT_PHONE_DISPLAY, CONTACT_PHONE_E164 } from "@/lib/constants";
 
 // Persistent, viewport-fixed CTA — stays visible while scrolling. Kept
@@ -42,7 +42,7 @@ export function FloatingDealsButton() {
   }, []);
 
   return (
-    <motion.a
+    <m.a
       href={`tel:${CONTACT_PHONE_E164}`}
       initial={{ opacity: 0, y: 12 }}
       animate={hidden ? { opacity: 0, y: 12 } : { opacity: 1, y: 0 }}
@@ -70,6 +70,6 @@ export function FloatingDealsButton() {
         </span>
         <span className="hidden text-[0.7rem] font-medium text-[var(--color-navy-950)]/80 sm:inline">{CONTACT_PHONE_DISPLAY}</span>
       </span>
-    </motion.a>
+    </m.a>
   );
 }

@@ -33,7 +33,7 @@ export function PopularAirlines() {
             <div className="flex items-baseline justify-between gap-4 border-b border-[var(--color-navy-950)]/8 pb-3">
               <div>
                 <p className="font-display text-sm font-semibold text-[var(--color-navy-950)]">{a.name}</p>
-                <p className="mt-0.5 text-xs text-[var(--color-navy-950)]/55">{a.note}</p>
+                <p className="mt-0.5 text-xs text-[var(--color-navy-950)]/65">{a.note}</p>
               </div>
               <span className="shrink-0 text-xs text-[var(--color-navy-950)]/65">{a.region}</span>
             </div>

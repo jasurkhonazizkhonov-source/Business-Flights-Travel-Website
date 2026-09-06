@@ -3,7 +3,16 @@ import Link from "next/link";
 import type { BlogPost } from "@/data/blog-posts";
 import { formatIsoDate } from "@/lib/format-date";
 
-export function PostCard({ post }: { post: BlogPost }) {
+export function PostCard({
+  post,
+  // Default matches /blog and the related-posts grid on article pages
+  // (grid-cols-1 → sm:grid-cols-2 → lg:grid-cols-3). BlogPreview on the
+  // homepage jumps straight to 3 columns at sm: and needs its own value.
+  sizes = "(min-width: 1024px) 33vw, (min-width: 640px) 50vw, 100vw",
+}: {
+  post: BlogPost;
+  sizes?: string;
+}) {
   return (
     <Link href={`/blog/${post.slug}`} className="group block overflow-hidden rounded-2xl border border-[var(--color-navy-950)]/8 bg-white">
       <div className="relative aspect-[16/10] w-full overflow-hidden">
@@ -11,7 +20,7 @@ export function PostCard({ post }: { post: BlogPost }) {
           src={post.featuredImage}
           alt={post.title}
           fill
-          sizes="(min-width: 1024px) 33vw, 90vw"
+          sizes={sizes}
           className="object-cover transition-transform duration-700 ease-out group-hover:scale-105"
         />
       </div>

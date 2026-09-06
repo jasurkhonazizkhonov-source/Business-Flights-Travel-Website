@@ -1,4 +1,4 @@
-import { useLayoutEffect, useState, type RefObject } from "react";
+import { useEffect, useState, type RefObject } from "react";
 
 /**
  * A popover anchored to its trigger's left edge (the default for every
@@ -22,7 +22,14 @@ import { useLayoutEffect, useState, type RefObject } from "react";
 export function usePopoverAlign(containerRef: RefObject<HTMLElement | null>, open: boolean, popoverWidth: number) {
   const [align, setAlign] = useState<"left" | "right">("left");
 
-  useLayoutEffect(() => {
+  // useEffect, not useLayoutEffect: this popover is always opacity-0 +
+  // inert until `open`, so getting its alignment right happens-after
+  // first paint costs nothing visible — but running it via
+  // useLayoutEffect would force this measurement (getBoundingClientRect)
+  // synchronously before the browser can paint, on every field that uses
+  // this hook, adding to main-thread blocking time on initial load for a
+  // value nothing on screen depends on yet.
+  useEffect(() => {
     function measure() {
       const el = containerRef.current;
       if (!el) return;

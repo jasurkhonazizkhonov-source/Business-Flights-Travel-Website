@@ -1,14 +1,25 @@
 "use client";
 
-import { useRef, useState } from "react";
-import { DayPicker } from "react-day-picker";
-import { motion } from "framer-motion";
+import { useId, useRef, useState } from "react";
+import dynamic from "next/dynamic";
+import { m } from "framer-motion";
 import { CalendarDays } from "lucide-react";
 import { format } from "date-fns";
-import "react-day-picker/style.css";
 import { useClickOutside } from "@/hooks/useClickOutside";
 import { usePopoverAlign } from "@/hooks/usePopoverAlign";
 import { cn } from "@/lib/cn";
+
+// react-day-picker (+ its CSS, pulled in inside DayPickerCalendar.tsx) is
+// fetched as its own chunk instead of bundling straight into this
+// always-mounted-in-the-hero component — see the comment on
+// DeferredFloatingDealsButton for why `ssr: false` here is safe even though
+// this calendar is always present (just opacity/inert-hidden) rather than
+// conditionally mounted. No loading fallback is needed: it's invisible
+// behind `inert`/opacity:0 until a user opens it, well after this chunk has
+// had time to load in the background.
+const DayPickerCalendar = dynamic(() => import("./DayPickerCalendar").then((mod) => mod.DayPickerCalendar), {
+  ssr: false,
+});
 
 function parseIso(value: string): Date | undefined {
   if (!value) return undefined;
@@ -37,6 +48,7 @@ export function DateField({
 }) {
   const [open, setOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  const labelId = useId();
   useClickOutside(containerRef, () => setOpen(false), open);
   const align = usePopoverAlign(containerRef, open, 320);
 
@@ -47,12 +59,15 @@ export function DateField({
 
   return (
     <div className="relative" ref={containerRef}>
-      <label className="mb-1.5 block text-xs font-semibold tracking-wide text-[var(--color-navy-700)]">{label}</label>
+      <label id={labelId} className="mb-1.5 block text-xs font-semibold tracking-wide text-[var(--color-navy-700)]">
+        {label}
+      </label>
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-haspopup="dialog"
         aria-expanded={open}
+        aria-labelledby={labelId}
         className={cn(
           "flex w-full items-center gap-2.5 rounded-xl border bg-white px-3.5 py-3 text-left text-sm text-[var(--color-navy-950)] transition-colors",
           error ? "border-red-400" : "border-[var(--color-navy-950)]/12 hover:border-[var(--color-navy-950)]/25",
@@ -84,7 +99,7 @@ export function DateField({
           rendered/hit-tested position for the whole transition, so a click
           landing early in that window can miss the day it visually
           appears to be on. */}
-      <motion.div
+      <m.div
         animate={open ? { opacity: 1 } : { opacity: 0 }}
         initial={false}
         transition={{ duration: 0.16, ease: "easeOut" }}
@@ -95,7 +110,7 @@ export function DateField({
           align === "right" ? "right-0" : "left-0",
         )}
       >
-        <DayPicker
+        <DayPickerCalendar
           mode="single"
           selected={selected}
           defaultMonth={selected ?? floor}
@@ -109,7 +124,7 @@ export function DateField({
           }}
           className="bfw-daypicker"
         />
-      </motion.div>
+      </m.div>
     </div>
   );
 }

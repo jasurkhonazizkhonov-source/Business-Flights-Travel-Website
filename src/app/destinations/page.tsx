@@ -53,7 +53,14 @@ export default function DestinationsPage() {
         <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {featured.map((d, i) => (
             <Reveal key={d.citySlug} delay={(i % 4) * 0.05}>
-              <DestinationCard destination={d} priority={i < 4} />
+              {/* This grid jumps straight from 1 to 2 to 4 columns (no
+                  lg:grid-cols-3 step, unlike the continent grids below), so
+                  it needs its own sizes rather than the shared default. */}
+              <DestinationCard
+                destination={d}
+                priority={i < 4}
+                sizes="(min-width: 1024px) 25vw, (min-width: 640px) 50vw, 100vw"
+              />
             </Reveal>
           ))}
         </div>

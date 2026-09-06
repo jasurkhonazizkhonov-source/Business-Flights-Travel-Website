@@ -97,7 +97,7 @@ export default async function BlogPostPage({ params }: PageProps<"/blog/[slug]">
           </nav>
           <p className="mt-4 text-xs font-semibold tracking-[0.2em] text-[var(--color-gold-600)]">{post.category.toUpperCase()}</p>
           <h1 className="mt-3 text-[clamp(1.75rem,4vw,2.5rem)] font-display font-semibold leading-tight text-[var(--color-navy-950)]">{post.title}</h1>
-          <div className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-[var(--color-navy-950)]/55">
+          <div className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-[var(--color-navy-950)]/65">
             <span>{post.author}</span>
             <span aria-hidden="true">·</span>
             <time dateTime={post.publishedAt}>{formatIsoDate(post.publishedAt)}</time>

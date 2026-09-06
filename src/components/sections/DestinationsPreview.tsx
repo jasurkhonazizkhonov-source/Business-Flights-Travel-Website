@@ -28,7 +28,12 @@ export function DestinationsPreview() {
       <div className="mt-8 grid grid-cols-2 gap-3 sm:mt-10 sm:grid-cols-4 sm:gap-4">
         {featured.map((d, i) => (
           <Reveal key={d.citySlug} delay={(i % 4) * 0.06}>
-            <DestinationCard destination={d} priority={i < 4} />
+            {/* This grid is grid-cols-2 from the smallest viewport up to
+                sm:grid-cols-4 — never 1 column — so the shared default
+                (tuned for the /destinations page's 1-column mobile grid)
+                would over-claim 100vw here and make next/image fetch a
+                source width roughly 2x what's ever displayed. */}
+            <DestinationCard destination={d} priority={i < 4} sizes="(min-width: 640px) 25vw, 50vw" />
           </Reveal>
         ))}
       </div>

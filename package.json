@@ -7,6 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "analyze": "ANALYZE=true next build",
     "validate:content": "node scripts/validate-content.mjs",
     "postinstall": "prisma generate"
   },
@@ -29,6 +30,8 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.13.0",
+    "@next/bundle-analyzer": "^16.3.4",
     "@playwright/test": "^1.62.1",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
@@ -44,5 +47,12 @@
     "@prisma/engines@7.9.1": true,
     "prisma@7.9.1": true,
     "unrs-resolver@1.12.2": true
-  }
+  },
+  "browserslist": [
+    "chrome >= 93",
+    "edge >= 93",
+    "firefox >= 92",
+    "safari >= 15.4",
+    "not dead"
+  ]
 }

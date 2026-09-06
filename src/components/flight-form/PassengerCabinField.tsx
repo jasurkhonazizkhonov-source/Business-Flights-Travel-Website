@@ -1,7 +1,7 @@
 "use client";
 
-import { useRef, useState } from "react";
-import { motion } from "framer-motion";
+import { useId, useRef, useState } from "react";
+import { m } from "framer-motion";
 import { Users, Minus, Plus } from "lucide-react";
 import { useClickOutside } from "@/hooks/useClickOutside";
 import { usePopoverAlign } from "@/hooks/usePopoverAlign";
@@ -80,6 +80,7 @@ export function PassengerCabinField({
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
+  const labelId = useId();
   useClickOutside(ref, () => setOpen(false), open);
   const align = usePopoverAlign(ref, open, 320);
 
@@ -87,12 +88,15 @@ export function PassengerCabinField({
 
   return (
     <div className="relative" ref={ref}>
-      <label className="mb-1.5 block text-xs font-semibold tracking-wide text-[var(--color-navy-700)]">Travelers &amp; Cabin</label>
+      <label id={labelId} className="mb-1.5 block text-xs font-semibold tracking-wide text-[var(--color-navy-700)]">
+        Travelers &amp; Cabin
+      </label>
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-haspopup="dialog"
         aria-expanded={open}
+        aria-labelledby={labelId}
         className={cn(
           "flex w-full items-center gap-2.5 rounded-xl border bg-white px-3.5 py-3 text-left text-sm text-[var(--color-navy-950)] transition-colors",
           "border-[var(--color-navy-950)]/12 hover:border-[var(--color-navy-950)]/25",
@@ -115,7 +119,7 @@ export function PassengerCabinField({
           a transform on this wrapper shifts every button's real
           rendered/hit-tested position for the whole transition, so a click
           landing early in that window can miss its target. */}
-      <motion.div
+      <m.div
         animate={open ? { opacity: 1 } : { opacity: 0 }}
         initial={false}
         transition={{ duration: 0.16, ease: "easeOut" }}
@@ -181,7 +185,7 @@ export function PassengerCabinField({
             >
               Done
             </button>
-      </motion.div>
+      </m.div>
     </div>
   );
 }

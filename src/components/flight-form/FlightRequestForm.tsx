@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { m, AnimatePresence } from "framer-motion";
 import { Plus, CheckCircle2, AlertTriangle, Loader2 } from "lucide-react";
 import { PhoneNumberField } from "@/components/forms/PhoneNumberField";
 import { SegmentRow, type SegmentState } from "./SegmentRow";
@@ -274,7 +274,7 @@ export function FlightRequestForm({
       </button>
       <AnimatePresence>
         {showMore && (
-          <motion.div
+          <m.div
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: "auto", opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
@@ -331,7 +331,7 @@ export function FlightRequestForm({
                 />
               </div>
             </div>
-          </motion.div>
+          </m.div>
         )}
       </AnimatePresence>
 
@@ -449,7 +449,7 @@ function SuccessPanel({
   };
 }) {
   return (
-    <motion.div
+    <m.div
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3 }}
@@ -481,6 +481,6 @@ function SuccessPanel({
         <dt className="text-[var(--color-navy-950)]/65">Cabin</dt>
         <dd className="font-medium text-[var(--color-navy-950)]">{summary.cabinClass.replace("_", " ")}</dd>
       </dl>
-    </motion.div>
+    </m.div>
   );
 }

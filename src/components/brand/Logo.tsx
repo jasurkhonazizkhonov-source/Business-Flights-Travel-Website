@@ -17,10 +17,18 @@ const LOGO_HEIGHT = 402;
 export function Logo({
   variant = "navy",
   className = "h-8 w-auto",
+  sizes = "96px",
   priority,
 }: {
   variant?: "navy" | "white";
   className?: string;
+  // Real rendered width in CSS px at the largest breakpoint this instance
+  // is shown at (e.g. the header's h-9 ≈ 36px tall × ~2.68:1 ≈ 96px wide).
+  // Without this, next/image has no way to know the logo is displayed far
+  // smaller than its 1077px source and generates a srcset sized for the
+  // full intrinsic width — this is what was costing ~20KB for a ~96×36
+  // logo. Override per call site when the real display width differs.
+  sizes?: string;
   priority?: boolean;
 }) {
   const src = variant === "white" ? "/brand/logo-white.png" : "/brand/logo-navy.png";
@@ -30,6 +38,7 @@ export function Logo({
       alt="Business Flights Travel"
       width={LOGO_WIDTH}
       height={LOGO_HEIGHT}
+      sizes={sizes}
       priority={priority}
       className={cn("w-auto select-none", className)}
     />

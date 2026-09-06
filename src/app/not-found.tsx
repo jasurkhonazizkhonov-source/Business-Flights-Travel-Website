@@ -47,7 +47,7 @@ export default function NotFound() {
             </span>
             <span>
               <span className="block text-sm font-semibold text-[var(--color-navy-950)]">{label}</span>
-              <span className="block text-xs text-[var(--color-navy-950)]/55">{description}</span>
+              <span className="block text-xs text-[var(--color-navy-950)]/65">{description}</span>
             </span>
           </Link>
         ))}

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence, m } from "framer-motion";
 import { Menu, X, ChevronDown } from "lucide-react";
 import { Logo } from "@/components/brand/Logo";
 import { DestinationsMegaMenu } from "@/components/layout/DestinationsMegaMenu";
@@ -67,7 +67,12 @@ export function Header({ navMenuRegions }: { navMenuRegions: NavMenuRegion[] }) 
     >
       <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6 lg:h-20 lg:px-8">
         <Link href="/" className="shrink-0" aria-label="Business Flights Travel — home">
-          <Logo variant="navy" className="h-7 sm:h-8 lg:h-9" priority />
+          <Logo
+            variant="navy"
+            className="h-7 sm:h-8 lg:h-9"
+            sizes="(min-width: 1024px) 96px, (min-width: 640px) 86px, 75px"
+            priority
+          />
         </Link>
 
         <nav className="hidden items-center gap-5 xl:gap-7 lg:flex" aria-label="Primary">
@@ -113,7 +118,7 @@ export function Header({ navMenuRegions }: { navMenuRegions: NavMenuRegion[] }) 
 
       <AnimatePresence>
         {mobileOpen && (
-          <motion.div
+          <m.div
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: "auto", opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
@@ -139,7 +144,7 @@ export function Header({ navMenuRegions }: { navMenuRegions: NavMenuRegion[] }) 
                       </button>
                       <AnimatePresence initial={false}>
                         {mobileDestOpen && (
-                          <motion.div
+                          <m.div
                             initial={{ height: 0, opacity: 0 }}
                             animate={{ height: "auto", opacity: 1 }}
                             exit={{ height: 0, opacity: 0 }}
@@ -178,7 +183,7 @@ export function Header({ navMenuRegions }: { navMenuRegions: NavMenuRegion[] }) 
                             >
                               View all destinations →
                             </Link>
-                          </motion.div>
+                          </m.div>
                         )}
                       </AnimatePresence>
                     </div>
@@ -201,7 +206,7 @@ export function Header({ navMenuRegions }: { navMenuRegions: NavMenuRegion[] }) 
                 {PRIMARY_CTA_LABEL}
               </Link>
             </nav>
-          </motion.div>
+          </m.div>
         )}
       </AnimatePresence>
     </header>

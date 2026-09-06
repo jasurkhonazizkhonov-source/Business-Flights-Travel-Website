@@ -32,7 +32,7 @@ export function Footer() {
       <div className="mx-auto max-w-7xl px-4 py-12 sm:px-6 sm:py-16 lg:px-8">
         <div className="grid gap-10 sm:grid-cols-2 sm:gap-x-8 sm:gap-y-12 lg:grid-cols-[1.2fr_0.9fr_0.9fr_1.2fr]">
           <div className="sm:col-span-2 lg:col-span-1">
-            <Logo variant="white" className="h-7" />
+            <Logo variant="white" className="h-7" sizes="75px" />
             <p className="mt-5 max-w-sm text-sm leading-relaxed text-[var(--color-cream-100)]/70">{SITE_DESCRIPTION}</p>
             <Link
               href="/flights"

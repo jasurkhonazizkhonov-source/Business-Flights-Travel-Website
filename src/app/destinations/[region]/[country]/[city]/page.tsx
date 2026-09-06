@@ -292,7 +292,9 @@ export default async function DestinationPage({ params }: PageProps<"/destinatio
         </Reveal>
         <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4 sm:gap-4">
           {relatedFallback.map((d) => (
-            <DestinationCard key={`${d.region}-${d.citySlug}`} destination={d} />
+            // grid-cols-2 -> sm:grid-cols-4, never 1 column — see the same
+            // note on DestinationsPreview.tsx.
+            <DestinationCard key={`${d.region}-${d.citySlug}`} destination={d} sizes="(min-width: 640px) 25vw, 50vw" />
           ))}
         </div>
       </section>

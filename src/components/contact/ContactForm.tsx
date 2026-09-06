@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { motion } from "framer-motion";
+import { m } from "framer-motion";
 import { CheckCircle2, AlertTriangle, Loader2 } from "lucide-react";
 import { PhoneNumberField } from "@/components/forms/PhoneNumberField";
 import { submitContactMessage } from "@/server/actions/submit-contact-message";
@@ -90,7 +90,7 @@ export function ContactForm() {
 
   if (status === "success") {
     return (
-      <motion.div
+      <m.div
         initial={{ opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}
         className="rounded-2xl border border-[var(--color-navy-950)]/8 bg-white p-8 text-center"
@@ -100,7 +100,7 @@ export function ContactForm() {
         <p className="mt-2 text-sm text-[var(--color-navy-950)]/65">
           Thank you for reaching out. A member of our team will get back to you shortly.
         </p>
-      </motion.div>
+      </m.div>
     );
   }
 

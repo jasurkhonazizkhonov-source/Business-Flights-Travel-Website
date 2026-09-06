@@ -2,7 +2,7 @@
 
 import { useRef, useState } from "react";
 import Link from "next/link";
-import { motion } from "framer-motion";
+import { m } from "framer-motion";
 import { ChevronDown, ArrowRight } from "lucide-react";
 import type { NavMenuRegion } from "@/data/destinations";
 import { useClickOutside } from "@/hooks/useClickOutside";
@@ -57,7 +57,7 @@ export function DestinationsMegaMenu({ active, regions }: { active: boolean; reg
           click is always exactly where it visually appears from the first
           frame — fixing the flake and the same latent risk for a real fast
           click, not just papering over the test. */}
-      <motion.div
+      <m.div
         role="menu"
         aria-label="Popular destinations"
         animate={open ? { opacity: 1 } : { opacity: 0 }}
@@ -96,7 +96,7 @@ export function DestinationsMegaMenu({ active, regions }: { active: boolean; reg
             View all destinations <ArrowRight size={15} />
           </Link>
         </div>
-      </motion.div>
+      </m.div>
     </div>
   );
 }

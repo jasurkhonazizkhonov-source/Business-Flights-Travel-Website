@@ -26,7 +26,10 @@ export function BlogPreview() {
       <div className="mt-10 grid grid-cols-1 gap-6 sm:grid-cols-3">
         {featured.map((post, i) => (
           <Reveal key={post.slug} delay={i * 0.08}>
-            <PostCard post={post} />
+            {/* This grid jumps straight from 1 to 3 columns at sm: (no
+                2-column step, unlike /blog's grid), so it needs its own
+                sizes rather than PostCard's shared default. */}
+            <PostCard post={post} sizes="(min-width: 640px) 33vw, 100vw" />
           </Reveal>
         ))}
       </div>

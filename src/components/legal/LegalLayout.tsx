@@ -30,7 +30,7 @@ export function LegalLayout({
             <h1 className="mt-3 text-[clamp(1.9rem,4.5vw,2.75rem)] font-display font-semibold leading-tight text-[var(--color-navy-950)]">
               {title}
             </h1>
-            <p className="mt-3 text-sm text-[var(--color-navy-950)]/55">Last updated: {lastUpdated}</p>
+            <p className="mt-3 text-sm text-[var(--color-navy-950)]/65">Last updated: {lastUpdated}</p>
             <p className="mt-5 max-w-2xl text-[15px] leading-relaxed text-[var(--color-navy-950)]/70 sm:text-base">{intro}</p>
           </Reveal>
         </div>
