@@ -67,8 +67,15 @@ export async function submitFlightRequest(input: FlightRequestInput): Promise<Su
   if (data.website) {
     return friendlyError();
   }
-  // Implausibly fast submission for a human filling a multi-step form.
-  if (data.renderedAt && Date.now() - data.renderedAt < MIN_FORM_FILL_MS) {
+  // Implausibly fast submission for a human filling a multi-step form —
+  // `!data.renderedAt`, not just "too fast": the real form always sends
+  // this (set via useState(() => Date.now()) the moment it mounts — see
+  // FlightRequestForm.tsx), so a request missing it entirely didn't come
+  // from the rendered form at all. Treating a missing timestamp as passing
+  // (the previous `data.renderedAt && ...` short-circuit) meant a crafted
+  // request that simply omitted this optional field skipped the timing
+  // check completely, same as it skips the honeypot by omitting `website`.
+  if (!data.renderedAt || Date.now() - data.renderedAt < MIN_FORM_FILL_MS) {
     return friendlyError();
   }
 

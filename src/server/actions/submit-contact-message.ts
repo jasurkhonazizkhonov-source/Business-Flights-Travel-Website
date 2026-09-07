@@ -46,7 +46,14 @@ export async function submitContactMessage(input: ContactMessageInput): Promise<
   const data = parsed.data;
 
   if (data.website) return friendlyError();
-  if (data.renderedAt && Date.now() - data.renderedAt < MIN_FORM_FILL_MS) return friendlyError();
+  // `!data.renderedAt`, not just "too fast": the real form always sends
+  // this (set via useState(() => Date.now()) the moment it mounts — see
+  // ContactForm.tsx), so a request missing it entirely didn't come from
+  // the rendered form at all. Treating a missing timestamp as passing (the
+  // previous `data.renderedAt && ...` short-circuit) meant a crafted
+  // request that simply omitted this optional field skipped the timing
+  // check completely, same as it skips the honeypot by omitting `website`.
+  if (!data.renderedAt || Date.now() - data.renderedAt < MIN_FORM_FILL_MS) return friendlyError();
 
   // Phone is a required field — validate it's a genuine, complete number
   // (not just non-empty) the same way the flight request form does.
