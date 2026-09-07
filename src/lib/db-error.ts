@@ -94,6 +94,17 @@ function describeKnownCode(code: string): string {
       return "unique constraint violation";
     case "P2003":
       return "foreign key constraint violation";
+    case "P2021":
+      // Confirmed in production 2026-09-07: the connected database has no
+      // `Company` table at all. Prisma only reaches this code once the
+      // connection, auth, and TLS have all already succeeded — this is
+      // never a connectivity problem, it means the schema this app expects
+      // (prisma/schema.prisma) hasn't been applied to whichever database
+      // DATABASE_URL currently points at (wrong database, or a fresh/
+      // reset instance that was never migrated).
+      return "table does not exist — schema not applied to this database (check DATABASE_URL points at the right instance)";
+    case "P2022":
+      return "column does not exist — schema drift between prisma/schema.prisma and this database";
     case "P2025":
       return "expected record not found";
     default:

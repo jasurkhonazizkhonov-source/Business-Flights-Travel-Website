@@ -60,6 +60,21 @@ test.describe("describeDbError", () => {
     expect(describeDbError(err)).toBe("PrismaClientKnownRequestError P2002: unique constraint violation");
   });
 
+  test("P2021 (table does not exist) is categorized as a schema/wrong-database issue, not connectivity — regression guard for the confirmed 2026-09-07 production incident", () => {
+    const err = new PrismaClientKnownRequestError("The table `public.Company` does not exist in the current database.", {
+      code: "P2021",
+      clientVersion: "7.10.0",
+      meta: { table: "public.Company" },
+    });
+    const description = describeDbError(err);
+    expect(description).toContain("P2021");
+    expect(description).toContain("schema not applied");
+    // Must never echo the raw Prisma message here (meta can carry a table
+    // name, which is safe, but the categorization itself is a fixed
+    // sentence keyed only off the code, consistent with every other case).
+    expect(description).not.toContain("public.Company");
+  });
+
   test("PrismaClientValidationError is flagged as an application bug, not a connectivity issue", () => {
     const err = new PrismaClientValidationError("Unknown argument `bogusField`.", { clientVersion: "7.10.0" });
     expect(describeDbError(err)).toContain("application bug, not a connectivity issue");
