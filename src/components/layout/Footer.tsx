@@ -4,6 +4,7 @@ import { Logo } from "@/components/brand/Logo";
 import { PaymentIcons } from "@/components/brand/PaymentIcons";
 import { AirlineStrip } from "@/components/layout/AirlineStrip";
 import { NewsletterForm } from "@/components/newsletter/NewsletterForm";
+import { CookieSettingsLink } from "@/components/consent/CookieSettingsLink";
 import { destinationPath, getFeaturedDestinations } from "@/data/destinations";
 import {
   COMPANY_ADDRESS,
@@ -167,6 +168,7 @@ export function Footer() {
                 {link.label}
               </Link>
             ))}
+            <CookieSettingsLink className="hover:text-[var(--color-cream-100)]/80" />
           </nav>
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <p>© {new Date().getFullYear()} Business Flights Travel. All rights reserved.</p>

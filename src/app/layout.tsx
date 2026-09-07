@@ -3,6 +3,7 @@ import { Instrument_Sans, Playfair_Display } from "next/font/google";
 import { Header } from "@/components/layout/Header";
 import { Footer } from "@/components/layout/Footer";
 import { DeferredFloatingDealsButton } from "@/components/layout/DeferredFloatingDealsButton";
+import { DeferredCookieConsent } from "@/components/consent/DeferredCookieConsent";
 import { MotionProvider } from "@/components/MotionProvider";
 import { Toaster } from "@/components/Toaster";
 import { getNavMenuRegions } from "@/data/destinations";
@@ -153,6 +154,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
           </main>
           <Footer />
           <DeferredFloatingDealsButton />
+          <DeferredCookieConsent />
         </MotionProvider>
         <Toaster />
       </body>

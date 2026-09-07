@@ -4,10 +4,13 @@ import { CONTACT_EMAIL, SITE_NAME } from "@/lib/constants";
 
 // The "what this site actually sets" section below should be re-verified
 // against real cookie/storage usage at each future deploy — see docs/LEGAL.md.
-// As of this writing the site sets no cookies at all, and there is no
-// analytics or cookie-consent infrastructure in the codebase — nothing to
-// enable via an environment variable. If analytics is ever added, build the
-// consent-gating alongside it and update this policy in the same change.
+// As of this writing the site sets no cookies at all. There IS now a
+// cookie-preference center (src/components/consent/CookieConsent.tsx) that
+// stores a visitor's choice in localStorage (not a cookie) and exposes a
+// real hasConsent("analytics"|"marketing") check — nothing currently reads
+// it, because nothing optional exists yet, but if analytics or marketing
+// tooling is ever added, gate its loader behind that check and update this
+// policy in the same change rather than adding new consent plumbing.
 
 export const metadata: Metadata = {
   title: "Cookie Policy",
@@ -15,7 +18,7 @@ export const metadata: Metadata = {
   alternates: { canonical: "/cookie-policy" },
 };
 
-const LAST_UPDATED = "August 20, 2026";
+const LAST_UPDATED = "September 7, 2026";
 
 export default function CookiePolicyPage() {
   return (
@@ -41,17 +44,23 @@ export default function CookiePolicyPage() {
           server — none of them rely on a cookie or browser storage to function, so there is nothing essential to disclose beyond
           what your browser and our hosting provider do automatically to deliver the page to you.
         </p>
+        <p>
+          On your first visit, a short notice confirms this and lets you record a preference for optional categories below —
+          stored in your browser&apos;s local storage, not a cookie — so that if we ever add an optional technology, it launches
+          already honoring your choice rather than resetting it.
+        </p>
         <h3>Analytics cookies (only if and when enabled)</h3>
         <p>
-          We may in the future enable a privacy-conscious analytics tool to understand which pages are useful to visitors — in
-          aggregate, not to build individual profiles. If we do, a cookie-consent banner will appear on your first visit and no
-          analytics cookie will be set until you accept it. Declining does not affect your ability to use the flight request form
-          or any other part of the Site.
+          We do not currently run any analytics tool. If we enable a privacy-conscious one in the future to understand which pages
+          are useful to visitors — in aggregate, not to build individual profiles — it will only load for visitors who have
+          accepted the &quot;Analytics&quot; category in Cookie Preferences. Declining does not affect your ability to use the
+          flight request form or any other part of the Site.
         </p>
         <h3>Marketing cookies</h3>
         <p>
           We do not use third-party advertising or retargeting cookies on this Site, and have no current plans to. If that ever
-          changes, this policy will be updated first, and consent will be requested before any such cookies are set.
+          changes, this policy will be updated first, and any such cookie would likewise only be set for visitors who have
+          accepted the &quot;Marketing&quot; category.
         </p>
       </LegalSection>
 
@@ -67,12 +76,13 @@ export default function CookiePolicyPage() {
         <p>You can control or disable cookies in several ways:</p>
         <ul>
           <li>
-            <strong>Browser settings:</strong> Most browsers let you block or delete cookies through their settings menu.
-            Instructions vary by browser — check your browser&apos;s help documentation for details.
+            <strong>Cookie Settings:</strong> Use the &quot;Cookie Settings&quot; link in the footer of any page to reopen your
+            preferences at any time — accept, reject, or change your choice for Analytics and Marketing. Nothing about using the
+            Site or submitting a request depends on this choice.
           </li>
           <li>
-            <strong>The consent banner:</strong> If and when we enable analytics, you will be able to decline it from the banner
-            itself, without losing access to any part of the Site, including the flight request form.
+            <strong>Browser settings:</strong> Most browsers let you block or delete cookies, and clear local storage, through
+            their settings menu. Instructions vary by browser — check your browser&apos;s help documentation for details.
           </li>
         </ul>
       </LegalSection>

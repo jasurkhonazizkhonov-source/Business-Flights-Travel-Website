@@ -13,7 +13,7 @@ export const metadata: Metadata = {
   alternates: { canonical: "/privacy-policy" },
 };
 
-const LAST_UPDATED = "August 20, 2026";
+const LAST_UPDATED = "September 7, 2026";
 
 export default function PrivacyPolicyPage() {
   return (
@@ -130,9 +130,10 @@ export default function PrivacyPolicyPage() {
 
       <LegalSection heading="8. Cookies and Similar Technologies">
         <p>
-          We use cookies and similar technologies for essential site functionality and, where enabled, for analytics. Full details
-          — including the specific categories of cookies we use and how to control them — are in our{" "}
-          <a href="/cookie-policy">Cookie Policy</a>.
+          This Site does not currently set any cookies. Your cookie preference — for optional categories that would only apply if
+          we add analytics or marketing tools in the future — is stored in your browser&apos;s local storage rather than a cookie.
+          Full details are in our <a href="/cookie-policy">Cookie Policy</a>, including how to review or change that preference at
+          any time.
         </p>
       </LegalSection>
 
