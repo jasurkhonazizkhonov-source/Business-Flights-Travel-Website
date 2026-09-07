@@ -4,6 +4,7 @@ import { headers } from "next/headers";
 import { prisma } from "@/lib/prisma";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { isSpamSubmission } from "@/lib/anti-spam";
+import { describeDbError } from "@/lib/db-error";
 import { normalizePhoneNumber } from "@/lib/phone";
 import { findAirportByIata } from "@/data/airports";
 import { flightRequestSchema, type FlightRequestInput } from "@/lib/validations/flight-request";
@@ -178,8 +179,11 @@ export async function submitFlightRequest(input: FlightRequestInput): Promise<Su
     };
   } catch (err) {
     // Never leak DB/driver errors to the client — log full detail
-    // server-side only.
-    console.error("[submitFlightRequest] failed", err);
+    // server-side only. The categorized line first makes the failure mode
+    // (connectivity vs. constraint vs. config vs. app bug — see
+    // src/lib/db-error.ts) scannable in Vercel's runtime logs without
+    // having to parse the full stack trace on the line after it.
+    console.error(`[submitFlightRequest] failed: ${describeDbError(err)}`, err);
     return friendlyError();
   }
 }

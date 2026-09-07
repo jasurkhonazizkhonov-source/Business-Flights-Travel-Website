@@ -4,6 +4,7 @@ import { headers } from "next/headers";
 import { prisma } from "@/lib/prisma";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { isSpamSubmission } from "@/lib/anti-spam";
+import { describeDbError } from "@/lib/db-error";
 import { normalizePhoneNumber } from "@/lib/phone";
 import { contactMessageSchema, type ContactMessageInput } from "@/lib/validations/contact";
 import { resolveContact } from "@/server/contact";
@@ -100,7 +101,7 @@ export async function submitContactMessage(input: ContactMessageInput): Promise<
 
     return { ok: true };
   } catch (err) {
-    console.error("[submitContactMessage] failed", err);
+    console.error(`[submitContactMessage] failed: ${describeDbError(err)}`, err);
     return friendlyError();
   }
 }

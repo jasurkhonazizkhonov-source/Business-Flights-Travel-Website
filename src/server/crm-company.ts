@@ -25,8 +25,31 @@ import { prisma } from "@/lib/prisma";
 let cachedCompanyId: string | null = null;
 let pendingLookup: Promise<string> | null = null;
 
-export function getCrmCompanyId(): Promise<string> {
-  if (cachedCompanyId) return Promise.resolve(cachedCompanyId);
+// `async`, not a plain function returning a Promise: the lazy Prisma proxy
+// (src/lib/prisma.ts) throws SYNCHRONOUSLY, not as a rejection, the moment
+// a missing/unreachable DATABASE_URL is discovered on first property access
+// (e.g. `prisma.company` below) — that's intentional there, so a request
+// with no database dependency at all never pays for a connection attempt.
+// A plain function has no way to convert that synchronous throw into a
+// promise rejection on its own; only a function actually declared `async`
+// gets that conversion from the language itself. That distinction is
+// invisible when this is awaited directly (`await getCrmCompanyId()`
+// already runs inside another async function, which performs the same
+// conversion regardless), but it matters the moment this is called as a
+// bare expression alongside another async call — e.g.
+// `Promise.all([resolveContact(...), getCrmCompanyId()])` in
+// submit-contact-message.ts. There, `resolveContact(...)` starts first and
+// returns its (already-rejecting, since it also awaits this function)
+// promise; if the second array element then throws synchronously while
+// `Promise.all`'s argument list is still being evaluated, `Promise.all` is
+// never actually called — nothing ever attaches a handler to
+// `resolveContact`'s promise, and Node logs it as an unhandled rejection
+// even though the outer try/catch still runs (rejections need a consumer
+// to be marked "handled"; being unwound past by an unrelated synchronous
+// throw doesn't count). Declaring this `async` removes the synchronous
+// throw entirely, so it can no longer happen regardless of call site.
+export async function getCrmCompanyId(): Promise<string> {
+  if (cachedCompanyId) return cachedCompanyId;
   if (!pendingLookup) {
     pendingLookup = prisma.company
       .findFirst({ select: { id: true } })
