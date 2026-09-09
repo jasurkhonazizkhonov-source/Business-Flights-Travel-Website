@@ -40,6 +40,28 @@ import {
 // engine layer (host unreachable, auth failure, TLS, timeout), P2xxx is
 // the query layer (constraint violations, missing records), P3xxx is
 // migration-related. See https://www.prisma.io/docs/orm/reference/error-reference
+// Safe metadata ONLY — hostname, port, and database name, read via the
+// standard URL accessors that never touch `.username`/`.password`. This
+// exists specifically to answer "which database is this runtime actually
+// pointed at?" from inside Vercel's own runtime logs, without requiring
+// anyone to separately open the dashboard's Environment Variables page and
+// manually compare values by hand. Call it alongside describeDbError() in
+// each server action's catch block so the answer is already sitting in
+// the log the next time a database error is investigated, whatever the
+// cause. Never include this string, or any part of it, in a response sent
+// to the browser — same rule as describeDbError().
+export function describeDatabaseTarget(): string {
+  const url = process.env.DATABASE_URL;
+  if (!url) return "DATABASE_URL is not set in this runtime";
+  try {
+    const u = new URL(url);
+    const db = u.pathname.replace(/^\//, "") || "(no path)";
+    return `${u.hostname}:${u.port || "(default)"}/${db}`;
+  } catch {
+    return "DATABASE_URL is set but is not a valid URL";
+  }
+}
+
 export function describeDbError(err: unknown): string {
   if (err instanceof PrismaClientInitializationError) {
     // Thrown when the engine can't even start a connection — wrong host,

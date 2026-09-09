@@ -4,7 +4,7 @@ import { headers } from "next/headers";
 import { prisma } from "@/lib/prisma";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { isSpamSubmission } from "@/lib/anti-spam";
-import { describeDbError } from "@/lib/db-error";
+import { describeDbError, describeDatabaseTarget } from "@/lib/db-error";
 import { normalizePhoneNumber } from "@/lib/phone";
 import { findAirportByIata } from "@/data/airports";
 import { flightRequestSchema, type FlightRequestInput } from "@/lib/validations/flight-request";
@@ -183,7 +183,7 @@ export async function submitFlightRequest(input: FlightRequestInput): Promise<Su
     // (connectivity vs. constraint vs. config vs. app bug — see
     // src/lib/db-error.ts) scannable in Vercel's runtime logs without
     // having to parse the full stack trace on the line after it.
-    console.error(`[submitFlightRequest] failed: ${describeDbError(err)}`, err);
+    console.error(`[submitFlightRequest] failed: ${describeDbError(err)} | db target: ${describeDatabaseTarget()}`, err);
     return friendlyError();
   }
 }

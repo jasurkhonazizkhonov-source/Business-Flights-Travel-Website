@@ -11,7 +11,7 @@ import {
   PrismaClientKnownRequestError,
   PrismaClientValidationError,
 } from "@prisma/client/runtime/client";
-import { describeDbError } from "../src/lib/db-error";
+import { describeDbError, describeDatabaseTarget } from "../src/lib/db-error";
 
 // Regression coverage for the sanitized database-error categorization used
 // by all three server actions' catch blocks (submit-flight-request.ts,
@@ -90,5 +90,50 @@ test.describe("describeDbError", () => {
     const longMessage = "x".repeat(500);
     const description = describeDbError(new Error(longMessage));
     expect(description.length).toBeLessThan(250);
+  });
+});
+
+// describeDatabaseTarget() — answers "which database is this runtime
+// actually pointed at?" (host/port/dbname only) directly inside Vercel's
+// own runtime logs, specifically so that question never again requires a
+// separate manual comparison against the dashboard's Environment
+// Variables page. Manipulates process.env.DATABASE_URL directly; each
+// test restores the original value in a finally block so this can't leak
+// into other tests in the same worker.
+test.describe("describeDatabaseTarget", () => {
+  test("reports DATABASE_URL unset", () => {
+    const original = process.env.DATABASE_URL;
+    try {
+      delete process.env.DATABASE_URL;
+      expect(describeDatabaseTarget()).toBe("DATABASE_URL is not set in this runtime");
+    } finally {
+      if (original === undefined) delete process.env.DATABASE_URL;
+      else process.env.DATABASE_URL = original;
+    }
+  });
+
+  test("reports host, port, and database name — and NEVER the username or password, even when both are present in the URL", () => {
+    const original = process.env.DATABASE_URL;
+    try {
+      process.env.DATABASE_URL = "postgres://secretuser:secretpassword123@pg-example.aivencloud.com:24692/defaultdb?sslmode=require";
+      const description = describeDatabaseTarget();
+      expect(description).toBe("pg-example.aivencloud.com:24692/defaultdb");
+      expect(description).not.toContain("secretuser");
+      expect(description).not.toContain("secretpassword123");
+    } finally {
+      if (original === undefined) delete process.env.DATABASE_URL;
+      else process.env.DATABASE_URL = original;
+    }
+  });
+
+  test("reports a malformed DATABASE_URL safely rather than throwing", () => {
+    const original = process.env.DATABASE_URL;
+    try {
+      process.env.DATABASE_URL = "not a valid url at all";
+      expect(describeDatabaseTarget()).toBe("DATABASE_URL is set but is not a valid URL");
+    } finally {
+      if (original === undefined) delete process.env.DATABASE_URL;
+      else process.env.DATABASE_URL = original;
+    }
   });
 });

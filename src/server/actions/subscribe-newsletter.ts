@@ -4,7 +4,7 @@ import { randomUUID } from "crypto";
 import { headers } from "next/headers";
 import { prisma } from "@/lib/prisma";
 import { checkRateLimit } from "@/lib/rate-limit";
-import { describeDbError } from "@/lib/db-error";
+import { describeDbError, describeDatabaseTarget } from "@/lib/db-error";
 import { newsletterSchema, type NewsletterInput } from "@/lib/validations/newsletter";
 import { getCrmCompanyId } from "@/server/crm-company";
 
@@ -66,7 +66,7 @@ export async function subscribeToNewsletter(input: NewsletterInput): Promise<Sub
 
     return { ok: true, alreadySubscribed: false };
   } catch (err) {
-    console.error(`[subscribeToNewsletter] failed: ${describeDbError(err)}`, err);
+    console.error(`[subscribeToNewsletter] failed: ${describeDbError(err)} | db target: ${describeDatabaseTarget()}`, err);
     return { ok: false, error: "We're sorry, something went wrong. Please try again." };
   }
 }
