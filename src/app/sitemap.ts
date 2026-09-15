@@ -18,18 +18,30 @@ const staticRoutes: Array<{ path: string; priority: number; changeFrequency: Met
 ];
 
 export default function sitemap(): MetadataRoute.Sitemap {
-  const now = new Date();
-
+  // `lastModified` is deliberately omitted for static routes and
+  // destinations below, not set to "now" — this project has no genuine
+  // per-page last-updated tracking for either (destinations.ts has no
+  // timestamp field at all; static route content changes with ordinary
+  // commits, not on a schedule this file can see). Stamping every one of
+  // these 182 URLs (11 static + 171 destinations) with the current
+  // request/build time on every single deploy — when the overwhelming
+  // majority haven't actually changed — is exactly the anti-pattern
+  // Google Search Central warns against: it teaches crawlers that this
+  // sitemap's lastmod values aren't trustworthy, which can reduce how
+  // much weight Google gives them for re-crawl prioritization. Blog posts
+  // are the one case with a real, deliberately-maintained date (see
+  // BlogPost.updatedAt in src/data/blog-posts.ts) - that's kept, since
+  // it's an honest signal, not a generated one. `lastModified` is
+  // optional on every MetadataRoute.Sitemap entry, so omitting it here
+  // is valid Next.js/sitemap-spec output, not a workaround.
   return [
     ...staticRoutes.map((r) => ({
       url: `${SITE_URL}${r.path}`,
-      lastModified: now,
       changeFrequency: r.changeFrequency,
       priority: r.priority,
     })),
     ...destinations.map((d) => ({
       url: `${SITE_URL}${destinationPath(d)}`,
-      lastModified: now,
       changeFrequency: "monthly" as const,
       priority: d.featured ? 0.75 : 0.65,
     })),
