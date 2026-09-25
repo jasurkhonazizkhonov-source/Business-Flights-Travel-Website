@@ -89,6 +89,12 @@ export function describeDbError(err: unknown): string {
     // Our own thrown errors (see src/lib/prisma.ts, src/server/crm-company.ts)
     // use a distinct, greppable prefix specifically so this branch can name
     // them without string-matching arbitrary message text.
+    // Thrown by src/lib/schema-guard.ts (matched by name, not import, so this
+    // file stays dependency-light). Its messages are written to be safe to log.
+    if (err.name === "SchemaNotReadyError") {
+      const reason = (err as Error & { reason?: string }).reason ?? "unknown";
+      return `schema-guard (${reason}): ${err.message.slice(0, 240)}`;
+    }
     if (err.message.startsWith("DATABASE_URL is not set")) return "config: DATABASE_URL missing in this runtime";
     if (err.message.startsWith("No Company row found")) return "data: CRM database has no Company row (not bootstrapped)";
     return `${err.name}: ${err.message.slice(0, 200)}`;

@@ -10,6 +10,7 @@ import { findAirportByIata } from "@/data/airports";
 import { flightRequestSchema, type FlightRequestInput } from "@/lib/validations/flight-request";
 import { distributeNewWebsiteLead } from "@/server/lead-distribution";
 import { resolveContact } from "@/server/contact";
+import { ensureSchemaReady } from "@/server/schema-ready";
 
 export type SubmitFlightRequestResult =
   | {
@@ -79,6 +80,12 @@ export async function submitFlightRequest(input: FlightRequestInput): Promise<Su
   }
 
   try {
+    // This action writes Airport rows before it ever reaches getCrmCompanyId(),
+    // so the schema is verified here first (memoized per instance; see
+    // src/lib/schema-guard.ts). On an intentionally-new database with
+    // DATABASE_AUTO_INIT=true this initializes it and the request continues.
+    await ensureSchemaReady();
+
     const firstSegment = data.segments[0];
 
     // Validate the submitted IATA codes against our own application-owned

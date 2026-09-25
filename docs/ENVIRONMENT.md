@@ -38,6 +38,21 @@ Still set `DATABASE_URL` in your hosting provider's environment variables
 before real customers can submit forms — there's just no build-time
 ordering requirement to worry about anymore.
 
+## Database schema safety — `DATABASE_AUTO_INIT` (optional, unset by default)
+
+The website never owns the CRM schema: `prisma/migrations/` is a verbatim copy of the Compass Tools migration history, and `src/lib/migration-bundle.generated.ts` embeds that SQL for the runtime (regenerate with `npm run bundle:migrations`; a test fails if it drifts).
+
+Before a write path touches the database, `src/lib/schema-guard.ts` (wired in via `getCrmCompanyId()` and the flight-request action) classifies the connected database once per server instance:
+
+| State | Meaning | Behavior |
+|---|---|---|
+| healthy | all required CRM tables exist | nothing is created, altered or reset; the write proceeds |
+| empty | zero tables in `public` | **refused** unless `DATABASE_AUTO_INIT=true`; with it, the real migration history is applied under an advisory lock, the schema is re-verified, then the write proceeds in the same request |
+| partial | some, not all, CRM tables | always refused (never guessed at or replayed) |
+| unrelated | tables exist, none are CRM's | always refused (another application's database is never touched) |
+
+`DATABASE_AUTO_INIT=true` exists so a wrong or stale `DATABASE_URL` can never silently turn an unintended database into a working orphan CRM (this happened once in production). Leave it **unset** for the normal production deployment, whose `DATABASE_URL` points at the real, already-migrated CRM database. Set it only when you deliberately point a deployment at a brand-new, empty database, and remove it afterwards. The same gate applies to the Vercel build step (`scripts/vercel-build.mjs`). Refusals reach visitors as the usual generic error; the cause (plus the safe `db target:` host/port/dbname only) is in the server logs as `schema-guard (<reason>)`.
+
 ## Production site URL — not an environment variable
 
 `SITE_URL` in `src/lib/constants.ts` is a plain static constant

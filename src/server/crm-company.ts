@@ -1,5 +1,6 @@
 import "server-only";
 import { prisma } from "@/lib/prisma";
+import { ensureSchemaReady } from "@/server/schema-ready";
 
 // The CRM ("Compass Tools") is single-tenant per database — exactly one
 // Company row exists in any given connected PostgreSQL database, with an
@@ -50,6 +51,13 @@ let pendingLookup: Promise<string> | null = null;
 // throw entirely, so it can no longer happen regardless of call site.
 export async function getCrmCompanyId(): Promise<string> {
   if (cachedCompanyId) return cachedCompanyId;
+  // Verify the CRM schema exists BEFORE any write depends on it (see
+  // src/lib/schema-guard.ts): healthy -> nothing happens; intentionally-empty +
+  // DATABASE_AUTO_INIT=true -> initialized here, then this request proceeds;
+  // anything else (empty without opt-in, partial, unrelated) -> a safe,
+  // credential-free SchemaNotReadyError that the calling action turns into its
+  // generic customer-facing message. Memoized per instance after success.
+  await ensureSchemaReady();
   if (!pendingLookup) {
     pendingLookup = prisma.company
       .findFirst({ select: { id: true } })

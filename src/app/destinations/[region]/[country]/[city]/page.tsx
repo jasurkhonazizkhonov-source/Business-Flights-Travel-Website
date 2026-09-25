@@ -8,6 +8,7 @@ import { DestinationCard } from "@/components/destinations/DestinationCard";
 import { destinations, destinationPath, getDestination, regionLabel } from "@/data/destinations";
 import { blogPosts } from "@/data/blog-posts";
 import { SITE_URL } from "@/lib/constants";
+import { pickRelatedDestinations } from "@/lib/related-destinations";
 import { FARE_DISCLAIMER, formatFareUSD } from "@/lib/fares";
 
 // A small, fixed set of guides genuinely relevant to planning ANY
@@ -60,11 +61,9 @@ export default async function DestinationPage({ params }: PageProps<"/destinatio
   const destination = getDestination(region, country, city);
   if (!destination) notFound();
 
-  const related = destinations
-    .filter((d) => d.citySlug !== destination.citySlug && (d.region === destination.region || d.country === destination.country))
-    .slice(0, 4);
-  const relatedFallback =
-    related.length >= 4 ? related : [...related, ...destinations.filter((d) => d.citySlug !== destination.citySlug && !related.includes(d))].slice(0, 4);
+  // See src/lib/related-destinations.ts: spreads internal links across the whole
+  // catalog instead of every page in a region linking the same first four cities.
+  const relatedFallback = pickRelatedDestinations(destination, destinations, 4);
 
   const quoteHref = `/flights?to=${destination.iata}`;
 
