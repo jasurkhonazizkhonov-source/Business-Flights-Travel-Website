@@ -77,6 +77,9 @@ function validateDestinations() {
       citySlug: get(/citySlug: "([^"]+)"/),
       iata: get(/iata: "([^"]+)"/),
       heroImage: get(/heroImage: "([^"]+)"/),
+      businessTravel: get(/businessTravel: "([^"]+)"/),
+      bestTimeToVisit: get(/bestTimeToVisit: "([^"]+)"/),
+      flyingFromUS: get(/flyingFromUS: "([^"]+)"/),
     };
   });
 
@@ -112,6 +115,26 @@ function validateDestinations() {
   const missing = dests.filter((d) => !d.region || !d.country || !d.countrySlug || !d.city || !d.citySlug || !d.iata || !d.heroImage);
   if (missing.length) fail(`destinations missing required fields: ${missing.map((d) => d.city || "(unnamed)").join(", ")}`);
   else ok("every destination has region/country/city/iata/heroImage");
+
+  // Regression guard: a content-generation pass once left businessTravel
+  // ending with a duplicated, lowercased copy of bestTimeToVisit (e.g.
+  // "...service from Lufthansa. may through September offers...") on 98
+  // destinations — fixed by stripping the duplicate, not by inventing new
+  // text. Catches the same defect reappearing on any destination.
+  const dupedBusinessTravel = dests.filter(
+    (d) => d.businessTravel && d.bestTimeToVisit && d.businessTravel.toLowerCase().endsWith(d.bestTimeToVisit.toLowerCase()) && d.businessTravel.length > d.bestTimeToVisit.length,
+  );
+  if (dupedBusinessTravel.length) fail(`businessTravel duplicates bestTimeToVisit at the end for: ${dupedBusinessTravel.map((d) => d.city).join(", ")}`);
+  else ok("no destination's businessTravel field duplicates its bestTimeToVisit sentence");
+
+  // Regression guard for the two shared "Flying from the United States"
+  // templates 98 destinations used verbatim (fixed by naming the city/IATA
+  // already in each destination's own data, not by inventing route facts).
+  const flyingCounts = {};
+  for (const d of dests) if (d.flyingFromUS) flyingCounts[d.flyingFromUS] = (flyingCounts[d.flyingFromUS] || 0) + 1;
+  const sharedFlying = Object.entries(flyingCounts).filter(([, n]) => n > 1);
+  if (sharedFlying.length) fail(`flyingFromUS text is identical across multiple destinations (${sharedFlying.length} shared value(s), used ${sharedFlying.reduce((s, [, n]) => s + n, 0)} times total)`);
+  else ok(`every destination has a distinct flyingFromUS value (${dests.length}/${dests.length})`);
 
   return dests;
 }

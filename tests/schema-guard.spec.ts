@@ -211,6 +211,38 @@ test.describe("ensureSchema() against a real PostgreSQL engine", () => {
     await expect(ensureSchema({ db: runner, bundle: bad, autoInit: true })).rejects.toMatchObject({ reason: "partial_schema" });
   });
 
+  test("a LATE failure (after all REQUIRED_TABLES already exist) is reported healthy-with-pending, never silently treated as fully resolved, and is retried (not skipped) on the next opt-in call", async () => {
+    // In the real 54-migration history, every REQUIRED_TABLES member exists by
+    // migration ~32 ("marketing_agent_inquisitions_subscriptions", which adds
+    // Subscriber/ContactInquiry — the last of the 13). This proves the guard's
+    // behavior at exactly that real boundary: once all required tables exist,
+    // a failure further into the (CRM-internal, website-irrelevant) remainder
+    // must not silently look "fully done" — but must also not block the
+    // website, since every table IT needs is genuinely present and correct.
+    const boundaryIndex = MIGRATION_BUNDLE.findIndex((m) => m.name === "20260822150000_marketing_agent_inquiries_subscriptions");
+    expect(boundaryIndex).toBeGreaterThan(0);
+    const upToBoundary = MIGRATION_BUNDLE.slice(0, boundaryIndex + 1);
+    const brokenNext = { name: "zz_broken_after_boundary", sql: `SELECT * FROM table_that_does_not_exist` };
+    const bundleWithLateFailure = [...upToBoundary, brokenNext];
+
+    const { runner } = await newDb();
+    await expect(ensureSchema({ db: runner, bundle: bundleWithLateFailure, autoInit: true })).rejects.toMatchObject({ reason: "init_failed" });
+
+    // Next call (e.g. the next real website request): must report healthy —
+    // every REQUIRED_TABLES member exists — and must NOT hide that the bundle
+    // still has an unapplied entry.
+    const afterFailure = await inspectSchema(runner, bundleWithLateFailure);
+    expect(afterFailure.kind).toBe("healthy");
+    expect(afterFailure.pending).toEqual(["zz_broken_after_boundary"]);
+
+    const withoutOptIn = await ensureSchema({ db: runner, bundle: bundleWithLateFailure, autoInit: false });
+    expect(withoutOptIn).toMatchObject({ kind: "healthy", initialized: false, pendingNotApplied: ["zz_broken_after_boundary"] });
+    expect(await count(runner, "Company")).toBe(1); // website writes remain safe throughout
+
+    // With the opt-in, the guard retries the SAME failed migration (not silently skipped forever) and fails the same way again.
+    await expect(ensureSchema({ db: runner, bundle: bundleWithLateFailure, autoInit: true })).rejects.toMatchObject({ reason: "init_failed" });
+  });
+
   test("CONCURRENT initialization of a brand-new database: one caller initializes, the other finds it done — one Company, one full migration set, no errors", async () => {
     const { raw } = await newDb();
     // Emulated cross-session advisory lock (see file header).
