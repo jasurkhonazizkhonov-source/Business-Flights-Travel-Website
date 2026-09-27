@@ -58,6 +58,13 @@ async function verifyOnce(): Promise<void> {
     if (result.initialized) {
       console.warn(`[schema-guard] Initialized an empty database: ${result.appliedMigrations.length} migrations applied.`);
     }
+    if (result.repaired) {
+      // Schema repaired, NOT data recovered — a manually-deleted table's rows
+      // are gone regardless; see src/lib/schema-guard.ts's repairObjects() comment.
+      console.warn(
+        `[schema-guard] Repaired missing managed schema object(s): tables recreated = [${result.tablesRepaired.join(", ")}], objects added = ${result.objectsRepaired}. Pre-existing tables and data were not modified.`,
+      );
+    }
   } finally {
     await client.end().catch(() => undefined);
   }

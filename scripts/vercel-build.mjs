@@ -68,6 +68,19 @@
 //     conflict (checksum mismatch, or a table name collision with
 //     something unrelated already there) it fails loudly rather than
 //     guessing — never destructive, with or without the gate.
+//   - This step only ever runs `prisma migrate deploy`, which is NOT enough
+//     to catch a table manually dropped AFTER a successful deployment while
+//     `_prisma_migrations` still says every migration applied (it only
+//     replays migrations the tracking table doesn't already list as done —
+//     see src/lib/schema-guard.ts's own header for why). That harder case
+//     (and multi-table damage, missing indexes/constraints, etc.) is instead
+//     caught and safely repaired at REQUEST time by src/lib/schema-guard.ts
+//     (via ensureSchemaReady(), wired into getCrmCompanyId() and the flight-
+//     request action) — deliberately, since Vercel instances are ephemeral
+//     and scale to zero, so "checked once at build time" can't be the only
+//     line of defense against schema drift discovered later in a
+//     deployment's life. This script's job stays narrow: catch the
+//     genuinely-empty-database case (Case 2) before any traffic arrives.
 //   - This step is best-effort and NON-BLOCKING: if DATABASE_URL isn't
 //     set, the database is unreachable, or migrate deploy fails for any
 //     reason, this logs a clear (credential-free) message and the build
