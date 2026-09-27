@@ -1,4 +1,17 @@
-# SEO / indexing audit — 2026-09-24
+# SEO / indexing audit — 2026-09-24, updated 2026-09-27
+
+**2026-09-27 update**: deeper re-audit found and fixed two real, mechanical content defects (not visible from HTTP/canonical/metadata checks alone — found by actually reading the rendered page text). See [`gsc-affected-urls-2026-09-27.csv`](./gsc-affected-urls-2026-09-27.csv) for the current 127-row inventory (125 from the original GSC report + 2 URLs named in a later task that do not exist in this repository — see below).
+
+1. **`flyingFromUS`**: 98 of 171 destinations used one of two identical sentences verbatim, naming no city at all. Rewritten to include each destination's own city name and IATA code (already-verified data, nothing invented) — 171/171 now distinct.
+2. **`businessTravel`**: the same 98 destinations had this field end with a duplicated, lowercased copy of their own `bestTimeToVisit` sentence appended (a leftover from whatever process generated the original content). Removed; the genuine airline-tracking sentence is unchanged.
+
+Both are now guarded by `scripts/validate-content.mjs`. Near-duplicate similarity across destinations (re-measured live): max Jaccard 0.64 → 0.558, median 0.229 → 0.22 — a real but modest reduction, reported honestly rather than oversold.
+
+**Also verified, not fixed**: two blog URLs named in the 2026-09-27 task (`united-polaris-vs-american-flagship-business`, `qatar-qsuite-vs-emirates-business-class`) do not exist anywhere in this repository's git history and correctly 404. Not fabricated to match a list that appears to have included them in error.
+
+---
+
+# Original audit — 2026-09-24
 
 Generated with `node scripts/audit-seo-inventory.mjs <baseUrl> --gsc <gsc.json>` (read-only GETs) against
 production, plus `scripts/validate-seo.mjs`. Full per-URL results for the 125 URLs in the Search Console report:
