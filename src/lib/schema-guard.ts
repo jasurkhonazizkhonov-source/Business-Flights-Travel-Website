@@ -44,13 +44,13 @@ import { SCHEMA_SHAPE, ALL_SCHEMA_TABLES } from "@/lib/schema-shape.generated";
 //   needs_repair        every present table's OWN columns match SCHEMA_SHAPE,
 //                       but one or more required tables are entirely missing
 //                       and/or an existing required table is missing an
-//                       index/unique-constraint/foreign-key/primary-key ->
+//                       index/unique-constraint/foreign-key/primary-key/sequence ->
 //                       repaired ONLY when DATABASE_AUTO_INIT=true, and ONLY
 //                       the missing objects — existing tables, their data,
 //                       and unrelated objects are never touched. THIS
 //                       REPAIRS SCHEMA, NOT DATA: a manually-deleted table's
 //                       rows are gone; recreating the table does not bring
-//                       them back (see repairSchema()'s own comment).
+//                       them back (see repairObjects()'s own comment).
 //   unsafe_damage        a required table exists but a REQUIRED column is
 //                       missing or has a different type than expected ->
 //                       ALWAYS refused, regardless of the opt-in. Changing
@@ -180,6 +180,7 @@ export interface TableDiagnosis {
   exists: boolean;
   missingColumns: string[];
   mismatchedColumns: Array<{ column: string; expected: string; actual: string }>;
+  missingSequences: string[]; // sequence names a website-required column's default depends on
   missingPrimaryKey: boolean;
   missingUniqueConstraints: string[]; // names
   missingIndexes: string[]; // full CREATE INDEX statements still needed
@@ -237,7 +238,17 @@ function extractDdlColumns(sql: string): string[] {
 
 async function diagnoseTable(db: SqlRunner, table: string, exists: boolean): Promise<TableDiagnosis> {
   const shape = SCHEMA_SHAPE[table as keyof typeof SCHEMA_SHAPE];
-  const base: TableDiagnosis = { table, exists, missingColumns: [], mismatchedColumns: [], missingPrimaryKey: false, missingUniqueConstraints: [], missingIndexes: [], missingForeignKeys: [] };
+  const base: TableDiagnosis = {
+    table,
+    exists,
+    missingColumns: [],
+    mismatchedColumns: [],
+    missingSequences: [],
+    missingPrimaryKey: false,
+    missingUniqueConstraints: [],
+    missingIndexes: [],
+    missingForeignKeys: [],
+  };
   if (!exists) return base;
 
   const liveCols = new Map(
@@ -253,6 +264,13 @@ async function diagnoseTable(db: SqlRunner, table: string, exists: boolean): Pro
   // "unsafe damage" — see WEBSITE_REQUIRED_COLUMNS's comment for why the
   // full SCHEMA_SHAPE column list (the entire CRM schema for this table)
   // would be too broad and cause false refusals over CRM-only columns.
+  // Compared: existence and PostgreSQL's canonical type string
+  // (pg_catalog.format_type on BOTH sides, so formatting can never differ).
+  // Deliberately NOT compared: NOT NULL flags and DEFAULT expressions. The
+  // migration history documents hand-applied production migrations, so
+  // harmless looseness there is real; refusing website writes over it (the
+  // website supplies explicit values for every column it writes) would turn
+  // a cosmetic drift into an outage. Neither is ever auto-altered either.
   const requiredCols = WEBSITE_REQUIRED_COLUMNS[table] ?? shape.columns.map((c) => c.name);
   const byName = new Map(shape.columns.map((c) => [c.name, c.type]));
   for (const name of requiredCols) {
@@ -276,6 +294,20 @@ async function diagnoseTable(db: SqlRunner, table: string, exists: boolean): Pro
     const cols = extractDdlColumns(sql);
     return cols.length > 0 && cols.every((c) => requiredCols.includes(c));
   };
+
+  // A website-required column whose default depends on a sequence (e.g.
+  // Airport.id) needs that sequence to exist too — a plain `DROP TABLE ...
+  // CASCADE` drops an owned sequence along with the table (verified live),
+  // and even a standalone `DROP SEQUENCE ... CASCADE` strips the column's
+  // own DEFAULT clause on an otherwise-intact table. Both are covered:
+  // repairObjects recreates the sequence before the table when the table
+  // itself is missing, and reattaches the DEFAULT + ownership here when the
+  // table is intact but just the sequence is gone.
+  for (const seq of shape.sequences) {
+    if (!requiredCols.includes(seq.column)) continue;
+    const [seqExists] = await db.query(`SELECT to_regclass($1) IS NOT NULL AS exists`, [`"${seq.name}"`]);
+    if (!seqExists?.exists) base.missingSequences.push(seq.name);
+  }
 
   const liveConstraints = new Set(
     (await db.query(`SELECT conname FROM pg_constraint WHERE conrelid = $1::regclass`, [`"${table}"`])).map((r) => String(r.conname)),
@@ -325,7 +357,13 @@ export async function inspectSchema(db: SqlRunner, bundle: readonly BundledMigra
   const diagnoses = await Promise.all(REQUIRED_TABLES.map((t) => diagnoseTable(db, t, tables.has(t))));
   const hasUnsafeDamage = diagnoses.some((d) => d.missingColumns.length > 0 || d.mismatchedColumns.length > 0);
   const needsObjectRepair = diagnoses.some(
-    (d) => !d.exists || d.missingPrimaryKey || d.missingUniqueConstraints.length > 0 || d.missingIndexes.length > 0 || d.missingForeignKeys.length > 0,
+    (d) =>
+      !d.exists ||
+      d.missingSequences.length > 0 ||
+      d.missingPrimaryKey ||
+      d.missingUniqueConstraints.length > 0 ||
+      d.missingIndexes.length > 0 ||
+      d.missingForeignKeys.length > 0,
   );
 
   let kind: SchemaKind;
@@ -399,6 +437,17 @@ async function applyMigrations(db: SqlRunner, migrations: readonly BundledMigrat
 // how many tables in this batch were missing at once:
 //   phase 1: CREATE TABLE (if missing) + its own primary key
 //   phase 2: indexes, then unique constraints, then foreign keys
+// All of this function's DDL runs inside ONE PostgreSQL transaction.
+// PostgreSQL (unlike MySQL) supports fully transactional DDL — CREATE
+// TABLE/INDEX/SEQUENCE and ALTER TABLE ADD CONSTRAINT can all be rolled
+// back — so a multi-object repair (several missing tables, or a table plus
+// its indexes/constraints/sequence) either lands completely or not at all;
+// there is never a half-repaired state left visible to a concurrent
+// request or the next retry. If anything fails, ROLLBACK undoes every
+// statement this call made (not just the one that failed) before the
+// SchemaNotReadyError propagates, and the caller's mandatory re-inspection
+// (see ensureSchema) then sees the ORIGINAL damage, unchanged — so a retry
+// starts from a clean, accurate diagnosis rather than a partially-applied one.
 async function repairObjects(db: SqlRunner, diagnoses: readonly TableDiagnosis[]): Promise<{ tablesCreated: string[]; objectsAdded: number }> {
   const tablesCreated: string[] = [];
   let objectsAdded = 0;
@@ -407,41 +456,79 @@ async function repairObjects(db: SqlRunner, diagnoses: readonly TableDiagnosis[]
       await db.exec(sql);
       objectsAdded++;
     } catch (err) {
-      throw new SchemaNotReadyError("repair_failed", `Repair failed while adding ${label}. No existing data was modified by this attempt.`, { cause: err });
+      throw new SchemaNotReadyError("repair_failed", `Repair failed while adding ${label}. Every change this repair attempt made has been rolled back — no existing data or partially-created object was left behind.`, { cause: err });
     }
   };
 
-  for (const d of diagnoses) {
-    if (d.exists) continue;
-    const shape = SCHEMA_SHAPE[d.table as keyof typeof SCHEMA_SHAPE];
-    await run(`table "${d.table}"`, shape.createTable);
-    if (shape.primaryKey) await run(`primary key on "${d.table}"`, shape.primaryKey.sql);
-    tablesCreated.push(d.table);
-  }
-  for (const d of diagnoses) {
-    const shape = SCHEMA_SHAPE[d.table as keyof typeof SCHEMA_SHAPE];
-    const wasCreated = tablesCreated.includes(d.table);
-    const indexesNeeded = wasCreated ? shape.indexes : d.missingIndexes;
-    for (const idxSql of indexesNeeded) await run(`index on "${d.table}"`, idxSql);
-    if (wasCreated || d.missingPrimaryKey) {
-      // primary key for a just-created table was already added above; this only covers
-      // the (rare) case of an EXISTING table that is somehow missing just its primary key.
-      if (!wasCreated && d.missingPrimaryKey && shape.primaryKey) await run(`primary key on "${d.table}"`, shape.primaryKey.sql);
+  await db.exec("BEGIN");
+  try {
+    // Phase 0: sequences a missing table's own DEFAULT clause will reference
+    // (must exist before CREATE TABLE runs), plus sequences for EXISTING
+    // tables that specifically lost theirs (e.g. `DROP SEQUENCE ... CASCADE`
+    // without touching the table) — recreated and reattached in place.
+    for (const d of diagnoses) {
+      const shape = SCHEMA_SHAPE[d.table as keyof typeof SCHEMA_SHAPE];
+      const seqsNeeded = !d.exists ? shape.sequences : shape.sequences.filter((s) => d.missingSequences.includes(s.name));
+      for (const seq of seqsNeeded) {
+        await run(`sequence "${seq.name}" on "${d.table}"`, seq.createSequence);
+        if (d.exists) {
+          await run(`default on "${d.table}"."${seq.column}"`, seq.setDefault); // a missing table's createTable already embeds the DEFAULT
+          // The table kept its rows, so the fresh sequence must start AFTER
+          // the highest existing id, or the next insert would collide with
+          // (and be rejected by) an existing primary key. Read-only on the
+          // table's data; only moves the sequence.
+          await run(
+            `next value of "${seq.name}"`,
+            `SELECT setval('"${seq.name}"'::regclass, COALESCE((SELECT MAX("${seq.column}") FROM "${d.table}"), 0) + 1, false)`,
+          );
+        }
+      }
     }
-    const uniquesNeeded = wasCreated ? shape.uniqueConstraints.map((c) => c.name) : d.missingUniqueConstraints;
-    for (const name of uniquesNeeded) {
-      const c = shape.uniqueConstraints.find((u) => u.name === name);
-      if (c) await run(`unique constraint "${name}" on "${d.table}"`, c.sql);
+
+    for (const d of diagnoses) {
+      if (d.exists) continue;
+      const shape = SCHEMA_SHAPE[d.table as keyof typeof SCHEMA_SHAPE];
+      await run(`table "${d.table}"`, shape.createTable);
+      if (shape.primaryKey) await run(`primary key on "${d.table}"`, shape.primaryKey.sql);
+      tablesCreated.push(d.table);
     }
-  }
-  for (const d of diagnoses) {
-    const shape = SCHEMA_SHAPE[d.table as keyof typeof SCHEMA_SHAPE];
-    const wasCreated = tablesCreated.includes(d.table);
-    const fksNeeded = wasCreated ? shape.foreignKeys.map((c) => c.name) : d.missingForeignKeys;
-    for (const name of fksNeeded) {
-      const c = shape.foreignKeys.find((f) => f.name === name);
-      if (c) await run(`foreign key "${name}" on "${d.table}"`, c.sql);
+    // Sequence ownership needs both the sequence and the table's column to
+    // already exist, so it runs after table creation, for every sequence
+    // touched above (new tables and sequence-only repairs alike).
+    for (const d of diagnoses) {
+      const shape = SCHEMA_SHAPE[d.table as keyof typeof SCHEMA_SHAPE];
+      const seqsNeeded = !d.exists ? shape.sequences : shape.sequences.filter((s) => d.missingSequences.includes(s.name));
+      for (const seq of seqsNeeded) await run(`ownership of "${seq.name}"`, seq.setOwnership);
     }
+    for (const d of diagnoses) {
+      const shape = SCHEMA_SHAPE[d.table as keyof typeof SCHEMA_SHAPE];
+      const wasCreated = tablesCreated.includes(d.table);
+      const indexesNeeded = wasCreated ? shape.indexes : d.missingIndexes;
+      for (const idxSql of indexesNeeded) await run(`index on "${d.table}"`, idxSql);
+      if (!wasCreated && d.missingPrimaryKey && shape.primaryKey) {
+        // primary key for a just-created table was already added above; this only covers
+        // the (rare) case of an EXISTING table that is somehow missing just its primary key.
+        await run(`primary key on "${d.table}"`, shape.primaryKey.sql);
+      }
+      const uniquesNeeded = wasCreated ? shape.uniqueConstraints.map((c) => c.name) : d.missingUniqueConstraints;
+      for (const name of uniquesNeeded) {
+        const c = shape.uniqueConstraints.find((u) => u.name === name);
+        if (c) await run(`unique constraint "${name}" on "${d.table}"`, c.sql);
+      }
+    }
+    for (const d of diagnoses) {
+      const shape = SCHEMA_SHAPE[d.table as keyof typeof SCHEMA_SHAPE];
+      const wasCreated = tablesCreated.includes(d.table);
+      const fksNeeded = wasCreated ? shape.foreignKeys.map((c) => c.name) : d.missingForeignKeys;
+      for (const name of fksNeeded) {
+        const c = shape.foreignKeys.find((f) => f.name === name);
+        if (c) await run(`foreign key "${name}" on "${d.table}"`, c.sql);
+      }
+    }
+    await db.exec("COMMIT");
+  } catch (err) {
+    await db.exec("ROLLBACK").catch(() => undefined);
+    throw err;
   }
   return { tablesCreated, objectsAdded };
 }

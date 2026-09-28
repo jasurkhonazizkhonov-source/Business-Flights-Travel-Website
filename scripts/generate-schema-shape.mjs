@@ -99,14 +99,55 @@ async function buildShape() {
       return `"${c.name}" ${c.type}${notNull}${def}`;
     });
 
+    // A column whose default is `nextval('"Seq"'::regclass)` (Prisma's
+    // `@default(autoincrement())`, e.g. Airport.id) depends on a real
+    // sequence object that a plain `DROP TABLE ... CASCADE` ALSO drops —
+    // proven live: dropping Airport this way removes Airport_id_seq too,
+    // and Postgres additionally strips the column's own DEFAULT clause
+    // when the sequence it references is dropped. Recreating the table
+    // from `createTable` alone would then fail (`relation "Airport_id_seq"
+    // does not exist`), and even if it somehow existed, the column would
+    // silently lose its auto-increment default. Capturing each such
+    // sequence's real parameters (not assumed 1/1/unbounded defaults) lets
+    // repair recreate the sequence AND reattach both the DEFAULT and
+    // ownership before the table's own constraints are added.
+    const sequences = [];
+    for (const c of cols) {
+      const seqMatch = typeof c.default_expr === "string" && c.default_expr.match(/nextval\('"?([^'"]+)"?'::regclass\)/);
+      if (!seqMatch) continue;
+      const seqName = seqMatch[1];
+      const [seqRow] = (
+        await db.query(
+          `SELECT start_value, increment_by, min_value, max_value, cache_size, cycle, data_type
+           FROM pg_sequences WHERE schemaname = 'public' AND sequencename = $1`,
+          [seqName],
+        )
+      ).rows;
+      if (!seqRow) continue; // defensive: default references a sequence that isn't (or is no longer) in pg_sequences
+      sequences.push({
+        column: c.name,
+        name: seqName,
+        createSequence:
+          `CREATE SEQUENCE IF NOT EXISTS "${seqName}" AS ${seqRow.data_type} START WITH ${seqRow.start_value} ` +
+          `INCREMENT BY ${seqRow.increment_by} MINVALUE ${seqRow.min_value} MAXVALUE ${seqRow.max_value} ` +
+          `CACHE ${seqRow.cache_size}${seqRow.cycle ? " CYCLE" : " NO CYCLE"};`,
+        setDefault: `ALTER TABLE "${table}" ALTER COLUMN "${c.name}" SET DEFAULT nextval('"${seqName}"'::regclass);`,
+        setOwnership: `ALTER SEQUENCE "${seqName}" OWNED BY "${table}"."${c.name}";`,
+      });
+    }
+
     shape[table] = {
       columns: cols.map((c) => ({ name: c.name, type: c.type, notNull: c.not_null })),
       createTable: `CREATE TABLE IF NOT EXISTS "${table}" (\n  ${colDefs.join(",\n  ")}\n)`,
-      // Applied in this order during repair: primary key first (other
-      // constraints/indexes may depend on it), then unique, then indexes
-      // (plain, non-constraint-backed), then foreign keys last (they
-      // reference other tables' primary/unique keys, which must exist by
-      // then — see schema-guard.ts's two-phase repair).
+      // Applied in this order during repair: sequences first (a column's
+      // own DEFAULT, embedded in createTable, references them by name),
+      // then the table itself, then primary key (other constraints/indexes
+      // may depend on it), then unique, then indexes (plain, non-
+      // constraint-backed), then foreign keys last (they reference other
+      // tables' primary/unique keys, which must exist by then), then
+      // sequence ownership (needs both the sequence and the table's column
+      // to already exist) — see schema-guard.ts's repair phases.
+      sequences,
       primaryKey: constraints.find((c) => c.type === "p") ? toAddConstraint(table, constraints.find((c) => c.type === "p")) : null,
       uniqueConstraints: constraints.filter((c) => c.type === "u").map((c) => toAddConstraint(table, c)),
       indexes: indexes.map((i) => i.def + ";"),
@@ -135,9 +176,17 @@ function render({ shape, allTables }) {
     "  type: string;",
     "  notNull: boolean;",
     "}",
+    "export interface SequenceShape {",
+    "  column: string;",
+    "  name: string;",
+    "  createSequence: string;",
+    "  setDefault: string;",
+    "  setOwnership: string;",
+    "}",
     "export interface TableShape {",
     "  columns: ColumnShape[];",
     "  createTable: string;",
+    "  sequences: SequenceShape[];",
     "  primaryKey: AddConstraint | null;",
     "  uniqueConstraints: AddConstraint[];",
     "  indexes: string[];",

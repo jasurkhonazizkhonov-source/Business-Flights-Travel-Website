@@ -7,6 +7,7 @@ import { checkRateLimit } from "@/lib/rate-limit";
 import { describeDbError, describeDatabaseTarget } from "@/lib/db-error";
 import { newsletterSchema, type NewsletterInput } from "@/lib/validations/newsletter";
 import { getCrmCompanyId } from "@/server/crm-company";
+import { noteWriteFailure } from "@/server/schema-ready";
 
 export type SubscribeNewsletterResult = { ok: true; alreadySubscribed: boolean } | { ok: false; error: string };
 
@@ -66,6 +67,7 @@ export async function subscribeToNewsletter(input: NewsletterInput): Promise<Sub
 
     return { ok: true, alreadySubscribed: false };
   } catch (err) {
+    noteWriteFailure(err);
     console.error(`[subscribeToNewsletter] failed: ${describeDbError(err)} | db target: ${describeDatabaseTarget()}`, err);
     return { ok: false, error: "We're sorry, something went wrong. Please try again." };
   }

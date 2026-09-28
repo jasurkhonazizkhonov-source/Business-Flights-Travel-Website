@@ -9,6 +9,7 @@ import { normalizePhoneNumber } from "@/lib/phone";
 import { contactMessageSchema, type ContactMessageInput } from "@/lib/validations/contact";
 import { resolveContact } from "@/server/contact";
 import { getCrmCompanyId } from "@/server/crm-company";
+import { noteWriteFailure } from "@/server/schema-ready";
 
 export type SubmitContactMessageResult = { ok: true } | { ok: false; error: string; fieldErrors?: Record<string, string> };
 
@@ -101,6 +102,7 @@ export async function submitContactMessage(input: ContactMessageInput): Promise<
 
     return { ok: true };
   } catch (err) {
+    noteWriteFailure(err);
     console.error(`[submitContactMessage] failed: ${describeDbError(err)} | db target: ${describeDatabaseTarget()}`, err);
     return friendlyError();
   }

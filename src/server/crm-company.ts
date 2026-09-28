@@ -50,7 +50,14 @@ let pendingLookup: Promise<string> | null = null;
 // throw doesn't count). Declaring this `async` removes the synchronous
 // throw entirely, so it can no longer happen regardless of call site.
 export async function getCrmCompanyId(): Promise<string> {
-  if (cachedCompanyId) return cachedCompanyId;
+  // The guard is consulted on EVERY call (a memo lookup that only re-inspects
+  // the database once per revalidation window — see src/lib/readiness-cache.ts),
+  // not just the first: the cached Company id must never let a warm instance
+  // skip noticing that a managed table was dropped later.
+  if (cachedCompanyId) {
+    await ensureSchemaReady();
+    return cachedCompanyId;
+  }
   // Verify the CRM schema exists BEFORE any write depends on it (see
   // src/lib/schema-guard.ts): healthy -> nothing happens; intentionally-empty +
   // DATABASE_AUTO_INIT=true -> initialized here, then this request proceeds;

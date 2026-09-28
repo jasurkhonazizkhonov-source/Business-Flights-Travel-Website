@@ -2,6 +2,8 @@ import "server-only";
 import { Client } from "pg";
 import { MIGRATION_BUNDLE } from "@/lib/migration-bundle.generated";
 import { ensureSchema, type SqlRunner } from "@/lib/schema-guard";
+import { describeDatabaseTarget } from "@/lib/db-error";
+import { createReadinessCache, isMissingSchemaObjectError } from "@/lib/readiness-cache";
 
 // Runtime wiring for src/lib/schema-guard.ts — see that file for the full
 // safety model. Called from getCrmCompanyId() (src/server/crm-company.ts),
@@ -17,7 +19,11 @@ import { ensureSchema, type SqlRunner } from "@/lib/schema-guard";
 // The connection budget on the shared Postgres is small, so this uses a
 // single plain client and always closes it.
 
-let ready: Promise<void> | null = null;
+// A verified-healthy result is trusted for this long per instance, then re-inspected
+// (see src/lib/readiness-cache.ts). The database stays authoritative: a table
+// dropped later is noticed within this window, or immediately after a write
+// fails with a missing-relation error (noteWriteFailure below).
+const REVALIDATE_MS = 5 * 60 * 1000;
 
 function connectionOptions(): { connectionString: string; ssl: { rejectUnauthorized: boolean }; connectionTimeoutMillis: number } {
   const databaseUrl = process.env.DATABASE_URL;
@@ -45,7 +51,7 @@ async function verifyOnce(): Promise<void> {
       db: runner,
       bundle: MIGRATION_BUNDLE,
       autoInit: process.env.DATABASE_AUTO_INIT === "true",
-      log: (m) => console.warn(m),
+      log: (m) => console.warn(`${m} | db target: ${describeDatabaseTarget()}`),
     });
     if (result.pendingNotApplied.length > 0) {
       // Healthy schema, but the bundled history lists migrations this database
@@ -56,13 +62,13 @@ async function verifyOnce(): Promise<void> {
       );
     }
     if (result.initialized) {
-      console.warn(`[schema-guard] Initialized an empty database: ${result.appliedMigrations.length} migrations applied.`);
+      console.warn(`[schema-guard] Initialized an empty database: ${result.appliedMigrations.length} migrations applied. | db target: ${describeDatabaseTarget()}`);
     }
     if (result.repaired) {
       // Schema repaired, NOT data recovered — a manually-deleted table's rows
       // are gone regardless; see src/lib/schema-guard.ts's repairObjects() comment.
       console.warn(
-        `[schema-guard] Repaired missing managed schema object(s): tables recreated = [${result.tablesRepaired.join(", ")}], objects added = ${result.objectsRepaired}. Pre-existing tables and data were not modified.`,
+        `[schema-guard] Repaired missing managed schema object(s): tables recreated = [${result.tablesRepaired.join(", ")}], objects added = ${result.objectsRepaired}. Pre-existing tables and data were not modified. | db target: ${describeDatabaseTarget()}`,
       );
     }
   } finally {
@@ -70,12 +76,13 @@ async function verifyOnce(): Promise<void> {
   }
 }
 
+const cache = createReadinessCache({ ttlMs: REVALIDATE_MS, verify: verifyOnce });
+
 export function ensureSchemaReady(): Promise<void> {
-  if (!ready) {
-    ready = verifyOnce().catch((err) => {
-      ready = null; // never memoize a failure
-      throw err;
-    });
-  }
-  return ready;
+  return cache.ensure();
+}
+
+/** Call from a write path's catch block: a missing table/column error drops the memo so the next request re-inspects (and, if permitted, repairs). */
+export function noteWriteFailure(err: unknown): void {
+  if (isMissingSchemaObjectError(err)) cache.invalidate();
 }

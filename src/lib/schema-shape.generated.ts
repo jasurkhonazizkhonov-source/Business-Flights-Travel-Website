@@ -10,9 +10,17 @@ export interface ColumnShape {
   type: string;
   notNull: boolean;
 }
+export interface SequenceShape {
+  column: string;
+  name: string;
+  createSequence: string;
+  setDefault: string;
+  setOwnership: string;
+}
 export interface TableShape {
   columns: ColumnShape[];
   createTable: string;
+  sequences: SequenceShape[];
   primaryKey: AddConstraint | null;
   uniqueConstraints: AddConstraint[];
   indexes: string[];
@@ -99,6 +107,7 @@ export const SCHEMA_SHAPE: Readonly<Record<string, TableShape>> = {
       }
     ],
     "createTable": "CREATE TABLE IF NOT EXISTS \"Company\" (\n  \"id\" text NOT NULL,\n  \"name\" text NOT NULL,\n  \"website\" text,\n  \"phone\" text,\n  \"brandColor\" text,\n  \"logoOriginalUrl\" text,\n  \"logoEmailUrl\" text,\n  \"logoWebUrl\" text,\n  \"logoIconUrl\" text,\n  \"logoProcessingStatus\" \"LogoProcessingStatus\" NOT NULL DEFAULT 'NONE'::\"LogoProcessingStatus\",\n  \"logoProcessingError\" text,\n  \"signatureTemplate\" text NOT NULL,\n  \"createdAt\" timestamp(3) without time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,\n  \"updatedAt\" timestamp(3) without time zone NOT NULL,\n  \"logoEmailData\" bytea\n)",
+    "sequences": [],
     "primaryKey": {
       "name": "Company_pkey",
       "sql": "ALTER TABLE \"Company\" ADD CONSTRAINT \"Company_pkey\" PRIMARY KEY (id);"
@@ -211,6 +220,7 @@ export const SCHEMA_SHAPE: Readonly<Record<string, TableShape>> = {
       }
     ],
     "createTable": "CREATE TABLE IF NOT EXISTS \"Account\" (\n  \"id\" text NOT NULL,\n  \"fullName\" text NOT NULL,\n  \"email\" text NOT NULL,\n  \"phone\" text,\n  \"role\" \"AccountRole\" NOT NULL DEFAULT 'TRAVEL_AGENT'::\"AccountRole\",\n  \"status\" \"AccountStatus\" NOT NULL DEFAULT 'ACTIVE'::\"AccountStatus\",\n  \"avatarUrl\" text,\n  \"lastSeenAt\" timestamp(3) without time zone,\n  \"createdAt\" timestamp(3) without time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,\n  \"updatedAt\" timestamp(3) without time zone NOT NULL,\n  \"hiredAt\" timestamp(3) without time zone,\n  \"paymentPermissions\" text[] DEFAULT ARRAY[]::text[],\n  \"bookingPermissions\" text[] DEFAULT ARRAY[]::text[],\n  \"activeSessionId\" text,\n  \"sessionCreatedAt\" timestamp(3) without time zone,\n  \"companyId\" text NOT NULL,\n  \"location\" text,\n  \"commissionPercent\" numeric(5,2),\n  \"tipPercent\" numeric(5,2),\n  \"accountsVisible\" boolean NOT NULL DEFAULT true\n)",
+    "sequences": [],
     "primaryKey": {
       "name": "Account_pkey",
       "sql": "ALTER TABLE \"Account\" ADD CONSTRAINT \"Account_pkey\" PRIMARY KEY (id);"
@@ -284,6 +294,7 @@ export const SCHEMA_SHAPE: Readonly<Record<string, TableShape>> = {
       }
     ],
     "createTable": "CREATE TABLE IF NOT EXISTS \"Contact\" (\n  \"id\" text NOT NULL,\n  \"firstName\" text NOT NULL,\n  \"middleName\" text,\n  \"lastName\" text NOT NULL,\n  \"primaryPhone\" text,\n  \"primaryEmail\" text,\n  \"createdAt\" timestamp(3) without time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,\n  \"updatedAt\" timestamp(3) without time zone NOT NULL,\n  \"ownerId\" text,\n  \"companyId\" text NOT NULL\n)",
+    "sequences": [],
     "primaryKey": {
       "name": "Contact_pkey",
       "sql": "ALTER TABLE \"Contact\" ADD CONSTRAINT \"Contact_pkey\" PRIMARY KEY (id);"
@@ -342,6 +353,7 @@ export const SCHEMA_SHAPE: Readonly<Record<string, TableShape>> = {
       }
     ],
     "createTable": "CREATE TABLE IF NOT EXISTS \"ContactEmail\" (\n  \"id\" text NOT NULL,\n  \"contactId\" text NOT NULL,\n  \"email\" text NOT NULL,\n  \"type\" \"ContactEmailType\" NOT NULL DEFAULT 'PERSONAL'::\"ContactEmailType\",\n  \"isPrimary\" boolean NOT NULL DEFAULT false,\n  \"createdAt\" timestamp(3) without time zone NOT NULL DEFAULT CURRENT_TIMESTAMP\n)",
+    "sequences": [],
     "primaryKey": {
       "name": "ContactEmail_pkey",
       "sql": "ALTER TABLE \"ContactEmail\" ADD CONSTRAINT \"ContactEmail_pkey\" PRIMARY KEY (id);"
@@ -392,6 +404,7 @@ export const SCHEMA_SHAPE: Readonly<Record<string, TableShape>> = {
       }
     ],
     "createTable": "CREATE TABLE IF NOT EXISTS \"ContactPhone\" (\n  \"id\" text NOT NULL,\n  \"contactId\" text NOT NULL,\n  \"number\" text NOT NULL,\n  \"type\" \"PhoneType\" NOT NULL DEFAULT 'MOBILE'::\"PhoneType\",\n  \"isPrimary\" boolean NOT NULL DEFAULT false,\n  \"createdAt\" timestamp(3) without time zone NOT NULL DEFAULT CURRENT_TIMESTAMP\n)",
+    "sequences": [],
     "primaryKey": {
       "name": "ContactPhone_pkey",
       "sql": "ALTER TABLE \"ContactPhone\" ADD CONSTRAINT \"ContactPhone_pkey\" PRIMARY KEY (id);"
@@ -482,6 +495,7 @@ export const SCHEMA_SHAPE: Readonly<Record<string, TableShape>> = {
       }
     ],
     "createTable": "CREATE TABLE IF NOT EXISTS \"ContactInquiry\" (\n  \"id\" text NOT NULL,\n  \"companyId\" text NOT NULL,\n  \"firstName\" text NOT NULL,\n  \"lastName\" text NOT NULL,\n  \"email\" text NOT NULL,\n  \"phone\" text,\n  \"subject\" \"InquirySubject\" NOT NULL,\n  \"message\" text NOT NULL,\n  \"status\" \"InquiryStatus\" NOT NULL DEFAULT 'NEW'::\"InquiryStatus\",\n  \"assignedAdminId\" text,\n  \"readAt\" timestamp(3) without time zone,\n  \"matchedContactId\" text,\n  \"createdAt\" timestamp(3) without time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,\n  \"updatedAt\" timestamp(3) without time zone NOT NULL\n)",
+    "sequences": [],
     "primaryKey": {
       "name": "ContactInquiry_pkey",
       "sql": "ALTER TABLE \"ContactInquiry\" ADD CONSTRAINT \"ContactInquiry_pkey\" PRIMARY KEY (id);"
@@ -641,6 +655,7 @@ export const SCHEMA_SHAPE: Readonly<Record<string, TableShape>> = {
       }
     ],
     "createTable": "CREATE TABLE IF NOT EXISTS \"Lead\" (\n  \"id\" text NOT NULL,\n  \"contactId\" text NOT NULL,\n  \"departureAirportId\" integer,\n  \"arrivalAirportId\" integer,\n  \"departureDate\" timestamp(3) without time zone,\n  \"returnDate\" timestamp(3) without time zone,\n  \"tripType\" \"TripType\" NOT NULL DEFAULT 'ROUND_TRIP'::\"TripType\",\n  \"cabinClass\" \"CabinClass\" NOT NULL DEFAULT 'ECONOMY'::\"CabinClass\",\n  \"adults\" integer NOT NULL DEFAULT 1,\n  \"children\" integer NOT NULL DEFAULT 0,\n  \"infants\" integer NOT NULL DEFAULT 0,\n  \"flexibleDates\" boolean NOT NULL DEFAULT false,\n  \"preferredAirline\" text,\n  \"budget\" numeric(10,2),\n  \"notes\" text,\n  \"status\" \"LeadStatus\" NOT NULL DEFAULT 'ATTEMPTING_TO_CONTACT'::\"LeadStatus\",\n  \"source\" \"LeadSource\" NOT NULL DEFAULT 'WEBSITE'::\"LeadSource\",\n  \"priority\" \"Priority\" NOT NULL DEFAULT 'MEDIUM'::\"Priority\",\n  \"assignedAgentId\" text,\n  \"createdAt\" timestamp(3) without time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,\n  \"updatedAt\" timestamp(3) without time zone NOT NULL,\n  \"queueDistributedAt\" timestamp(3) without time zone,\n  \"referredByContactId\" text,\n  \"offeredToId\" text,\n  \"offeredAt\" timestamp(3) without time zone,\n  \"offerExpiresAt\" timestamp(3) without time zone\n)",
+    "sequences": [],
     "primaryKey": {
       "name": "Lead_pkey",
       "sql": "ALTER TABLE \"Lead\" ADD CONSTRAINT \"Lead_pkey\" PRIMARY KEY (id);"
@@ -725,6 +740,7 @@ export const SCHEMA_SHAPE: Readonly<Record<string, TableShape>> = {
       }
     ],
     "createTable": "CREATE TABLE IF NOT EXISTS \"LeadStatusHistory\" (\n  \"id\" text NOT NULL,\n  \"leadId\" text NOT NULL,\n  \"fromStatus\" \"LeadStatus\",\n  \"toStatus\" \"LeadStatus\" NOT NULL,\n  \"changedById\" text,\n  \"note\" text,\n  \"changedAt\" timestamp(3) without time zone NOT NULL DEFAULT CURRENT_TIMESTAMP\n)",
+    "sequences": [],
     "primaryKey": {
       "name": "LeadStatusHistory_pkey",
       "sql": "ALTER TABLE \"LeadStatusHistory\" ADD CONSTRAINT \"LeadStatusHistory_pkey\" PRIMARY KEY (id);"
@@ -783,6 +799,7 @@ export const SCHEMA_SHAPE: Readonly<Record<string, TableShape>> = {
       }
     ],
     "createTable": "CREATE TABLE IF NOT EXISTS \"LeadQueueEntry\" (\n  \"id\" text NOT NULL,\n  \"accountId\" text NOT NULL,\n  \"isActive\" boolean NOT NULL DEFAULT true,\n  \"joinedAt\" timestamp(3) without time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,\n  \"lastAssignedAt\" timestamp(3) without time zone,\n  \"leadsAssignedCount\" integer NOT NULL DEFAULT 0,\n  \"updatedAt\" timestamp(3) without time zone NOT NULL\n)",
+    "sequences": [],
     "primaryKey": {
       "name": "LeadQueueEntry_pkey",
       "sql": "ALTER TABLE \"LeadQueueEntry\" ADD CONSTRAINT \"LeadQueueEntry_pkey\" PRIMARY KEY (id);"
@@ -854,6 +871,7 @@ export const SCHEMA_SHAPE: Readonly<Record<string, TableShape>> = {
       }
     ],
     "createTable": "CREATE TABLE IF NOT EXISTS \"Activity\" (\n  \"id\" text NOT NULL,\n  \"contactId\" text,\n  \"leadId\" text,\n  \"quoteId\" text,\n  \"bookingId\" text,\n  \"actorId\" text,\n  \"type\" text NOT NULL,\n  \"description\" text NOT NULL,\n  \"metadata\" jsonb,\n  \"createdAt\" timestamp(3) without time zone NOT NULL DEFAULT CURRENT_TIMESTAMP\n)",
+    "sequences": [],
     "primaryKey": {
       "name": "Activity_pkey",
       "sql": "ALTER TABLE \"Activity\" ADD CONSTRAINT \"Activity_pkey\" PRIMARY KEY (id);"
@@ -943,6 +961,15 @@ export const SCHEMA_SHAPE: Readonly<Record<string, TableShape>> = {
       }
     ],
     "createTable": "CREATE TABLE IF NOT EXISTS \"Airport\" (\n  \"id\" integer NOT NULL DEFAULT nextval('\"Airport_id_seq\"'::regclass),\n  \"iata\" text NOT NULL,\n  \"icao\" text,\n  \"name\" text NOT NULL,\n  \"city\" text NOT NULL,\n  \"country\" text NOT NULL,\n  \"countryCode\" text,\n  \"timezone\" text,\n  \"latitude\" double precision,\n  \"longitude\" double precision\n)",
+    "sequences": [
+      {
+        "column": "id",
+        "name": "Airport_id_seq",
+        "createSequence": "CREATE SEQUENCE IF NOT EXISTS \"Airport_id_seq\" AS integer START WITH 1 INCREMENT BY 1 MINVALUE 1 MAXVALUE 2147483647 CACHE 1 NO CYCLE;",
+        "setDefault": "ALTER TABLE \"Airport\" ALTER COLUMN \"id\" SET DEFAULT nextval('\"Airport_id_seq\"'::regclass);",
+        "setOwnership": "ALTER SEQUENCE \"Airport_id_seq\" OWNED BY \"Airport\".\"id\";"
+      }
+    ],
     "primaryKey": {
       "name": "Airport_pkey",
       "sql": "ALTER TABLE \"Airport\" ADD CONSTRAINT \"Airport_pkey\" PRIMARY KEY (id);"
@@ -1010,6 +1037,7 @@ export const SCHEMA_SHAPE: Readonly<Record<string, TableShape>> = {
       }
     ],
     "createTable": "CREATE TABLE IF NOT EXISTS \"Subscriber\" (\n  \"id\" text NOT NULL,\n  \"companyId\" text NOT NULL,\n  \"email\" text NOT NULL,\n  \"status\" \"SubscriberStatus\" NOT NULL DEFAULT 'SUBSCRIBED'::\"SubscriberStatus\",\n  \"source\" text,\n  \"subscribedAt\" timestamp(3) without time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,\n  \"unsubscribedAt\" timestamp(3) without time zone,\n  \"unsubscribeToken\" text NOT NULL,\n  \"createdAt\" timestamp(3) without time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,\n  \"updatedAt\" timestamp(3) without time zone NOT NULL\n)",
+    "sequences": [],
     "primaryKey": {
       "name": "Subscriber_pkey",
       "sql": "ALTER TABLE \"Subscriber\" ADD CONSTRAINT \"Subscriber_pkey\" PRIMARY KEY (id);"
@@ -1087,6 +1115,7 @@ export const SCHEMA_SHAPE: Readonly<Record<string, TableShape>> = {
       }
     ],
     "createTable": "CREATE TABLE IF NOT EXISTS \"Notification\" (\n  \"id\" text NOT NULL,\n  \"accountId\" text NOT NULL,\n  \"taskId\" text,\n  \"type\" text NOT NULL,\n  \"title\" text NOT NULL,\n  \"body\" text,\n  \"readAt\" timestamp(3) without time zone,\n  \"createdAt\" timestamp(3) without time zone NOT NULL DEFAULT CURRENT_TIMESTAMP,\n  \"leadId\" text,\n  \"quoteId\" text,\n  \"contactInquiryId\" text\n)",
+    "sequences": [],
     "primaryKey": {
       "name": "Notification_pkey",
       "sql": "ALTER TABLE \"Notification\" ADD CONSTRAINT \"Notification_pkey\" PRIMARY KEY (id);"

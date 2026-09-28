@@ -10,7 +10,7 @@ import { findAirportByIata } from "@/data/airports";
 import { flightRequestSchema, type FlightRequestInput } from "@/lib/validations/flight-request";
 import { distributeNewWebsiteLead } from "@/server/lead-distribution";
 import { resolveContact } from "@/server/contact";
-import { ensureSchemaReady } from "@/server/schema-ready";
+import { ensureSchemaReady, noteWriteFailure } from "@/server/schema-ready";
 
 export type SubmitFlightRequestResult =
   | {
@@ -190,6 +190,7 @@ export async function submitFlightRequest(input: FlightRequestInput): Promise<Su
     // (connectivity vs. constraint vs. config vs. app bug — see
     // src/lib/db-error.ts) scannable in Vercel's runtime logs without
     // having to parse the full stack trace on the line after it.
+    noteWriteFailure(err);
     console.error(`[submitFlightRequest] failed: ${describeDbError(err)} | db target: ${describeDatabaseTarget()}`, err);
     return friendlyError();
   }
