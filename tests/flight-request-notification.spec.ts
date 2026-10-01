@@ -46,6 +46,7 @@ function fakeMailer(impl?: (m: MailMessage) => void | Promise<void>): { mailer: 
       async send(message) {
         sent.push(message);
         if (impl) await impl(message);
+        return { messageId: "fake-message-id", response: "250 2.0.0 OK (fake)", accepted: [message.to], rejected: [] };
       },
     },
   };
@@ -225,7 +226,7 @@ test.describe("sendFlightRequestNotification — mailer wiring, never throws", (
     process.env.FLIGHT_REQUEST_NOTIFICATION_EMAIL = "ops@businessflights.travel";
     const { mailer, sent } = fakeMailer();
     const result = await sendFlightRequestNotification(BASE, { mailer });
-    expect(result).toEqual({ sent: true });
+    expect(result).toEqual({ sent: true, messageId: "fake-message-id" });
     expect(sent).toHaveLength(1);
     expect(sent[0].to).toBe("ops@businessflights.travel");
     expect(sent[0].subject).toBe(buildFlightRequestNotificationSubject(BASE));
@@ -243,7 +244,45 @@ test.describe("sendFlightRequestNotification — mailer wiring, never throws", (
     process.env.FLIGHT_REQUEST_NOTIFICATION_EMAIL = "ops@businessflights.travel";
     const failing: Mailer = { send: async () => { throw new Error("SMTP connection refused"); } };
     const result = await sendFlightRequestNotification(BASE, { mailer: failing });
-    expect(result).toEqual({ sent: false, reason: "send_failed" });
+    expect(result).toEqual({ sent: false, reason: "send_failed", category: "other" });
+  });
+
+  test("a Nodemailer EAUTH error is categorized as authentication_failed — the real Gmail App Password / account auth failure mode", async () => {
+    process.env.FLIGHT_REQUEST_NOTIFICATION_EMAIL = "ops@businessflights.travel";
+    const failing: Mailer = {
+      send: async () => {
+        const err = new Error("Invalid login: 535-5.7.8 Username and Password not accepted") as Error & { code: string };
+        err.code = "EAUTH";
+        throw err;
+      },
+    };
+    const result = await sendFlightRequestNotification(BASE, { mailer: failing });
+    expect(result).toEqual({ sent: false, reason: "send_failed", category: "authentication_failed" });
+  });
+
+  test("a Nodemailer connection error (ETIMEDOUT/ECONNECTION/ESOCKET) is categorized as connection_failed", async () => {
+    process.env.FLIGHT_REQUEST_NOTIFICATION_EMAIL = "ops@businessflights.travel";
+    for (const code of ["ETIMEDOUT", "ECONNECTION", "ESOCKET", "EDNS"]) {
+      const failing: Mailer = {
+        send: async () => {
+          const err = new Error("could not connect") as Error & { code: string };
+          err.code = code;
+          throw err;
+        },
+      };
+      const result = await sendFlightRequestNotification(BASE, { mailer: failing });
+      expect(result).toEqual({ sent: false, reason: "send_failed", category: "connection_failed" });
+    }
+  });
+
+  test("a successful send logs the SMTP response/messageId as safe acceptance evidence, not just a boolean", async () => {
+    process.env.FLIGHT_REQUEST_NOTIFICATION_EMAIL = "ops@businessflights.travel";
+    const { mailer } = fakeMailer();
+    const logs: string[] = [];
+    const result = await sendFlightRequestNotification(BASE, { mailer, log: (m) => logs.push(m) });
+    expect(result).toEqual({ sent: true, messageId: "fake-message-id" });
+    expect(logs.join("\n")).toContain("SMTP accepted the message");
+    expect(logs.join("\n")).toContain("fake-message-id");
   });
 
   test("a mailer failure's log line never contains the SMTP credentials, even when real-looking secrets are set in the environment", async () => {

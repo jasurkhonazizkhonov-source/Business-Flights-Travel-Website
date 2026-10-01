@@ -328,7 +328,45 @@ function buildPlainText(input: FlightRequestNotificationInput, fullName: string)
   return lines.join("\n");
 }
 
-export type SendFlightRequestNotificationResult = { sent: true } | { sent: false; reason: "not_configured" | "send_failed" };
+export type SendFlightRequestNotificationResult =
+  | { sent: true; messageId: string }
+  | { sent: false; reason: "not_configured" | "send_failed"; category?: NodemailerErrorCategory };
+
+// Nodemailer's own stable error `code` values (see its SMTP transport
+// source) translated into a human-readable category — specifically so a
+// real production failure's log line names the actual failure mode
+// (auth vs. connection vs. envelope vs. something else) instead of forcing
+// whoever reads it to go decode a raw Nodemailer error by hand. This is
+// the "safe SMTP connection verification" this module provides: never a
+// public endpoint, never anything beyond this one structured log line, and
+// never anything that touches process.env or the raw error object itself
+// (which Nodemailer error classes do NOT embed credentials in, but this
+// still only ever forwards `message`/`code`/`command`/`responseCode` —
+// protocol metadata, not configuration).
+type NodemailerErrorCategory =
+  | "authentication_failed" // EAUTH — wrong GMAIL_SENDER_EMAIL/GMAIL_APP_PASSWORD, or the account's own security policy rejected it
+  | "connection_failed" // ECONNECTION / ESOCKET / ETIMEDOUT / EDNS — could not reach smtp.gmail.com at all
+  | "envelope_rejected" // EENVELOPE — Gmail rejected the sender or every recipient address
+  | "message_rejected" // EMESSAGE — Gmail rejected the message itself (e.g. content policy)
+  | "other";
+
+function categorizeNodemailerError(code: unknown): NodemailerErrorCategory {
+  switch (code) {
+    case "EAUTH":
+      return "authentication_failed";
+    case "ECONNECTION":
+    case "ESOCKET":
+    case "ETIMEDOUT":
+    case "EDNS":
+      return "connection_failed";
+    case "EENVELOPE":
+      return "envelope_rejected";
+    case "EMESSAGE":
+      return "message_rejected";
+    default:
+      return "other";
+  }
+}
 
 /**
  * Sends the internal notification. NEVER throws — a failure here must never
@@ -352,17 +390,27 @@ export async function sendFlightRequestNotification(
   }
   try {
     const { subject, html, text } = buildFlightRequestNotificationEmail(input);
-    await options.mailer.send({ to, subject, html, text });
-    return { sent: true };
+    const info = await options.mailer.send({ to, subject, html, text });
+    // This is evidence of SMTP ACCEPTANCE (Gmail's own server reply), not
+    // proof the recipient's inbox displayed the message — nothing past the
+    // SMTP handshake (spam filtering, inbox rules) is observable from here,
+    // for any email sender on any provider. `response`/`accepted` are the
+    // server's own reply text and the addresses it accepted — safe,
+    // non-secret protocol metadata.
+    log(
+      `[flight-request-notification] SMTP accepted the message: messageId=${info.messageId} accepted=${JSON.stringify(info.accepted)} response="${info.response}"`,
+    );
+    return { sent: true, messageId: info.messageId };
   } catch (err) {
     // Safe, credential-free diagnostic only: never the raw error object (which
     // could carry transport/config details), never process.env, just the
     // message/standard SMTP protocol fields a Nodemailer error exposes.
     const e = err as { message?: unknown; code?: unknown; command?: unknown; responseCode?: unknown } | null;
     const message = typeof e?.message === "string" ? e.message.slice(0, 300) : "unknown error";
-    const code = typeof e?.code === "string" || typeof e?.code === "number" ? ` code=${e.code}` : "";
+    const code = typeof e?.code === "string" || typeof e?.code === "number" ? e.code : undefined;
     const command = typeof e?.command === "string" ? ` command=${e.command}` : "";
-    log(`[flight-request-notification] Failed to send internal notification: ${message}${code}${command}`);
-    return { sent: false, reason: "send_failed" };
+    const category = categorizeNodemailerError(code);
+    log(`[flight-request-notification] Failed to send internal notification (${category}): ${message}${code ? ` code=${code}` : ""}${command}`);
+    return { sent: false, reason: "send_failed", category };
   }
 }
