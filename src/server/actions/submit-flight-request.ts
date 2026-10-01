@@ -11,6 +11,8 @@ import { flightRequestSchema, type FlightRequestInput } from "@/lib/validations/
 import { distributeNewWebsiteLead } from "@/server/lead-distribution";
 import { resolveContact } from "@/server/contact";
 import { ensureSchemaReady, noteWriteFailure } from "@/server/schema-ready";
+import { sendFlightRequestNotification, type FlightRequestSegment } from "@/lib/email/flight-request-notification";
+import { gmailMailer } from "@/lib/email/mailer";
 
 export type SubmitFlightRequestResult =
   | {
@@ -171,6 +173,39 @@ export async function submitFlightRequest(input: FlightRequestInput): Promise<Su
     // fail the customer's submission.
     await distributeNewWebsiteLead(lead.id).catch((err) => {
       console.error("[submitFlightRequest] distribution failed", err);
+    });
+
+    // Internal-only notification to the Business Flights Travel team — NOT
+    // the customer-facing response below, which is unchanged either way.
+    // Runs AFTER the Lead is already persisted, so an email failure can
+    // never roll back (or appear to roll back) a successful submission;
+    // sendFlightRequestNotification() itself never throws (see that file),
+    // and this still never fails the customer's response even if it did.
+    const emailSegments: FlightRequestSegment[] = data.segments.map((seg, i) =>
+      i === 0 ? { from: fromAirport, to: toAirport, departureDate: seg.departureDate } : seg,
+    );
+    await sendFlightRequestNotification(
+      {
+        firstName: data.firstName,
+        lastName: data.lastName,
+        email: data.email,
+        phoneE164: phone.e164,
+        tripType: data.tripType,
+        cabinClass: data.cabinClass,
+        adults: data.adults,
+        children: data.children,
+        infants: data.infants,
+        flexibleDates: data.flexibleDates,
+        preferredAirline: data.preferredAirline,
+        budget: data.budget,
+        notes: data.notes,
+        segments: emailSegments,
+        returnDate: data.returnDate,
+        submittedAt: new Date(),
+      },
+      { mailer: gmailMailer },
+    ).catch((err) => {
+      console.error("[submitFlightRequest] internal notification email failed", err);
     });
 
     return {

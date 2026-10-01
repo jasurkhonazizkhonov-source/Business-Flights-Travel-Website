@@ -1,10 +1,13 @@
 # Environment Variables
 
-This project reads exactly one environment variable. Everything else — the
-production site URL, SEO metadata, static reference data — is checked into
-the repo as code, not sourced from configuration. No secret is ever imported
-into a Client Component or sent to the browser (`src/lib/prisma.ts` and
-every `server/actions/*.ts` file are server-only).
+This project reads a small, fixed set of environment variables (`DATABASE_URL`
+is the only one required to submit a form; the rest are optional —
+`DATABASE_AUTO_INIT` and the three below). Everything else — the production
+site URL, SEO metadata, static reference data — is checked into the repo as
+code, not sourced from configuration. No secret is ever imported into a
+Client Component or sent to the browser (`src/lib/prisma.ts`,
+`src/lib/email/mailer.ts`, and every `server/actions/*.ts` file are
+server-only).
 
 Copy `.env.example` to `.env` and fill in the real value, or set it directly
 in your hosting provider's environment variable settings for production.
@@ -68,6 +71,18 @@ Two allowlists keep repair narrow and prevent false alarms: `REQUIRED_TABLES` (1
 **Local vs production.** The local and production websites intentionally use *different* Aiven databases; nothing in this repository hard-codes either (`DATABASE_URL` is read only from the environment; `.env` is git-ignored). Guard log lines and every action's failure log end with `db target: <host>:<port>/<dbname>` — never the user, password or full URL — which is enough to tell the two environments apart in the logs.
 
 Concurrency: repair/initialization runs under the same PostgreSQL advisory lock Prisma's own `migrate deploy` uses, and re-inspects the actual database again once the lock is held — so two requests that both detect the same problem never race to create conflicting objects; the second finds the first's work already done. A failed repair is never reported healthy and is retried (not skipped) on the next request.
+
+## Internal Flight Request notification — `FLIGHT_REQUEST_NOTIFICATION_EMAIL`, `GMAIL_SENDER_EMAIL`, `GMAIL_APP_PASSWORD` (all optional)
+
+A separate, internal-only email to the Business Flights Travel team after a flight request has been validated and **successfully saved** — distinct from, and never affecting, the customer's own success response. See `src/lib/email/flight-request-notification.ts` (the pure template/decision logic) and `src/lib/email/mailer.ts` (the only module that touches Nodemailer/Gmail). Wired into `src/server/actions/submit-flight-request.ts`, after the Lead is persisted.
+
+| Variable | What it is |
+|---|---|
+| `FLIGHT_REQUEST_NOTIFICATION_EMAIL` | The mailbox that receives the notification. Configure separately per environment. |
+| `GMAIL_SENDER_EMAIL` | The Gmail/Google Workspace account that authenticates and sends (SMTP "from"/username). This project had no existing sender-email variable to reuse — checked directly: no email/SMTP code existed anywhere in this repository before this feature (the CRM's own email sending lives in the separate Compass Tools codebase, not here). Gmail SMTP requires authenticating as a specific account, so this one new variable was unavoidable. |
+| `GMAIL_APP_PASSWORD` | A Google-generated **App Password** for `GMAIL_SENDER_EMAIL` — never that account's normal login password. Requires 2-Step Verification enabled on the account first; generate one at `myaccount.google.com/apppasswords`. |
+
+All three are **optional** and **unset by default**: if `FLIGHT_REQUEST_NOTIFICATION_EMAIL` isn't set, the feature is simply inactive — no error, nothing sent, the customer's flow is completely unaffected. All three are server-side only, never `NEXT_PUBLIC_*`, and must be configured separately for local and production (they are not expected to be the same inbox/account). Never put the real App Password — or any real value here — in `.env.example`, a commit, a log line, or an error shown to a customer; a send failure is logged with only the message/SMTP protocol code, never the credentials or the Nodemailer config object, and is never surfaced to the visitor (the Flight Request they already submitted stays saved either way — see that module's own header for why).
 
 ## Production site URL — not an environment variable
 
