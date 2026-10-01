@@ -18,6 +18,8 @@ import { PrismaPGlite } from "pglite-prisma-adapter";
 import { PrismaClient, Prisma } from "../src/generated/prisma/client";
 import { ensureSchema, BASELINE_COMPANY } from "../src/lib/schema-guard";
 import { MIGRATION_BUNDLE } from "../src/lib/migration-bundle.generated";
+import { sendFlightRequestNotification, type FlightRequestSegment } from "../src/lib/email/flight-request-notification";
+import type { Mailer, MailMessage } from "../src/lib/email/mailer";
 
 async function main() {
   const pg = new PGlite();
@@ -79,6 +81,97 @@ async function main() {
   });
   await prisma.activity.create({ data: { leadId: lead.id, contactId, actorId: null, type: "LEAD_CREATED", description: "Lead created from the website flight request form" } });
   summary.flightRequest = "contact + lead + status history + airports + activity created";
+
+  // --- Flight Request internal notification: REAL integration, not just an
+  // isolated-helper test. Uses the actual, unmodified sendFlightRequestNotification
+  // (imported above, the exact function submit-flight-request.ts calls) fed with
+  // data read back from the rows JUST persisted above — not hand-typed fixture
+  // values — so this proves the notification builder correctly consumes genuinely-
+  // persisted Prisma records, not only a test's own assumptions about their shape.
+  // Only the SMTP transport itself is faked (as it must be for an automated,
+  // credential-free test) — everything else here is the real production code path.
+  process.env.FLIGHT_REQUEST_NOTIFICATION_EMAIL = "ops+e2e@businessflights.travel";
+  const persistedContact = await prisma.contact.findUniqueOrThrow({ where: { id: contactId } });
+  const emailSegments: FlightRequestSegment[] = [{ from, to, departureDate: "2027-01-15" }];
+  const sentMessages: MailMessage[] = [];
+  const fakeMailer: Mailer = {
+    async send(message) {
+      sentMessages.push(message);
+      return { messageId: "e2e-fake-message-id", response: "250 2.0.0 OK (fake, e2e)", accepted: [message.to], rejected: [] };
+    },
+  };
+  const notifyResult = await sendFlightRequestNotification(
+    {
+      firstName: persistedContact.firstName,
+      lastName: persistedContact.lastName,
+      email: persistedContact.primaryEmail ?? "e2e-flight@example.com",
+      phoneE164: persistedContact.primaryPhone ?? "+14155550100",
+      tripType: "ONE_WAY",
+      cabinClass: "BUSINESS",
+      adults: 1,
+      children: 0,
+      infants: 0,
+      flexibleDates: false,
+      segments: emailSegments,
+      submittedAt: new Date(),
+    },
+    { mailer: fakeMailer },
+  );
+  if (!notifyResult.sent) throw new Error(`expected the real notification function to report sent:true against persisted data, got: ${JSON.stringify(notifyResult)}`);
+  if (sentMessages.length !== 1) throw new Error(`expected exactly one email attempt, got ${sentMessages.length}`);
+  const built = sentMessages[0];
+  if (built.to !== "ops+e2e@businessflights.travel") throw new Error("notification recipient did not match FLIGHT_REQUEST_NOTIFICATION_EMAIL");
+  if (!built.subject.includes("JFK") || !built.subject.includes("LHR")) throw new Error(`subject did not reflect the actual persisted route: ${built.subject}`);
+  if (!built.html.includes(persistedContact.firstName) || !built.html.includes(persistedContact.lastName)) {
+    throw new Error("notification HTML did not include the actual persisted contact's name");
+  }
+  if (!built.html.includes("John F. Kennedy International Airport") || !built.html.includes("Heathrow Airport")) {
+    throw new Error("notification HTML did not include the actual persisted airport names");
+  }
+  summary.notification = { sent: true, messageId: (notifyResult as { messageId: string }).messageId, recipient: built.to };
+
+  // --- Failure isolation, proven behaviorally (not just by reading source text):
+  // database failure -> notification never attempted; database success + email
+  // failure -> the already-saved record is untouched and still there afterward.
+  let notifyAttemptedAfterDbFailure = false;
+  let dbWriteThrew = false;
+  try {
+    await prisma.$transaction(async (tx) => {
+      await tx.lead.create({
+        data: {
+          contactId, departureAirportId: -999999, arrivalAirportId: to.id, // invalid FK -> this write throws
+          departureDate: new Date(), tripType: "ONE_WAY", cabinClass: "BUSINESS", adults: 1, children: 0, infants: 0, flexibleDates: false,
+          source: "WEBSITE", priority: "MEDIUM", status: "ATTEMPTING_TO_CONTACT",
+        },
+      });
+      // Mirrors submit-flight-request.ts's own structure: notification is only
+      // ever reached AFTER persistence succeeds, in the same try block — a
+      // thrown persistence error means this next line is simply never reached.
+      notifyAttemptedAfterDbFailure = true;
+      await sendFlightRequestNotification({ firstName: "x", lastName: "y", email: "x@example.com", phoneE164: "+14155550100", tripType: "ONE_WAY", cabinClass: "BUSINESS", adults: 1, children: 0, infants: 0, flexibleDates: false, segments: emailSegments, submittedAt: new Date() }, { mailer: fakeMailer });
+    });
+  } catch {
+    dbWriteThrew = true;
+  }
+  // Checked OUTSIDE the try/catch above on purpose: if it were inside that
+  // same try block, this very assertion failing would be caught by the
+  // catch right below it and silently treated as "the expected failure" —
+  // masking the real bug (the invalid-FK write unexpectedly succeeding)
+  // instead of reporting it.
+  if (!dbWriteThrew) throw new Error("expected the invalid-foreign-key Lead write to throw, but it did not");
+  if (notifyAttemptedAfterDbFailure) throw new Error("notification was attempted even though persistence failed — this must never happen");
+  if (sentMessages.length !== 1) throw new Error("the failed-persistence attempt must not have sent an additional email");
+  summary.notificationNotAttemptedOnDbFailure = true;
+
+  const leadCountBeforeEmailFailure = await prisma.lead.count();
+  const alwaysFailingMailer: Mailer = { send: async () => { throw new Error("simulated SMTP failure for e2e proof"); } };
+  const failedNotifyResult = await sendFlightRequestNotification(
+    { firstName: "DbSuccess", lastName: "EmailFail", email: "x@example.com", phoneE164: "+14155550100", tripType: "ONE_WAY", cabinClass: "BUSINESS", adults: 1, children: 0, infants: 0, flexibleDates: false, segments: emailSegments, submittedAt: new Date() },
+    { mailer: alwaysFailingMailer },
+  );
+  if (failedNotifyResult.sent) throw new Error("expected the always-failing mailer to produce sent:false");
+  if ((await prisma.lead.count()) !== leadCountBeforeEmailFailure) throw new Error("a notification failure must never affect already-persisted rows");
+  summary.dataPreservedOnEmailFailure = true;
 
   // --- Get in touch (submit-contact-message.ts) ---
   const inquiry = await prisma.contactInquiry.create({

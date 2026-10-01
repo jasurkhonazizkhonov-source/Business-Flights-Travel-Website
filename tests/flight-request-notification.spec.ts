@@ -267,6 +267,46 @@ test.describe("sendFlightRequestNotification — mailer wiring, never throws", (
     expect(result).toEqual({ sent: false, reason: "send_failed", category: "other" });
   });
 
+  test("a recipient address that doesn't look like an email (after cleaning) is caught BEFORE any SMTP attempt — mailer is never called", async () => {
+    process.env.FLIGHT_REQUEST_NOTIFICATION_EMAIL = "not-a-valid-email-address";
+    const { mailer, sent } = fakeMailer();
+    const result = await sendFlightRequestNotification(BASE, { mailer });
+    expect(result).toEqual({ sent: false, reason: "send_failed", category: "configuration_invalid" });
+    expect(sent).toHaveLength(0);
+  });
+
+  test("an empty-string recipient (after cleaning strips it to nothing, e.g. it was just quote marks) is also caught as configuration_invalid", async () => {
+    process.env.FLIGHT_REQUEST_NOTIFICATION_EMAIL = '""';
+    const { mailer, sent } = fakeMailer();
+    const result = await sendFlightRequestNotification(BASE, { mailer });
+    expect(result).toEqual({ sent: false, reason: "send_failed", category: "configuration_invalid" });
+    expect(sent).toHaveLength(0);
+  });
+
+  test("a recipient configured with surrounding quotes or internal whitespace is cleaned and still reaches the mailer correctly", async () => {
+    process.env.FLIGHT_REQUEST_NOTIFICATION_EMAIL = '"ops@businessflights.travel"';
+    const { mailer, sent } = fakeMailer();
+    const result = await sendFlightRequestNotification(BASE, { mailer });
+    expect(result).toEqual({ sent: true, messageId: "fake-message-id" });
+    expect(sent[0].to).toBe("ops@businessflights.travel"); // quotes stripped before reaching the mailer
+  });
+
+  test("THE KEY NEW CASE — sendMail() resolves without throwing, but reports the recipient in `rejected`: this must NOT be reported as sent, since a non-throwing resolve is not by itself proof of acceptance", async () => {
+    process.env.FLIGHT_REQUEST_NOTIFICATION_EMAIL = "ops@businessflights.travel";
+    const rejectingButNotThrowing: Mailer = {
+      send: async (message) => ({
+        messageId: "fake-message-id",
+        response: "250 2.1.5 OK but recipient address rejected",
+        accepted: [],
+        rejected: [message.to],
+      }),
+    };
+    const logs: string[] = [];
+    const result = await sendFlightRequestNotification(BASE, { mailer: rejectingButNotThrowing, log: (m) => logs.push(m) });
+    expect(result).toEqual({ sent: false, reason: "send_failed", category: "envelope_rejected" });
+    expect(logs.join("\n")).toContain("rejected the recipient");
+  });
+
   test("a Nodemailer EAUTH error is categorized as authentication_failed — the real Gmail App Password / account auth failure mode", async () => {
     process.env.FLIGHT_REQUEST_NOTIFICATION_EMAIL = "ops@businessflights.travel";
     const failing: Mailer = {

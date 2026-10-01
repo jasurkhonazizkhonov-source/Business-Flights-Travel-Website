@@ -1,6 +1,6 @@
 import "server-only";
 import nodemailer from "nodemailer";
-import { cleanEnvSecret, isTransientConnectionError } from "@/lib/email/smtp-helpers";
+import { cleanEnvValue, isTransientConnectionError } from "@/lib/email/smtp-helpers";
 
 // Thin, server-only Gmail SMTP sender. Deliberately the only module in this
 // feature that touches `nodemailer` or reads the auth env vars — every
@@ -33,7 +33,7 @@ import { cleanEnvSecret, isTransientConnectionError } from "@/lib/email/smtp-hel
 //                         policy is the next thing to check (this code has
 //                         no way to detect or change that from here).
 //
-// Both are run through cleanEnvSecret() (src/lib/email/smtp-helpers.ts)
+// Both are run through cleanEnvValue() (src/lib/email/smtp-helpers.ts)
 // before use — see that file for why a plain `.trim()` isn't enough.
 export interface MailMessage {
   to: string;
@@ -70,8 +70,8 @@ let cachedTransport: ReturnType<typeof nodemailer.createTransport> | null = null
 
 function transport() {
   if (cachedTransport) return cachedTransport;
-  const user = cleanEnvSecret(process.env.GMAIL_SENDER_EMAIL);
-  const pass = cleanEnvSecret(process.env.GMAIL_APP_PASSWORD);
+  const user = cleanEnvValue(process.env.GMAIL_SENDER_EMAIL);
+  const pass = cleanEnvValue(process.env.GMAIL_APP_PASSWORD);
   if (!user || !pass) {
     throw new Error("Email is not configured: GMAIL_SENDER_EMAIL and GMAIL_APP_PASSWORD must both be set (server-side only; see docs/ENVIRONMENT.md).");
   }
@@ -96,7 +96,7 @@ function sleep(ms: number): Promise<void> {
 // loads `nodemailer`, reads GMAIL_APP_PASSWORD, or touches the network.
 export const gmailMailer: Mailer = {
   async send(message) {
-    const from = cleanEnvSecret(process.env.GMAIL_SENDER_EMAIL); // re-read, not captured, in case transport() hasn't run yet this instance
+    const from = cleanEnvValue(process.env.GMAIL_SENDER_EMAIL); // re-read, not captured, in case transport() hasn't run yet this instance
     const attemptSend = () =>
       transport().sendMail({
         from: `"Business Flights Travel" <${from}>`,

@@ -1,22 +1,54 @@
 import { test, expect } from "@playwright/test";
-import { cleanEnvSecret, isTransientConnectionError } from "../src/lib/email/smtp-helpers";
+import { cleanEnvValue, isPlausibleEmail, isTransientConnectionError } from "../src/lib/email/smtp-helpers";
 
-test.describe("cleanEnvSecret", () => {
+test.describe("cleanEnvValue", () => {
   test("strips leading/trailing whitespace (the classic 'pasted with a trailing newline' mistake)", () => {
-    expect(cleanEnvSecret("  abcd1234  \n")).toBe("abcd1234");
+    expect(cleanEnvValue("  abcd1234  \n")).toBe("abcd1234");
   });
 
   test("strips INTERNAL whitespace too — the real Gmail App Password mistake: Google's own UI displays the password as 'abcd efgh ijkl mnop' for readability, and copying that selects the spaces along with it", () => {
-    expect(cleanEnvSecret("abcd efgh ijkl mnop")).toBe("abcdefghijklmnop");
-    expect(cleanEnvSecret(" abcd efgh ijkl mnop ")).toBe("abcdefghijklmnop");
+    expect(cleanEnvValue("abcd efgh ijkl mnop")).toBe("abcdefghijklmnop");
+    expect(cleanEnvValue(" abcd efgh ijkl mnop ")).toBe("abcdefghijklmnop");
   });
 
   test("a value with no whitespace at all is returned unchanged", () => {
-    expect(cleanEnvSecret("alreadyclean@example.com")).toBe("alreadyclean@example.com");
+    expect(cleanEnvValue("alreadyclean@example.com")).toBe("alreadyclean@example.com");
   });
 
   test("undefined stays undefined (feature simply reads as unconfigured, not a crash)", () => {
-    expect(cleanEnvSecret(undefined)).toBeUndefined();
+    expect(cleanEnvValue(undefined)).toBeUndefined();
+  });
+
+  test("strips surrounding straight quotes — a common habit from shell `export KEY=\"value\"` or a JSON config pasted into a value field", () => {
+    expect(cleanEnvValue('"ops@businessflights.travel"')).toBe("ops@businessflights.travel");
+    expect(cleanEnvValue("'ops@businessflights.travel'")).toBe("ops@businessflights.travel");
+  });
+
+  test("strips smart/curly quotes too — the kind a word processor or some dashboard inputs auto-substitute", () => {
+    expect(cleanEnvValue("“abcd1234”")).toBe("abcd1234");
+    expect(cleanEnvValue("‘abcd1234’")).toBe("abcd1234");
+  });
+
+  test("handles quotes AND internal whitespace together — e.g. a whole Gmail App Password copied from a JSON file as \"abcd efgh ijkl mnop\"", () => {
+    expect(cleanEnvValue('"abcd efgh ijkl mnop"')).toBe("abcdefghijklmnop");
+  });
+});
+
+test.describe("isPlausibleEmail", () => {
+  test("accepts an ordinary email address", () => {
+    expect(isPlausibleEmail("ops@businessflights.travel")).toBe(true);
+  });
+
+  test("rejects undefined, empty string, and values with no '@' or no domain dot", () => {
+    expect(isPlausibleEmail(undefined)).toBe(false);
+    expect(isPlausibleEmail("")).toBe(false);
+    expect(isPlausibleEmail("not-an-email")).toBe(false);
+    expect(isPlausibleEmail("missing-domain-dot@localhost")).toBe(false);
+  });
+
+  test("rejects a value that still contains whitespace or a stray quote character (i.e. this is meant to run AFTER cleanEnvValue, not instead of it)", () => {
+    expect(isPlausibleEmail("ops @businessflights.travel")).toBe(false);
+    expect(isPlausibleEmail('"ops@businessflights.travel"')).toBe(false);
   });
 });
 

@@ -12,6 +12,7 @@
 // Only src/lib/email/mailer.ts (never imported here except by type) touches
 // `nodemailer` or reads the Gmail credentials.
 import type { Mailer } from "@/lib/email/mailer";
+import { cleanEnvValue, isPlausibleEmail } from "@/lib/email/smtp-helpers";
 import { SITE_NAME, SITE_URL, CONTACT_PHONE_DISPLAY, CONTACT_EMAIL, COMPANY_ADDRESS } from "@/lib/constants";
 
 export interface FlightRequestAirport {
@@ -368,8 +369,9 @@ export type SendFlightRequestNotificationResult =
 type NodemailerErrorCategory =
   | "authentication_failed" // EAUTH — wrong GMAIL_SENDER_EMAIL/GMAIL_APP_PASSWORD, or the account's own security policy rejected it
   | "connection_failed" // ECONNECTION / ESOCKET / ETIMEDOUT / EDNS / ECONNRESET — could not reach (or stay connected to) smtp.gmail.com; src/lib/email/mailer.ts already retries this category once before it ever reaches here
-  | "envelope_rejected" // EENVELOPE — Gmail rejected the sender or every recipient address
+  | "envelope_rejected" // EENVELOPE, OR a "successful" sendMail() that still reports the recipient in `rejected` — Gmail accepted the connection but refused the sender or every recipient address
   | "message_rejected" // EMESSAGE — Gmail rejected the message itself (e.g. content policy)
+  | "configuration_invalid" // FLIGHT_REQUEST_NOTIFICATION_EMAIL (after cleaning) doesn't look like an email address at all — caught before spending an SMTP round-trip on a doomed send
   | "other";
 
 function categorizeNodemailerError(code: unknown): NodemailerErrorCategory {
@@ -403,17 +405,42 @@ export async function sendFlightRequestNotification(
   options: { mailer: Mailer; log?: (message: string) => void },
 ): Promise<SendFlightRequestNotificationResult> {
   const log = options.log ?? ((m: string) => console.error(m));
-  const to = process.env.FLIGHT_REQUEST_NOTIFICATION_EMAIL;
-  if (!to) {
+  const rawTo = process.env.FLIGHT_REQUEST_NOTIFICATION_EMAIL;
+  if (!rawTo) {
     // Not an error: the feature is simply unconfigured for this environment
     // (e.g. a fresh deployment before an admin has set the recipient).
     // Never blocks or alters the customer's own successful response.
     log("[flight-request-notification] FLIGHT_REQUEST_NOTIFICATION_EMAIL is not set — skipping internal notification.");
     return { sent: false, reason: "not_configured" };
   }
+  // Cleaned the same way the sender credentials are (src/lib/email/mailer.ts):
+  // a trailing newline or surrounding quotes pasted into Vercel's dashboard is
+  // just as easy a mistake for the recipient address as for the password.
+  // Validated BEFORE attempting to send — an obviously malformed value
+  // (empty after cleaning, missing an "@", etc.) is caught here with a clear
+  // diagnostic rather than spending a real SMTP round-trip on a doomed send
+  // that Gmail would reject anyway.
+  const cleanedTo = cleanEnvValue(rawTo);
+  const cleanedToLength = cleanedTo?.length ?? 0;
+  if (!isPlausibleEmail(cleanedTo)) {
+    log(`[flight-request-notification] FLIGHT_REQUEST_NOTIFICATION_EMAIL is set but does not look like a valid email address — skipping internal notification. (length after cleaning: ${cleanedToLength})`);
+    return { sent: false, reason: "send_failed", category: "configuration_invalid" };
+  }
+  const to = cleanedTo;
   try {
     const { subject, html, text } = buildFlightRequestNotificationEmail(input);
     const info = await options.mailer.send({ to, subject, html, text });
+    // Nodemailer can resolve `sendMail()` successfully (not throw) while
+    // still reporting the recipient in `rejected` rather than `accepted` —
+    // e.g. the connection and authentication both succeeded but Gmail
+    // refused this specific address. A non-throwing resolve is therefore
+    // NOT by itself proof of acceptance; `rejected` must be empty too.
+    if (info.rejected.length > 0) {
+      log(
+        `[flight-request-notification] SMTP did not throw, but rejected the recipient: messageId=${info.messageId} rejected=${JSON.stringify(info.rejected)} response="${info.response}"`,
+      );
+      return { sent: false, reason: "send_failed", category: "envelope_rejected" };
+    }
     // This is evidence of SMTP ACCEPTANCE (Gmail's own server reply), not
     // proof the recipient's inbox displayed the message — nothing past the
     // SMTP handshake (spam filtering, inbox rules) is observable from here,
