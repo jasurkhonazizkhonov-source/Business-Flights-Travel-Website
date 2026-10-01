@@ -166,6 +166,26 @@ test.describe("buildFlightRequestNotificationEmail — HTML + text content", () 
     expect(text).toContain("Budget: $8,500");
   });
 
+  test("traveler breakdown: an adults-only request shows just the plain count (no redundant '(3 Adults)')", () => {
+    const { html, text } = buildFlightRequestNotificationEmail({ ...BASE, adults: 3, children: 0, infants: 0 });
+    expect(html).toContain("3 Travelers");
+    expect(html).not.toContain("(3 Adults)");
+    expect(text).toContain("Travelers: 3 Travelers");
+    expect(text).not.toContain("(3 Adults)");
+  });
+
+  test("traveler breakdown: adults + children + an infant are all shown, since the form collects them as separate fields", () => {
+    const mixed: FlightRequestNotificationInput = { ...BASE, adults: 2, children: 1, infants: 1 };
+    const { html, text } = buildFlightRequestNotificationEmail(mixed);
+    expect(html).toContain("4 Travelers (2 Adults, 1 Child, 1 Infant)");
+    expect(text).toContain("Travelers: 4 Travelers (2 Adults, 1 Child, 1 Infant)");
+  });
+
+  test("traveler breakdown: plural children/infants are pluralized correctly", () => {
+    const { html } = buildFlightRequestNotificationEmail({ ...BASE, adults: 2, children: 2, infants: 2 });
+    expect(html).toContain("2 Adults, 2 Children, 2 Infants");
+  });
+
   test("absent optional fields create NO empty/broken 'Additional Information' section at all", () => {
     const { html, text } = buildFlightRequestNotificationEmail(BASE); // no flexibleDates/airline/budget/notes
     expect(html).not.toContain("Additional Information");
@@ -262,7 +282,7 @@ test.describe("sendFlightRequestNotification — mailer wiring, never throws", (
 
   test("a Nodemailer connection error (ETIMEDOUT/ECONNECTION/ESOCKET) is categorized as connection_failed", async () => {
     process.env.FLIGHT_REQUEST_NOTIFICATION_EMAIL = "ops@businessflights.travel";
-    for (const code of ["ETIMEDOUT", "ECONNECTION", "ESOCKET", "EDNS"]) {
+    for (const code of ["ETIMEDOUT", "ECONNECTION", "ESOCKET", "EDNS", "ECONNRESET"]) {
       const failing: Mailer = {
         send: async () => {
           const err = new Error("could not connect") as Error & { code: string };

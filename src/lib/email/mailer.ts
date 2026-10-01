@@ -1,5 +1,6 @@
 import "server-only";
 import nodemailer from "nodemailer";
+import { cleanEnvSecret, isTransientConnectionError } from "@/lib/email/smtp-helpers";
 
 // Thin, server-only Gmail SMTP sender. Deliberately the only module in this
 // feature that touches `nodemailer` or reads the auth env vars — every
@@ -31,9 +32,9 @@ import nodemailer from "nodemailer";
 //                         after confirming the password, that organization
 //                         policy is the next thing to check (this code has
 //                         no way to detect or change that from here).
-// Both are `.trim()`ed defensively: a trailing newline/space from copying a
-// value into Vercel's dashboard UI is a real, easy mistake, is invisible in
-// the dashboard, and would make Gmail reject authentication outright.
+//
+// Both are run through cleanEnvSecret() (src/lib/email/smtp-helpers.ts)
+// before use — see that file for why a plain `.trim()` isn't enough.
 export interface MailMessage {
   to: string;
   subject: string;
@@ -69,8 +70,8 @@ let cachedTransport: ReturnType<typeof nodemailer.createTransport> | null = null
 
 function transport() {
   if (cachedTransport) return cachedTransport;
-  const user = process.env.GMAIL_SENDER_EMAIL?.trim();
-  const pass = process.env.GMAIL_APP_PASSWORD?.trim();
+  const user = cleanEnvSecret(process.env.GMAIL_SENDER_EMAIL);
+  const pass = cleanEnvSecret(process.env.GMAIL_APP_PASSWORD);
   if (!user || !pass) {
     throw new Error("Email is not configured: GMAIL_SENDER_EMAIL and GMAIL_APP_PASSWORD must both be set (server-side only; see docs/ENVIRONMENT.md).");
   }
@@ -86,19 +87,39 @@ function transport() {
   return cachedTransport;
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 // The real sender used in production. Never imported by a test — tests give
 // sendFlightRequestNotification a fake `Mailer` instead, so no test ever
 // loads `nodemailer`, reads GMAIL_APP_PASSWORD, or touches the network.
 export const gmailMailer: Mailer = {
   async send(message) {
-    const from = process.env.GMAIL_SENDER_EMAIL?.trim(); // re-read, not captured, in case transport() hasn't run yet this instance
-    const info = await transport().sendMail({
-      from: `"Business Flights Travel" <${from}>`,
-      to: message.to,
-      subject: message.subject,
-      html: message.html,
-      text: message.text,
-    });
+    const from = cleanEnvSecret(process.env.GMAIL_SENDER_EMAIL); // re-read, not captured, in case transport() hasn't run yet this instance
+    const attemptSend = () =>
+      transport().sendMail({
+        from: `"Business Flights Travel" <${from}>`,
+        to: message.to,
+        subject: message.subject,
+        html: message.html,
+        text: message.text,
+      });
+    let info;
+    try {
+      info = await attemptSend();
+    } catch (err) {
+      // One bounded retry, ONLY for transient connection-category failures
+      // (a cold-start DNS/TLS hiccup is the realistic case on a serverless
+      // function's first outbound call) — never for an authentication or
+      // envelope rejection, which a retry cannot fix and would only delay
+      // reporting. Still well inside a serverless function's own execution
+      // budget even in the worst case (two 10s-ceiling attempts, not two
+      // full Nodemailer-default 2-minute attempts).
+      if (!isTransientConnectionError(err)) throw err;
+      await sleep(500);
+      info = await attemptSend();
+    }
     return { messageId: info.messageId, response: info.response, accepted: info.accepted, rejected: info.rejected };
   },
 };

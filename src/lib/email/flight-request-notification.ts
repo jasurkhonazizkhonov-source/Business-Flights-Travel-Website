@@ -78,6 +78,28 @@ function travelerLabel(input: FlightRequestNotificationInput): string {
   return `${n} ${n === 1 ? "Traveler" : "Travelers"}`;
 }
 
+// Adults/children/infants are three separate fields the form actually
+// collects — shown here whenever the mix isn't simply "all adults", since
+// an infant (lap seat, no fare of its own) or a child materially changes
+// what the specialist needs to plan for, and collapsing them into just a
+// total would drop information the customer genuinely submitted. Kept out
+// of the SUBJECT line (which stays the short traveler count) and out of
+// the Trip Summary tile for an adults-only request, so the common case
+// doesn't read as redundant ("3 Travelers (3 Adults)").
+function travelerBreakdown(input: FlightRequestNotificationInput): string {
+  const parts: string[] = [];
+  if (input.adults > 0) parts.push(`${input.adults} Adult${input.adults === 1 ? "" : "s"}`);
+  if (input.children > 0) parts.push(`${input.children} Child${input.children === 1 ? "" : "ren"}`);
+  if (input.infants > 0) parts.push(`${input.infants} Infant${input.infants === 1 ? "" : "s"}`);
+  return parts.join(", ");
+}
+
+function travelerDisplay(input: FlightRequestNotificationInput): string {
+  const label = travelerLabel(input);
+  if (input.children === 0 && input.infants === 0) return label; // all-adults: the plain count already says it all
+  return `${label} (${travelerBreakdown(input)})`;
+}
+
 const TRIP_TYPE_LABEL: Record<FlightRequestNotificationInput["tripType"], string> = {
   ONE_WAY: "One Way",
   ROUND_TRIP: "Round Trip",
@@ -217,7 +239,7 @@ ${sectionLabel("Trip Summary")}
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
 <td width="33%" valign="top" style="padding:8px 4px;"><p style="margin:0 0 2px;font-size:11px;color:${MUTED};">Trip Type</p><p style="margin:0;font-size:14px;font-weight:600;color:${NAVY_950};">${escapeHtml(TRIP_TYPE_LABEL[input.tripType])}</p></td>
 <td width="34%" valign="top" style="padding:8px 4px;"><p style="margin:0 0 2px;font-size:11px;color:${MUTED};">Cabin Class</p><p style="margin:0;font-size:14px;font-weight:600;color:${NAVY_950};">${escapeHtml(input.cabinClass)}</p></td>
-<td width="33%" valign="top" style="padding:8px 4px;"><p style="margin:0 0 2px;font-size:11px;color:${MUTED};">Travelers</p><p style="margin:0;font-size:14px;font-weight:600;color:${NAVY_950};">${escapeHtml(travelerLabel(input))}</p></td>
+<td width="33%" valign="top" style="padding:8px 4px;"><p style="margin:0 0 2px;font-size:11px;color:${MUTED};">Travelers</p><p style="margin:0;font-size:14px;font-weight:600;color:${NAVY_950};">${escapeHtml(travelerDisplay(input))}</p></td>
 </tr></table>
 </td></tr>
 
@@ -295,7 +317,7 @@ function buildPlainText(input: FlightRequestNotificationInput, fullName: string)
   lines.push("TRIP SUMMARY");
   lines.push(`Trip Type: ${TRIP_TYPE_LABEL[input.tripType]}`);
   lines.push(`Cabin Class: ${input.cabinClass}`);
-  lines.push(`Travelers: ${travelerLabel(input)}`);
+  lines.push(`Travelers: ${travelerDisplay(input)}`);
   lines.push("");
   lines.push("CLIENT INFORMATION");
   lines.push(`Full Name: ${fullName}`);
@@ -345,7 +367,7 @@ export type SendFlightRequestNotificationResult =
 // protocol metadata, not configuration).
 type NodemailerErrorCategory =
   | "authentication_failed" // EAUTH — wrong GMAIL_SENDER_EMAIL/GMAIL_APP_PASSWORD, or the account's own security policy rejected it
-  | "connection_failed" // ECONNECTION / ESOCKET / ETIMEDOUT / EDNS — could not reach smtp.gmail.com at all
+  | "connection_failed" // ECONNECTION / ESOCKET / ETIMEDOUT / EDNS / ECONNRESET — could not reach (or stay connected to) smtp.gmail.com; src/lib/email/mailer.ts already retries this category once before it ever reaches here
   | "envelope_rejected" // EENVELOPE — Gmail rejected the sender or every recipient address
   | "message_rejected" // EMESSAGE — Gmail rejected the message itself (e.g. content policy)
   | "other";
@@ -358,6 +380,7 @@ function categorizeNodemailerError(code: unknown): NodemailerErrorCategory {
     case "ESOCKET":
     case "ETIMEDOUT":
     case "EDNS":
+    case "ECONNRESET":
       return "connection_failed";
     case "EENVELOPE":
       return "envelope_rejected";
