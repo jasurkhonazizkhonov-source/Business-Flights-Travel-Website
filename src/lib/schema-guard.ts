@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { BundledMigration } from "@/lib/migration-bundle.generated";
-import { SCHEMA_SHAPE, ALL_SCHEMA_TABLES } from "@/lib/schema-shape.generated";
+import { SCHEMA_SHAPE } from "@/lib/schema-shape.generated";
 
 // Runtime schema guard: before a website write depends on the CRM tables,
 // verify they exist AND are structurally intact, and — ONLY when explicitly
@@ -57,12 +57,29 @@ import { SCHEMA_SHAPE, ALL_SCHEMA_TABLES } from "@/lib/schema-shape.generated";
 //                       an existing column, or guessing at what a modified
 //                       table "should" look like, risks real data — this
 //                       guard only ever performs additive, purely-safe DDL.
-//   partial_unexpected   the database has some required tables AND at least
-//                       one table that ISN'T one of ours -> ALWAYS refused.
-//                       Table names matching by coincidence isn't enough
-//                       evidence this is our database.
-//   unrelated           tables exist, NONE are ours -> ALWAYS refused.
+//   unrelated           NONE of REQUIRED_TABLES exist -> ALWAYS refused.
 //                       Another application's database is never touched.
+//
+// *** WHY THERE IS NO "unexpected extra table" REFUSAL ***
+// An earlier version of this guard also refused whenever the database
+// contained a table that wasn't REQUIRED_TABLES and wasn't in a hand-
+// maintained list of "every other known Compass Tools CRM table"
+// (captured once from this repo's own copy of the CRM's migration
+// history). That broke production outright: Compass Tools is developed
+// in a SEPARATE repository and can add tables at any time without this
+// website being updated in lockstep, so that list goes stale the moment
+// the CRM ships one migration this repo doesn't know about yet — and
+// every website request started failing identically (Flight Request,
+// Newsletter, Contact — anything behind ensureSchemaReady()), confirmed
+// against the real production database, not just reasoned about.
+// The fix: this guard evaluates ONLY its own managed schema
+// (REQUIRED_TABLES + their columns/indexes/constraints/sequences, scoped
+// by WEBSITE_REQUIRED_COLUMNS below) and never requires a complete global
+// inventory of the shared database. A table it doesn't recognize is
+// simply not its concern — never inspected, never repaired, never grounds
+// for refusal. The only thing that still means "this probably isn't the
+// right database" is the ABSENCE of every table this app depends on
+// (see `unrelated` above), which needs no inventory of what else exists.
 //
 // Concurrency: initialization/repair runs under a Postgres advisory lock —
 // the same key Prisma's own `migrate deploy` takes, so this and a build-time
@@ -104,21 +121,6 @@ export const REQUIRED_TABLES = [
   "ContactInquiry", "Lead", "LeadStatusHistory", "LeadQueueEntry",
   "Activity", "Airport", "Subscriber", "Notification",
 ] as const;
-
-// Table names known, from this repository's own migration history comments
-// (see prisma/migrations/20260830115639_exchange_and_cancellation_workflow
-// and docs/PRODUCTION_READINESS.md's "3 orphaned database tables" note), to
-// have legitimately existed in this exact shared production Postgres
-// database from a since-removed Google Sheets integration that is NOT part
-// of this project's Prisma schema or migration history. Their current
-// live status is explicitly documented as unconfirmed (may already be
-// dropped by the CRM team, may still be present) — either way, their mere
-// presence must never make this guard treat the database as "unrelated" or
-// refuse service: that would be a real, self-inflicted outage over tables
-// this application has always known about and never owned or touched.
-// Excluded from BOTH inspectSchema()'s unexpectedTables detection and any
-// repair decision — never created, altered, or dropped by this guard.
-const KNOWN_EXTERNAL_TABLES = new Set(["NewsletterSubscriber", "SheetSyncRecord", "SubmissionSequence"]);
 
 // Columns the website's own write paths (subscribe-newsletter,
 // submit-contact-message, submit-flight-request, resolveContact,
@@ -173,7 +175,7 @@ export const BASELINE_COMPANY = {
   signatureTemplate: "Best regards,\n{{first_name}} {{last_name}}\n{{phone_number}}",
 } as const;
 
-export type SchemaKind = "healthy" | "empty" | "needs_repair" | "unsafe_damage" | "partial_unexpected" | "unrelated";
+export type SchemaKind = "healthy" | "empty" | "needs_repair" | "unsafe_damage" | "unrelated";
 
 export interface TableDiagnosis {
   table: string;
@@ -190,7 +192,6 @@ export interface TableDiagnosis {
 export interface SchemaInspection {
   kind: SchemaKind;
   missingTables: string[];
-  unexpectedTables: string[];
   hasMigrationsTable: boolean;
   /** Bundled migrations not recorded as applied (only knowable when Prisma's tracking table exists). */
   pending: string[];
@@ -334,15 +335,12 @@ export async function inspectSchema(db: SqlRunner, bundle: readonly BundledMigra
   const userTables = [...tables].filter((t) => t !== "_prisma_migrations");
 
   const missingTables = REQUIRED_TABLES.filter((t) => !tables.has(t));
-  // A table only counts as "unexpected"/foreign if it's NEITHER a
-  // REQUIRED_TABLES member NOR any other legitimate Compass Tools CRM table
-  // (ALL_SCHEMA_TABLES — the full ~40-table schema the real migration
-  // bundle creates; Booking/Quote/Task/etc. are entirely real and expected,
-  // the website just never queries them directly) NOR a KNOWN_EXTERNAL_TABLES
-  // entry (a since-removed integration's tables, documented as possibly
-  // still present in the real shared production database).
-  const knownTables = new Set<string>([...ALL_SCHEMA_TABLES, ...KNOWN_EXTERNAL_TABLES]);
-  const unexpectedTables = userTables.filter((t) => !knownTables.has(t));
+  // Deliberately NOT computed: a list of "every table in `userTables` this
+  // guard doesn't recognize." See this file's header for why — that check
+  // required a complete, always-current inventory of the shared database,
+  // which went stale against the real Compass Tools CRM (developed in a
+  // separate repository) and took down every website write path in
+  // production. A table this guard doesn't own is simply not inspected.
 
   let pending: string[] = [];
   if (hasMigrationsTable) {
@@ -368,18 +366,20 @@ export async function inspectSchema(db: SqlRunner, bundle: readonly BundledMigra
 
   let kind: SchemaKind;
   if (userTables.length === 0) kind = "empty";
-  // Nothing this app owns is present at all (whether or not the database
-  // is genuinely empty of userTables — e.g. only KNOWN_EXTERNAL_TABLES, or
-  // only tables belonging to a wholly different application, are present)
-  // -> never treat this as "ready to safely initialize"; that is exactly
-  // the wrong-DATABASE_URL scenario this guard exists to refuse.
+  // NONE of REQUIRED_TABLES exist, whatever else is present (nothing, a
+  // wholly different application's tables, or legitimate CRM tables this
+  // repo doesn't happen to know about) -> no evidence this is the right
+  // database; never treat it as "ready to safely initialize." This is the
+  // ONLY check that cares about the database's overall contents, and it
+  // only ever looks for the PRESENCE of this app's own tables — never an
+  // absence of anything else, so it can't go stale as the shared database
+  // gains tables elsewhere.
   else if (missingTables.length === REQUIRED_TABLES.length) kind = "unrelated";
-  else if (unexpectedTables.length > 0) kind = "partial_unexpected";
   else if (hasUnsafeDamage) kind = "unsafe_damage";
   else if (needsObjectRepair) kind = "needs_repair";
   else kind = "healthy";
 
-  return { kind, missingTables, unexpectedTables, hasMigrationsTable, pending, diagnoses };
+  return { kind, missingTables, hasMigrationsTable, pending, diagnoses };
 }
 
 async function withMigrateLock<T>(db: SqlRunner, fn: () => Promise<T>): Promise<T> {
@@ -589,12 +589,6 @@ export async function ensureSchema(args: {
       `A required table has a structural difference that cannot be safely auto-repaired (${details}). No automatic change was made. An administrator must resolve this manually.`,
     );
   }
-  if (first.kind === "partial_unexpected") {
-    throw new SchemaNotReadyError(
-      "partial_schema",
-      `The connected database has some required tables (missing: ${first.missingTables.join(", ") || "none"}) alongside tables this application does not recognize (${first.unexpectedTables.join(", ")}). Too ambiguous to safely repair automatically; not modified.`,
-    );
-  }
   if (first.kind === "unrelated") {
     throw new SchemaNotReadyError(
       "unrelated_database",
@@ -637,7 +631,7 @@ export async function ensureSchema(args: {
     }
     return withMigrateLock(db, async () => {
       const again = await inspectSchema(db, bundle);
-      if (again.kind === "unsafe_damage" || again.kind === "partial_unexpected" || again.kind === "unrelated") {
+      if (again.kind === "unsafe_damage" || again.kind === "unrelated") {
         throw new SchemaNotReadyError("partial_schema", "The database's condition changed before initialization/repair could run; stopping without modifying it.");
       }
       let appliedMigrations: string[] = [];

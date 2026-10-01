@@ -46,19 +46,15 @@ async function buildShape() {
   const db = new PGlite();
   for (const m of MIGRATION_BUNDLE) await db.exec(m.sql);
 
-  // The FULL Compass Tools CRM schema this migration bundle creates — every
-  // table, not just REQUIRED_TABLES (the narrower subset the website's own
-  // write paths touch and that schema-guard.ts is willing to targeted-repair).
-  // schema-guard.ts uses this complete list ONLY to tell "a legitimate CRM
-  // table the website doesn't happen to use" apart from "a table belonging
-  // to some other, unrelated application" when deciding whether a database
-  // is safely recognizable — never to gate readiness or trigger repair for
-  // tables outside REQUIRED_TABLES.
-  const allTables = (
-    await db.query(
-      `SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE' AND table_name <> '_prisma_migrations' ORDER BY table_name`,
-    )
-  ).rows.map((r) => r.table_name);
+  // NOTE: this used to also capture a complete list of every table the full
+  // migration bundle creates, so schema-guard.ts could tell "a legitimate
+  // CRM table we don't happen to use" apart from "a table from an unrelated
+  // application." That went stale the moment Compass Tools (developed in a
+  // separate repository) shipped a migration this repo's copy didn't know
+  // about yet, and took down every website write path in production —
+  // schema-guard.ts no longer requires a complete inventory of the shared
+  // database (see that file's header), so there is nothing left for such a
+  // list to feed, and it is deliberately not generated.
 
   const shape = {};
   for (const table of REQUIRED_TABLES) {
@@ -155,14 +151,14 @@ async function buildShape() {
     };
   }
   await db.close();
-  return { shape, allTables };
+  return { shape };
 }
 
 function toAddConstraint(table, c) {
   return { name: c.name, sql: `ALTER TABLE "${table}" ADD CONSTRAINT "${c.name}" ${c.def};` };
 }
 
-function render({ shape, allTables }) {
+function render({ shape }) {
   const lines = [
     "// GENERATED FILE — do not edit by hand. Run `npm run bundle:schema-shape`.",
     "// Source: the real 54 migrations (prisma/migrations), introspected via PostgreSQL's own",
@@ -195,13 +191,6 @@ function render({ shape, allTables }) {
     "",
     `export const SCHEMA_SHAPE: Readonly<Record<string, TableShape>> = ${JSON.stringify(shape, null, 2)} as const;`,
     "",
-    "// Every table the full 54-migration Compass Tools CRM schema creates —",
-    "// a strict superset of Object.keys(SCHEMA_SHAPE) (REQUIRED_TABLES). Used",
-    "// by schema-guard.ts only to recognize a legitimate CRM table the website",
-    "// itself never queries (e.g. Booking, Quote) as NOT foreign/unexpected —",
-    "// never to gate readiness or trigger repair outside REQUIRED_TABLES.",
-    `export const ALL_SCHEMA_TABLES: readonly string[] = ${JSON.stringify(allTables, null, 2)} as const;`,
-    "",
   ];
   return lines.join("\n");
 }
@@ -210,7 +199,7 @@ const isMain = process.argv[1] && fileURLToPath(import.meta.url) === path.resolv
 if (isMain) {
   const built = await buildShape();
   fs.writeFileSync(outFile, render(built), "utf8");
-  console.log(`Wrote ${path.relative(root, outFile)} (${Object.keys(built.shape).length} required tables, ${built.allTables.length} total CRM tables)`);
+  console.log(`Wrote ${path.relative(root, outFile)} (${Object.keys(built.shape).length} required tables)`);
 }
 
 export { buildShape, render };

@@ -94,7 +94,6 @@ test.describe("bundled migration history", () => {
     const built = await buildShape();
     expect(onDisk).toBe(render(built));
     expect(Object.keys(built.shape)).toEqual([...REQUIRED_TABLES]);
-    expect(built.allTables.length).toBeGreaterThan(REQUIRED_TABLES.length);
   });
 });
 
@@ -128,15 +127,102 @@ test.describe("ensureSchema() against a real PostgreSQL engine — CASE 1: healt
     expect(await count(runner, "Company")).toBe(1);
   });
 
-  test("a KNOWN legacy external table (from the removed Google Sheets integration) does not block a healthy database, and is never touched", async () => {
+  test("a table this guard has never heard of (legacy, or a brand-new CRM table) does not block a healthy database, and is never touched", async () => {
     const runner = await healthyDb();
-    await runner.exec(`CREATE TABLE "NewsletterSubscriber" (id serial primary key, email text); INSERT INTO "NewsletterSubscriber" (email) VALUES ('legacy@example.com');`);
+    await runner.exec(`CREATE TABLE "SomeTableThisRepoHasNeverSeen" (id serial primary key, note text); INSERT INTO "SomeTableThisRepoHasNeverSeen" (note) VALUES ('legacy or future CRM data');`);
     const insp = await inspectSchema(runner, MIGRATION_BUNDLE);
     expect(insp.kind).toBe("healthy");
-    expect(insp.unexpectedTables).toEqual([]);
     const result = await ensureSchema({ db: runner, bundle: MIGRATION_BUNDLE, autoInit: true });
     expect(result.kind).toBe("healthy");
-    expect(await count(runner, "NewsletterSubscriber")).toBe(1);
+    expect(await count(runner, "SomeTableThisRepoHasNeverSeen")).toBe(1);
+  });
+});
+
+// Regression coverage for the real 2026-10-01 production incident: an
+// earlier version of this guard refused whenever the database contained a
+// table outside a hand-maintained "every other known CRM table" list. That
+// list was captured once from this repo's copy of the CRM's migration
+// history and went stale the moment the separately-developed Compass Tools
+// CRM shipped a migration this repo didn't know about yet — which took down
+// EVERY website write path in production (Flight Request, Newsletter, …)
+// identically, since all of them share this one guard. The fix: the guard
+// never requires a complete inventory of the shared database — see
+// src/lib/schema-guard.ts's header. Named Case A–G to match the exact
+// regression scenarios this was specified against.
+test.describe("shared-database table inventory is never required (regression for the 2026-10-01 production incident)", () => {
+  /** Strips every table the full migration bundle creates down to ONLY REQUIRED_TABLES, leaving nothing else in `public` (Case A). */
+  async function requiredTablesOnlyDb(): Promise<SqlRunner> {
+    const runner = await healthyDb();
+    const allTables = (await runner.query(`SELECT table_name FROM information_schema.tables WHERE table_schema='public' AND table_type='BASE TABLE' AND table_name <> '_prisma_migrations'`)).map(
+      (r) => String(r.table_name),
+    );
+    const extra = allTables.filter((t) => !(REQUIRED_TABLES as readonly string[]).includes(t));
+    await runner.exec(`DROP TABLE ${extra.map((t) => `"${t}"`).join(", ")} CASCADE`);
+    return runner;
+  }
+
+  test("Case A — a database containing ONLY the website's required schema (no other CRM tables at all) is healthy", async () => {
+    const runner = await requiredTablesOnlyDb();
+    const insp = await inspectSchema(runner, MIGRATION_BUNDLE);
+    expect(insp.kind).toBe("healthy");
+    expect(insp.missingTables).toEqual([]);
+    const result = await ensureSchema({ db: runner, bundle: MIGRATION_BUNDLE, autoInit: false });
+    expect(result.kind).toBe("healthy");
+  });
+
+  test("Case B — the website's required schema alongside the full set of known CRM tables is healthy", async () => {
+    const runner = await healthyDb(); // the real 54-migration bundle creates every known CRM table alongside the required ones
+    const insp = await inspectSchema(runner, MIGRATION_BUNDLE);
+    expect(insp.kind).toBe("healthy");
+  });
+
+  test("Case C (THE CRITICAL REGRESSION TEST) — the website's required schema alongside a table that is NOT in this repository's migration snapshot at all is STILL healthy", async () => {
+    const runner = await requiredTablesOnlyDb(); // website schema only, per Case A
+    // Simulates Compass Tools (developed in a separate repository) having
+    // shipped a brand-new table this website's copy of the migration
+    // history has never seen — exactly the real production scenario.
+    await runner.exec(`CREATE TABLE "BrandNewCrmFeatureThisRepoDoesNotKnowAbout" (id text primary key, payload jsonb)`);
+    const insp = await inspectSchema(runner, MIGRATION_BUNDLE);
+    expect(insp.kind).toBe("healthy"); // MUST be accepted — this is the exact bug that broke production
+    const result = await ensureSchema({ db: runner, bundle: MIGRATION_BUNDLE, autoInit: false });
+    expect(result.kind).toBe("healthy");
+    // the unknown table itself is never inspected, altered, or dropped
+    expect(await count(runner, "BrandNewCrmFeatureThisRepoDoesNotKnowAbout")).toBe(0);
+  });
+
+  test("Case D — a missing website-managed table is still detected and goes through the existing safe repair/refusal behavior, even with an unknown CRM table also present", async () => {
+    const runner = await healthyDb();
+    await runner.exec(`CREATE TABLE "AnotherBrandNewCrmTable" (id text primary key)`);
+    await runner.exec(`DROP TABLE "Subscriber" CASCADE`);
+    const insp = await inspectSchema(runner, MIGRATION_BUNDLE);
+    expect(insp.kind).toBe("needs_repair"); // the unknown table does not change this
+    await expect(ensureSchema({ db: runner, bundle: MIGRATION_BUNDLE, autoInit: false })).rejects.toMatchObject({ reason: "repair_not_permitted" });
+    const repaired = await ensureSchema({ db: runner, bundle: MIGRATION_BUNDLE, autoInit: true });
+    expect(repaired).toMatchObject({ kind: "healthy", repaired: true, tablesRepaired: ["Subscriber"] });
+    expect(await count(runner, "AnotherBrandNewCrmTable")).toBe(0); // the unknown table was never touched
+  });
+
+  test("Case E — an unsafe structural mismatch on a website-managed table is still refused, even with an unknown CRM table also present", async () => {
+    const runner = await healthyDb();
+    await runner.exec(`CREATE TABLE "YetAnotherNewCrmTable" (id text primary key)`);
+    await runner.exec(`ALTER TABLE "Subscriber" DROP COLUMN email`);
+    const insp = await inspectSchema(runner, MIGRATION_BUNDLE);
+    expect(insp.kind).toBe("unsafe_damage");
+    await expect(ensureSchema({ db: runner, bundle: MIGRATION_BUNDLE, autoInit: true })).rejects.toMatchObject({ reason: "unsafe_structural_damage" });
+  });
+
+  test("Case F — a genuinely empty database retains the existing empty-database initialization policy, unaffected by this fix", async () => {
+    const { runner } = await newDb();
+    expect((await inspectSchema(runner, MIGRATION_BUNDLE)).kind).toBe("empty");
+    await expect(ensureSchema({ db: runner, bundle: MIGRATION_BUNDLE, autoInit: false })).rejects.toMatchObject({ reason: "empty_init_not_permitted" });
+  });
+
+  test("Case G — a non-empty database containing NONE of the website's required tables is still refused as unrelated, unaffected by this fix", async () => {
+    const { runner } = await newDb();
+    await runner.exec(`CREATE TABLE totally_unrelated_app_table (id serial primary key, total int); INSERT INTO totally_unrelated_app_table (total) VALUES (42);`);
+    expect((await inspectSchema(runner, MIGRATION_BUNDLE)).kind).toBe("unrelated");
+    await expect(ensureSchema({ db: runner, bundle: MIGRATION_BUNDLE, autoInit: true })).rejects.toMatchObject({ reason: "unrelated_database" });
+    expect(await count(runner, "totally_unrelated_app_table")).toBe(1); // untouched
   });
 });
 
@@ -554,25 +640,15 @@ test.describe("ensureSchema() — CASE 5: unrelated/unknown database", () => {
     expect(await count(runner, "other_app_orders")).toBe(1);
   });
 
-  test("a database with ONLY the known legacy external tables (no required tables at all) is still refused as unrelated — their presence is not \"strong evidence\" this is our database", async () => {
+  test("a database with ONLY an unrecognized table (no required tables at all) is still refused as unrelated — an unknown table's presence is not \"strong evidence\" this is our database", async () => {
     const { runner } = await newDb();
-    await runner.exec(`CREATE TABLE "NewsletterSubscriber" (id serial primary key, email text)`);
+    await runner.exec(`CREATE TABLE some_other_apps_table (id serial primary key, note text)`);
     expect((await inspectSchema(runner, MIGRATION_BUNDLE)).kind).toBe("unrelated");
     await expect(ensureSchema({ db: runner, bundle: MIGRATION_BUNDLE, autoInit: true })).rejects.toMatchObject({ reason: "unrelated_database" });
   });
-
-  test("PARTIAL + an UNRECOGNIZED table present (not one of ours, not a known legacy table): refused as ambiguous, distinct from a clean needs_repair case", async () => {
-    const runner = await healthyDb();
-    await runner.exec(`DROP TABLE "Notification" CASCADE`);
-    await runner.exec(`CREATE TABLE some_other_apps_table (id serial primary key)`);
-    const insp = await inspectSchema(runner, MIGRATION_BUNDLE);
-    expect(insp.kind).toBe("partial_unexpected");
-    expect(insp.unexpectedTables).toEqual(["some_other_apps_table"]);
-    const before = await snapshot(runner);
-    await expect(ensureSchema({ db: runner, bundle: MIGRATION_BUNDLE, autoInit: true })).rejects.toMatchObject({ reason: "partial_schema" });
-    expect(await snapshot(runner)).toBe(before);
-    expect(await count(runner, "Company")).toBe(1); // pre-existing data untouched
-  });
+  // The corrected version of "required tables present + an unrecognized table also present" —
+  // this now MUST be accepted, not refused — is covered above in "shared-database table
+  // inventory is never required", Cases C and D (the exact regression this fixes).
 });
 
 test.describe("write-path coverage", () => {
