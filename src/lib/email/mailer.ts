@@ -83,7 +83,12 @@ function transport() {
   const user = cleanEnvValue(process.env.GMAIL_SENDER_EMAIL);
   const pass = cleanEnvValue(process.env.GMAIL_APP_PASSWORD);
   if (!user || !pass) {
-    throw new Error("Email is not configured: GMAIL_SENDER_EMAIL and GMAIL_APP_PASSWORD must both be set (server-side only; see docs/ENVIRONMENT.md).");
+    // Names which variable is missing (never a value). `code: "ECONFIG"` is
+    // this app's own marker so the failure is classified as
+    // configuration_invalid instead of falling through to "other" — a missing
+    // App Password is a configuration problem, not an SMTP one.
+    const missing = [!user && "GMAIL_SENDER_EMAIL", !pass && "GMAIL_APP_PASSWORD"].filter(Boolean).join(" and ");
+    throw Object.assign(new Error(`Email is not configured: ${missing} must be set (server-side only; see docs/ENVIRONMENT.md).`), { code: "ECONFIG" });
   }
   cachedTransport = nodemailer.createTransport({
     host: "smtp.gmail.com",

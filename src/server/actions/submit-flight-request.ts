@@ -14,6 +14,8 @@ import { resolveContact } from "@/server/contact";
 import { ensureSchemaReady, noteWriteFailure } from "@/server/schema-ready";
 import { sendFlightRequestNotification, type FlightRequestSegment } from "@/lib/email/flight-request-notification";
 import { gmailMailer } from "@/lib/email/mailer";
+import { deriveLeadId } from "@/lib/submission-id";
+import { createWebsiteLead } from "@/server/create-website-lead";
 
 export type SubmitFlightRequestResult =
   | {
@@ -49,6 +51,22 @@ function formatSegmentsForNotes(input: FlightRequestInput): string {
   return `Multi-city itinerary requested:\n${lines.join("\n")}`;
 }
 
+// Runs best-effort work after the response. next/server's after() hands it to
+// the platform's waitUntil (Vercel keeps the function alive for it, up to the
+// page's maxDuration) and reports errors thrown inside the task — but it
+// throws SYNCHRONOUSLY at the call site where the platform provides no
+// waitUntil. That must never turn an already-saved request into an error for
+// the customer, so in that case the work runs before responding instead.
+// Every task passed in catches its own failures.
+async function afterResponse(task: () => Promise<unknown>, label: string): Promise<void> {
+  try {
+    after(task);
+  } catch (err) {
+    console.error(`[submitFlightRequest] after() is unavailable for ${label}; running it before responding instead`, err);
+    await task();
+  }
+}
+
 export async function submitFlightRequest(input: FlightRequestInput): Promise<SubmitFlightRequestResult> {
   const headerList = await headers();
   const ip = headerList.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
@@ -82,12 +100,26 @@ export async function submitFlightRequest(input: FlightRequestInput): Promise<Su
     return { ok: false, error: message, fieldErrors: { phone: message } };
   }
 
+  // Step timings (milliseconds only — never any customer data) go to the
+  // server log so a slow request can be attributed to a step instead of
+  // guessed at; the database is far from the function (see docs/ENVIRONMENT.md),
+  // so every sequential round trip counts.
+  const startedAt = performance.now();
+  const timings: Record<string, number> = {};
+  let lapAt = startedAt;
+  const lap = (label: string) => {
+    const now = performance.now();
+    timings[label] = Math.round(now - lapAt);
+    lapAt = now;
+  };
+
   try {
     // This action writes Airport rows before it ever reaches getCrmCompanyId(),
     // so the schema is verified here first (memoized per instance; see
     // src/lib/schema-guard.ts). On an intentionally-new database with
     // DATABASE_AUTO_INIT=true this initializes it and the request continues.
     await ensureSchemaReady();
+    lap("schema");
 
     const firstSegment = data.segments[0];
 
@@ -125,6 +157,8 @@ export async function submitFlightRequest(input: FlightRequestInput): Promise<Su
       }),
     ]);
 
+    lap("airports");
+
     const contactId = await resolveContact({
       firstName: data.firstName,
       lastName: data.lastName,
@@ -135,8 +169,16 @@ export async function submitFlightRequest(input: FlightRequestInput): Promise<Su
 
     const notesParts = [data.notes?.trim(), formatSegmentsForNotes(data)].filter(Boolean);
 
-    const lead = await prisma.lead.create({
-      data: {
+    lap("contact");
+
+    // The Lead, its status history and its LEAD_CREATED activity are written
+    // in ONE transaction. When the form sent a submission key, the Lead's
+    // primary key is derived from it, so a retried/duplicated POST of the
+    // same submission lands on the same row instead of creating a second
+    // Lead (see src/lib/submission-id.ts and src/server/create-website-lead.ts).
+    const created = await createWebsiteLead(
+      prisma,
+      {
         contactId,
         departureAirportId: fromAirport.id,
         arrivalAirportId: toAirport.id,
@@ -157,24 +199,45 @@ export async function submitFlightRequest(input: FlightRequestInput): Promise<Su
         LeadStatusHistory: {
           create: [{ toStatus: "ATTEMPTING_TO_CONTACT" }],
         },
+        Activity: {
+          create: [{ contactId, actorId: null, type: "LEAD_CREATED", description: "Lead created from the website flight request form" }],
+        },
       },
-    });
+      data.submissionId ? deriveLeadId(data.submissionId) : undefined,
+    );
+    lap("lead");
 
-    await prisma.activity.create({
-      data: {
-        leadId: lead.id,
-        contactId,
-        actorId: null,
-        type: "LEAD_CREATED",
-        description: "Lead created from the website flight request form",
-      },
-    });
+    const summary = {
+      tripType: data.tripType,
+      route: `${fromAirport.city} (${fromAirport.iata}) → ${toAirport.city} (${toAirport.iata})`,
+      departureDate: firstSegment.departureDate,
+      returnDate: data.returnDate,
+      passengers: data.adults + data.children + data.infants,
+      cabinClass: data.cabinClass,
+    };
+    console.info(`[submitFlightRequest] persisted in ${Math.round(performance.now() - startedAt)}ms (steps, ms: ${JSON.stringify(timings)})${created.duplicate ? " — duplicate of an already-saved submission" : ""}`);
 
-    // Best-effort: a queue with nobody active in it right now must never
-    // fail the customer's submission.
-    await distributeNewWebsiteLead(lead.id).catch((err) => {
-      console.error("[submitFlightRequest] distribution failed", err);
-    });
+    // The same submission already saved this Lead (a retried or repeated
+    // POST): the customer's request IS saved, so they get the same success —
+    // but the Lead was already queued and announced the first time, so
+    // neither happens again.
+    if (created.duplicate) return { ok: true, summary };
+
+    // Best-effort queue assignment. It is not needed for the customer's
+    // response (an unassigned Lead is simply picked up later by the CRM's own
+    // distributor), and it is the single largest block of sequential
+    // database round trips in this request — 9 to 15 of them, measured by
+    // replaying this exact code against a real engine — so it runs after the
+    // response instead of before it. A queue with nobody active in it, or a
+    // failure here, must never touch the customer's submission.
+    await afterResponse(
+      () =>
+      distributeNewWebsiteLead(created.id).then(
+        (r) => console.info(`[submitFlightRequest] lead distribution: ${r.assigned ? "assigned" : r.reason}`),
+        (err) => console.error("[submitFlightRequest] distribution failed", err),
+      ),
+      "lead distribution",
+    );
 
     // Internal-only notification to the Business Flights Travel team — NOT
     // the customer-facing response below, which is unchanged either way.
@@ -192,7 +255,8 @@ export async function submitFlightRequest(input: FlightRequestInput): Promise<Su
     const emailSegments: FlightRequestSegment[] = data.segments.map((seg, i) =>
       i === 0 ? { from: fromAirport, to: toAirport, departureDate: seg.departureDate } : seg,
     );
-    after(() =>
+    await afterResponse(
+      () =>
       sendFlightRequestNotification(
         {
           firstName: data.firstName,
@@ -216,19 +280,10 @@ export async function submitFlightRequest(input: FlightRequestInput): Promise<Su
       ).catch((err) => {
         console.error("[submitFlightRequest] internal notification email failed", err);
       }),
+      "internal notification",
     );
 
-    return {
-      ok: true,
-      summary: {
-        tripType: data.tripType,
-        route: `${fromAirport.city} (${fromAirport.iata}) → ${toAirport.city} (${toAirport.iata})`,
-        departureDate: firstSegment.departureDate,
-        returnDate: data.returnDate,
-        passengers: data.adults + data.children + data.infants,
-        cabinClass: data.cabinClass,
-      },
-    };
+    return { ok: true, summary };
   } catch (err) {
     // Never leak DB/driver errors to the client — log full detail
     // server-side only. The categorized line first makes the failure mode

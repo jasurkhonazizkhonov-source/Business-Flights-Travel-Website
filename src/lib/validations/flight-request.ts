@@ -109,6 +109,12 @@ export const flightRequestSchema = z
     // server-side in submit-flight-request.ts.
     website: z.string().max(0, "").optional().or(z.literal("")),
     renderedAt: z.number().optional(),
+
+    // One random UUID per mounted form, reused by every attempt of the same
+    // submission (see src/lib/submission-id.ts). Optional so an older cached
+    // client bundle, or a caller without one, still works — it just gets no
+    // retry protection. Strictly a UUID: it is hashed into a primary key.
+    submissionId: z.string().uuid().optional(),
   })
   .refine((v) => v.tripType !== "MULTI_CITY" || v.segments.length >= 2, {
     message: "Add at least two flights for a multi-city trip",

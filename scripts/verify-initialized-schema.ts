@@ -20,6 +20,8 @@ import { ensureSchema, BASELINE_COMPANY } from "../src/lib/schema-guard";
 import { MIGRATION_BUNDLE } from "../src/lib/migration-bundle.generated";
 import { sendFlightRequestNotification, type FlightRequestSegment } from "../src/lib/email/flight-request-notification";
 import type { Mailer, MailMessage } from "../src/lib/email/mailer";
+import { createWebsiteLead } from "../src/server/create-website-lead";
+import { deriveLeadId } from "../src/lib/submission-id";
 
 async function main() {
   const pg = new PGlite();
@@ -187,6 +189,52 @@ async function main() {
     lead: await prisma.lead.count(), contactInquiry: await prisma.contactInquiry.count(), leadStatusHistory: await prisma.leadStatusHistory.count(),
   };
   if ((summary.counts as { company: number }).company !== 1) throw new Error("expected exactly one Company");
+
+  // --- Server-side idempotency, proven against the real engine with the real
+  // helper the Server Action uses (computed AFTER the counts above so those
+  // stay about the three flows). A repeated/retried/concurrent attempt of the
+  // same submission must land on ONE Lead (one status history, one
+  // LEAD_CREATED activity); attempts without a key, or with different keys,
+  // are separate requests and must stay separate.
+  const leadInput = (): Parameters<typeof createWebsiteLead>[1] => ({
+    contactId, departureAirportId: from.id, arrivalAirportId: to.id, departureDate: new Date("2027-02-01"), tripType: "ONE_WAY", cabinClass: "BUSINESS",
+    adults: 1, children: 0, infants: 0, flexibleDates: false, source: "WEBSITE", priority: "MEDIUM", status: "ATTEMPTING_TO_CONTACT",
+    LeadStatusHistory: { create: [{ toStatus: "ATTEMPTING_TO_CONTACT" }] },
+    Activity: { create: [{ contactId, actorId: null, type: "LEAD_CREATED", description: "Lead created from the website flight request form" }] },
+  });
+  const leadsBefore = await prisma.lead.count();
+  const keyA = "7b1d2f64-0c9e-4a3b-8d55-1f0a9c3e2b10";
+  const idA = deriveLeadId(keyA);
+  if (!/^c[0-9a-f]{24}$/.test(idA)) throw new Error(`derived lead id has an unexpected shape: ${idA}`);
+  const first = await createWebsiteLead(prisma, leadInput(), idA);
+  const second = await createWebsiteLead(prisma, leadInput(), idA); // the "retried POST"
+  if (first.duplicate || first.id !== idA) throw new Error(`first attempt should create the Lead under the derived id: ${JSON.stringify(first)}`);
+  if (!second.duplicate || second.id !== idA) throw new Error(`second attempt should be reported as a duplicate of the same Lead: ${JSON.stringify(second)}`);
+  const keyB = "0d8c4a77-5e21-47aa-9b0c-6a1e3f9d8c21";
+  const concurrent = await Promise.all([1, 2, 3, 4].map(() => createWebsiteLead(prisma, leadInput(), deriveLeadId(keyB))));
+  const concurrentCreated = concurrent.filter((r) => !r.duplicate).length;
+  if (concurrentCreated !== 1) throw new Error(`4 concurrent attempts of one submission must create exactly one Lead, created ${concurrentCreated}`);
+  const noKey1 = await createWebsiteLead(prisma, leadInput());
+  const noKey2 = await createWebsiteLead(prisma, leadInput());
+  if (noKey1.duplicate || noKey2.duplicate || noKey1.id === noKey2.id) throw new Error("two requests without a submission key must stay two separate Leads");
+  const leadsAfterAll = await prisma.lead.count();
+  if (leadsAfterAll - leadsBefore !== 4) throw new Error(`expected 4 new Leads (A, B, and the two keyless), got ${leadsAfterAll - leadsBefore}`);
+  for (const id of [idA, deriveLeadId(keyB)]) {
+    const activities = await prisma.activity.count({ where: { leadId: id, type: "LEAD_CREATED" } });
+    const history = await prisma.leadStatusHistory.count({ where: { leadId: id } });
+    if (activities !== 1 || history !== 1) throw new Error(`lead ${id} must have exactly one LEAD_CREATED activity and one status history row, got ${activities}/${history}`);
+  }
+  // A genuine failure (invalid FK) under a key is NOT mistaken for a duplicate, creates nothing, and still throws.
+  let realFailureThrew = false;
+  try {
+    await createWebsiteLead(prisma, { ...leadInput(), departureAirportId: -999999 }, deriveLeadId("11111111-1111-4111-8111-111111111111"));
+  } catch {
+    realFailureThrew = true;
+  }
+  if (!realFailureThrew) throw new Error("a real persistence failure must propagate, not be reported as a duplicate");
+  if ((await prisma.lead.count()) !== leadsAfterAll) throw new Error("a failed attempt must not leave a Lead behind");
+  summary.idempotency = { sameKeyTwice: "one Lead, second reported duplicate", concurrentSameKey: "4 attempts -> 1 Lead", noKeyOrDifferentKey: "separate Leads", leadHasOneActivityAndHistory: true, realFailurePropagates: true };
+
   console.log(JSON.stringify({ ok: true, ...summary }));
   await prisma.$disconnect();
   await pg.close();

@@ -41,4 +41,9 @@ test("schema built from empty by the initializer accepts the website's real Pris
   // failure never affects already-persisted data.
   expect(result.notificationNotAttemptedOnDbFailure).toBe(true);
   expect(result.dataPreservedOnEmailFailure).toBe(true);
+  // Server-side idempotency, proven against the real engine with the real
+  // helper the Server Action calls: same submission key twice or four-way
+  // concurrent -> exactly one Lead; no key / different keys -> separate Leads;
+  // a genuine failure is never mistaken for a duplicate.
+  expect(result.idempotency).toMatchObject({ leadHasOneActivityAndHistory: true, realFailurePropagates: true });
 });

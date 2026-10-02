@@ -11,6 +11,7 @@ import {
 } from "../src/lib/email/flight-request-notification";
 import type { Mailer, MailMessage } from "../src/lib/email/mailer";
 import { airportSchema, flightRequestSchema } from "../src/lib/validations/flight-request";
+import { deriveLeadId } from "../src/lib/submission-id";
 
 // Everything here exercises src/lib/email/flight-request-notification.ts
 // directly — it is deliberately dependency-free (pure template building) or
@@ -493,24 +494,28 @@ test.describe("submit-flight-request.ts call-site ordering (structural regressio
     expect(notifyIdx).toBeGreaterThan(antiSpamIdx);
   });
 
-  test("the notification call appears after the Lead and Activity are created, and before the success return", () => {
-    const leadCreateIdx = source.indexOf("prisma.lead.create");
-    const activityCreateIdx = source.indexOf("prisma.activity.create");
-    const notifyIdx = source.indexOf("sendFlightRequestNotification(");
-    const successReturnIdx = source.indexOf("ok: true,\n      summary:");
+  test("the notification call appears after the Lead (with its LEAD_CREATED activity, written in the same transaction) is created, and before the success return", () => {
+    const leadCreateIdx = source.indexOf("await createWebsiteLead(");
+    const activityInLeadIdx = source.indexOf('type: "LEAD_CREATED"');
+    const notifyIdx = source.indexOf("sendFlightRequestNotification(", source.lastIndexOf("afterResponse("));
+    const successReturnIdx = source.lastIndexOf("return { ok: true, summary };");
+    expect(leadCreateIdx).toBeGreaterThan(-1);
+    expect(activityInLeadIdx).toBeGreaterThan(leadCreateIdx); // nested inside the Lead's create, not a separate later statement
+    expect(source).not.toContain("prisma.activity.create");
     expect(notifyIdx).toBeGreaterThan(leadCreateIdx);
-    expect(notifyIdx).toBeGreaterThan(activityCreateIdx);
     expect(successReturnIdx).toBeGreaterThan(notifyIdx);
   });
 
   test("the notification call has its own .catch() — a rejection can never propagate to the action's try/catch (which would otherwise turn a successful submission into the generic failure response)", () => {
-    const notifyBlock = source.slice(source.indexOf("sendFlightRequestNotification("), source.indexOf("sendFlightRequestNotification(") + 1500);
+    const callIdx = source.indexOf("sendFlightRequestNotification(", source.lastIndexOf("await afterResponse("));
+    const notifyBlock = source.slice(callIdx, callIdx + 1500);
     expect(notifyBlock).toContain(".catch(");
   });
 
   test("the notification call is deferred via next/server's after() rather than awaited inline — the customer's response must never block on Gmail being slow or unreachable", () => {
     expect(source).toContain('import { after } from "next/server"');
-    const afterIdx = source.indexOf("after(() =>");
+    // The LAST after(): the first one schedules queue distribution (below).
+    const afterIdx = source.lastIndexOf("afterResponse(");
     expect(afterIdx).toBeGreaterThan(-1);
     // Searched FROM afterIdx, not from the start of the file — an earlier
     // comment elsewhere in this file also contains the literal substring
@@ -841,5 +846,118 @@ test.describe("input bounds on client-supplied airport text", () => {
     expect(airportSchema.safeParse({ iata: "AAA", city: "c".repeat(42), name: "n".repeat(90), country: "k".repeat(44) }).success).toBe(true);
     expect(airportSchema.safeParse({ iata: "AAA", city: "c".repeat(121), name: "n", country: "k" }).success).toBe(false);
     expect(airportSchema.safeParse({ iata: "AAA", city: "c", name: "n".repeat(100_000), country: "k" }).success).toBe(false);
+  });
+});
+
+test.describe("server-side idempotency and request latency (structural + pure parts; the database behaviour is proven in tests/schema-init-e2e.spec.ts)", () => {
+  const actionSource = fs.readFileSync(path.resolve(__dirname, "../src/server/actions/submit-flight-request.ts"), "utf8");
+  const formSource = fs.readFileSync(path.resolve(__dirname, "../src/components/flight-form/FlightRequestForm.tsx"), "utf8");
+
+  test("deriveLeadId is deterministic, cuid-shaped, and different for every key", () => {
+    const a = deriveLeadId("7b1d2f64-0c9e-4a3b-8d55-1f0a9c3e2b10");
+    expect(a).toBe(deriveLeadId("7b1d2f64-0c9e-4a3b-8d55-1f0a9c3e2b10"));
+    expect(a).toMatch(/^c[0-9a-f]{24}$/);
+    expect(deriveLeadId("0d8c4a77-5e21-47aa-9b0c-6a1e3f9d8c21")).not.toBe(a);
+    expect(new Set(Array.from({ length: 500 }, () => deriveLeadId(crypto.randomUUID()))).size).toBe(500);
+  });
+
+  test("submissionId must be a UUID (it is hashed into a primary key) but stays optional", () => {
+    expect(flightRequestSchema.safeParse(validRequest()).success).toBe(true);
+    expect(flightRequestSchema.safeParse({ ...validRequest(), submissionId: "7b1d2f64-0c9e-4a3b-8d55-1f0a9c3e2b10" }).success).toBe(true);
+    for (const bad of ["x", "", "7b1d2f64-0c9e-4a3b-8d55", "'; DROP TABLE \"Lead\"; --", "7b1d2f64-0c9e-4a3b-8d55-1f0a9c3e2b10\n"]) {
+      expect(flightRequestSchema.safeParse({ ...validRequest(), submissionId: bad }).success, JSON.stringify(bad)).toBe(false);
+    }
+  });
+
+  test("the form mints ONE key per mounted form and sends it with the payload", () => {
+    expect(formSource).toMatch(/const \[submissionId\] = useState\(\(\) => globalThis\.crypto\?\.randomUUID\?\.\(\)\);/);
+    expect(formSource).toMatch(/renderedAt,\s*submissionId,\s*\};/);
+  });
+
+  test("the Lead is created through the idempotent helper with a derived id, and a duplicate returns success BEFORE queueing or notifying", () => {
+    const createIdx = actionSource.indexOf("await createWebsiteLead(");
+    const deriveIdx = actionSource.indexOf("deriveLeadId(data.submissionId)");
+    const dupIdx = actionSource.indexOf("if (created.duplicate) return { ok: true, summary };");
+    const firstAfterIdx = actionSource.indexOf("await afterResponse(");
+    expect(createIdx).toBeGreaterThan(-1);
+    expect(deriveIdx).toBeGreaterThan(createIdx);
+    expect(dupIdx).toBeGreaterThan(deriveIdx);
+    expect(firstAfterIdx).toBeGreaterThan(dupIdx); // no after() work is registered on the duplicate path
+  });
+
+  test("queue distribution runs in after() (not awaited inline), after the Lead exists, and its failure is caught and logged", () => {
+    const distIdx = actionSource.indexOf("distributeNewWebsiteLead(created.id)");
+    const afterIdx = actionSource.lastIndexOf("afterResponse(", distIdx);
+    const returnIdx = actionSource.lastIndexOf("return { ok: true, summary };");
+    expect(distIdx).toBeGreaterThan(-1);
+    expect(distIdx - afterIdx).toBeLessThan(60);
+    expect(actionSource).not.toMatch(/await distributeNewWebsiteLead\(/);
+    expect(actionSource.slice(distIdx, distIdx + 400)).toContain("distribution failed");
+    expect(returnIdx).toBeGreaterThan(distIdx);
+  });
+
+  test("the step-timing log line carries only numbers and fixed labels — no customer field is interpolated into it", () => {
+    const line = actionSource.split("\n").find((l) => l.includes("[submitFlightRequest] persisted in"))!;
+    expect(line).toBeTruthy();
+    for (const field of ["data.", "email", "phone", "firstName", "lastName", "notes"]) expect(line).not.toContain(field);
+  });
+});
+
+test.describe("Gmail configuration matrix (the credential combinations the deployment can actually be in)", () => {
+  const prevSender = process.env.GMAIL_SENDER_EMAIL;
+  test.afterEach(() => {
+    if (prevSender === undefined) delete process.env.GMAIL_SENDER_EMAIL;
+    else process.env.GMAIL_SENDER_EMAIL = prevSender;
+  });
+  const mailerSource = fs.readFileSync(path.resolve(__dirname, "../src/lib/email/mailer.ts"), "utf8");
+
+  test("sender missing (with or without a password): skipped as not_configured, the mailer is never called", async () => {
+    delete process.env.GMAIL_SENDER_EMAIL;
+    const { mailer, sent } = fakeMailer();
+    expect(await sendFlightRequestNotification(BASE, { mailer, log: () => {} })).toEqual({ sent: false, reason: "not_configured" });
+    expect(sent).toHaveLength(0);
+  });
+
+  test("password missing: the mailer's own ECONFIG error is classified configuration_invalid, never 'other', and the log names the failure without any value", async () => {
+    process.env.GMAIL_SENDER_EMAIL = "ops@businessflights.travel";
+    const logs: string[] = [];
+    const notConfigured: Mailer = { send: async () => { throw Object.assign(new Error("Email is not configured: GMAIL_APP_PASSWORD must be set"), { code: "ECONFIG" }); } };
+    expect(await sendFlightRequestNotification(BASE, { mailer: notConfigured, log: (m) => logs.push(m) })).toEqual({ sent: false, reason: "send_failed", category: "configuration_invalid" });
+    expect(logs.join("\n")).toContain("configuration_invalid");
+  });
+
+  test("mailer.ts throws that ECONFIG error, naming only the variable NAMES that are missing", () => {
+    expect(mailerSource).toContain('code: "ECONFIG"');
+    expect(mailerSource).toContain('!user && "GMAIL_SENDER_EMAIL"');
+    expect(mailerSource).toContain('!pass && "GMAIL_APP_PASSWORD"');
+  });
+
+  test("invalid sender -> configuration_invalid before any SMTP attempt; bad credentials -> authentication_failed; unreachable SMTP -> connection_failed", async () => {
+    const { mailer, sent } = fakeMailer();
+    process.env.GMAIL_SENDER_EMAIL = "definitely not an address";
+    expect(await sendFlightRequestNotification(BASE, { mailer, log: () => {} })).toMatchObject({ category: "configuration_invalid" });
+    expect(sent).toHaveLength(0);
+    process.env.GMAIL_SENDER_EMAIL = "ops@businessflights.travel";
+    const throwing = (code: string): Mailer => ({ send: async () => { throw Object.assign(new Error("x"), { code }); } });
+    expect(await sendFlightRequestNotification(BASE, { mailer: throwing("EAUTH"), log: () => {} })).toMatchObject({ category: "authentication_failed" });
+    expect(await sendFlightRequestNotification(BASE, { mailer: throwing("ETIMEDOUT"), log: () => {} })).toMatchObject({ category: "connection_failed" });
+    expect(await sendFlightRequestNotification(BASE, { mailer: throwing("EENVELOPE"), log: () => {} })).toMatchObject({ category: "envelope_rejected" });
+    expect(await sendFlightRequestNotification(BASE, { mailer: throwing("EMESSAGE"), log: () => {} })).toMatchObject({ category: "message_rejected" });
+  });
+});
+
+test.describe("after() can never turn a saved request into a customer-facing error", () => {
+  const source = fs.readFileSync(path.resolve(__dirname, "../src/server/actions/submit-flight-request.ts"), "utf8");
+  test("after() is called in exactly one place — inside afterResponse(), in a try whose catch runs the task before responding (next/server's after() throws synchronously where the platform has no waitUntil)", () => {
+    // Code only: lines that START with `after(` — the comments mention after() too.
+    expect(source.match(/^\s*after\(/gm)).toHaveLength(1);
+    expect(source).not.toMatch(/^\s*after\(\(\) =>/m);
+    const helper = source.slice(source.indexOf("async function afterResponse("), source.indexOf("export async function submitFlightRequest("));
+    expect(helper).toMatch(/try \{\s*after\(task\);\s*\} catch \(err\) \{[\s\S]*await task\(\);/);
+  });
+  test("both best-effort tasks (queue distribution, internal notification) go through that helper and catch their own failures", () => {
+    expect(source.match(/await afterResponse\(/g)).toHaveLength(2);
+    expect(source).toMatch(/distribution failed/);
+    expect(source).toMatch(/internal notification email failed/);
   });
 });

@@ -430,6 +430,8 @@ function categorizeNodemailerError(code: unknown): NodemailerErrorCategory {
       return "envelope_rejected";
     case "EMESSAGE":
       return "message_rejected";
+    case "ECONFIG": // thrown by mailer.ts when GMAIL_SENDER_EMAIL or GMAIL_APP_PASSWORD is missing
+      return "configuration_invalid";
     default:
       return "other";
   }
