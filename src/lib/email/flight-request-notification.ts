@@ -68,7 +68,26 @@ function escapeHtml(value: string): string {
 // builds a header value defends itself unconditionally rather than trusting
 // the caller.
 function subjectSafe(value: string): string {
-  return value.replace(/[\r\n]+/g, " ");
+  // Any control character (CR/LF included) plus the Unicode line/paragraph
+  // separators (\p{Zl}, \p{Zp}) — none can legitimately appear in an airport
+  // code. Written as Unicode property classes on purpose: a literal
+  // separator character inside a regex literal (or a // comment) is itself
+  // a line terminator and is a syntax error.
+  return value.replace(/[\p{Cc}\p{Zl}\p{Zp}]+/gu, " ");
+}
+
+// The form submits the cabin as an enum value ("PREMIUM_ECONOMY"); the
+// internal reader should see the same wording the form shows. An unknown
+// value (or a caller that already passes a display string) is shown as-is.
+const CABIN_LABEL: Record<string, string> = {
+  ECONOMY: "Economy",
+  PREMIUM_ECONOMY: "Premium Economy",
+  BUSINESS: "Business Class",
+  FIRST: "First Class",
+};
+
+function cabinLabel(cabinClass: string): string {
+  return CABIN_LABEL[cabinClass] ?? cabinClass;
 }
 
 const WEEKDAY_MONTH_DAY_YEAR = { weekday: "long", year: "numeric", month: "long", day: "numeric", timeZone: "UTC" } as const;
@@ -213,7 +232,7 @@ function additionalInfoHtml(input: FlightRequestNotificationInput): string {
   if (input.preferredAirline?.trim()) rows.push(fieldRow("Preferred Airline", escapeHtml(input.preferredAirline.trim())));
   if (typeof input.budget === "number") rows.push(fieldRow("Budget", escapeHtml(formatBudget(input.budget))));
   if (input.notes?.trim()) {
-    rows.push(fieldRow("Notes", escapeHtml(input.notes.trim()).replace(/\n/g, "<br>")));
+    rows.push(fieldRow("Notes", escapeHtml(input.notes.trim()).replace(/\r?\n/g, "<br>")));
   }
   if (rows.length === 0) return ""; // never render an empty section
   return sectionLabel("Additional Information") + rows.join("");
@@ -227,8 +246,13 @@ export function buildFlightRequestNotificationEmail(input: FlightRequestNotifica
   // zod-validated (.email()), so it never contains characters that need
   // escaping, and encoding the "@" (e.g. to "%40") is unnecessary and some
   // mail clients handle it less reliably than the plain, literal address.
-  const mailtoHref = `mailto:${input.email}`;
-  const telHref = `tel:${input.phoneE164.replace(/\s+/g, "")}`;
+  //
+  // Both are used only inside double-quoted href="…" attributes, so they are
+  // HTML-escaped here too: zod/libphonenumber already constrain these values
+  // upstream, but this function is also called directly with hand-built
+  // input, and a stray `"` must never be able to end the attribute.
+  const mailtoHref = escapeHtml(`mailto:${input.email}`);
+  const telHref = escapeHtml(`tel:${input.phoneE164.replace(/\s+/g, "")}`);
   const logoUrl = `${SITE_URL}/brand/logo-white.png`;
 
   const html = `<!DOCTYPE html>
@@ -254,7 +278,7 @@ ${sectionLabel("Trip Summary")}
 <tr><td style="padding:4px 24px 8px;">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
 <td width="33%" valign="top" style="padding:8px 4px;"><p style="margin:0 0 2px;font-size:11px;color:${MUTED};">Trip Type</p><p style="margin:0;font-size:14px;font-weight:600;color:${NAVY_950};">${escapeHtml(TRIP_TYPE_LABEL[input.tripType])}</p></td>
-<td width="34%" valign="top" style="padding:8px 4px;"><p style="margin:0 0 2px;font-size:11px;color:${MUTED};">Cabin Class</p><p style="margin:0;font-size:14px;font-weight:600;color:${NAVY_950};">${escapeHtml(input.cabinClass)}</p></td>
+<td width="34%" valign="top" style="padding:8px 4px;"><p style="margin:0 0 2px;font-size:11px;color:${MUTED};">Cabin Class</p><p style="margin:0;font-size:14px;font-weight:600;color:${NAVY_950};">${escapeHtml(cabinLabel(input.cabinClass))}</p></td>
 <td width="33%" valign="top" style="padding:8px 4px;"><p style="margin:0 0 2px;font-size:11px;color:${MUTED};">Travelers</p><p style="margin:0;font-size:14px;font-weight:600;color:${NAVY_950};">${escapeHtml(travelerDisplay(input))}</p></td>
 </tr></table>
 </td></tr>
@@ -332,7 +356,7 @@ function buildPlainText(input: FlightRequestNotificationInput, fullName: string)
   lines.push("");
   lines.push("TRIP SUMMARY");
   lines.push(`Trip Type: ${TRIP_TYPE_LABEL[input.tripType]}`);
-  lines.push(`Cabin Class: ${input.cabinClass}`);
+  lines.push(`Cabin Class: ${cabinLabel(input.cabinClass)}`);
   lines.push(`Travelers: ${travelerDisplay(input)}`);
   lines.push("");
   lines.push("CLIENT INFORMATION");
@@ -366,6 +390,8 @@ function buildPlainText(input: FlightRequestNotificationInput, fullName: string)
   return lines.join("\n");
 }
 
+type LogLevel = "info" | "warn" | "error";
+
 export type SendFlightRequestNotificationResult =
   | { sent: true; messageId: string }
   | { sent: false; reason: "not_configured" | "send_failed"; category?: NodemailerErrorCategory };
@@ -398,6 +424,7 @@ function categorizeNodemailerError(code: unknown): NodemailerErrorCategory {
     case "ETIMEDOUT":
     case "EDNS":
     case "ECONNRESET":
+    case "ETLS": // TLS handshake/close failure on the same connection — not retried (see isTransientConnectionError), but still a connection-class failure
       return "connection_failed";
     case "EENVELOPE":
       return "envelope_rejected";
@@ -417,9 +444,18 @@ function categorizeNodemailerError(code: unknown): NodemailerErrorCategory {
  */
 export async function sendFlightRequestNotification(
   input: FlightRequestNotificationInput,
-  options: { mailer: Mailer; log?: (message: string) => void },
+  options: { mailer: Mailer; log?: (message: string, level?: LogLevel) => void },
 ): Promise<SendFlightRequestNotificationResult> {
-  const log = options.log ?? ((m: string) => console.error(m));
+  // Runs after the customer's response (see submit-flight-request.ts), so
+  // this log line is the ONLY trace of the outcome: a successful send must
+  // not be filed under "error" in the platform's log filters, and a real
+  // failure must be. No customer data is ever put in any of these lines —
+  // only the sender address, SMTP protocol metadata and a failure category.
+  const log =
+    options.log ??
+    ((m: string, level: LogLevel = "info") => {
+      console[level](m);
+    });
   // The same Gmail address is both sender and recipient — there is no
   // separate notification-recipient variable. This file reads
   // GMAIL_SENDER_EMAIL (never GMAIL_APP_PASSWORD, which stays exclusively
@@ -433,7 +469,7 @@ export async function sendFlightRequestNotification(
     // Not an error: the feature is simply unconfigured for this environment
     // (e.g. a fresh deployment before an admin has set it up). Never blocks
     // or alters the customer's own successful response.
-    log("[flight-request-notification] GMAIL_SENDER_EMAIL is not set — skipping internal notification.");
+    log("[flight-request-notification] GMAIL_SENDER_EMAIL is not set — skipping internal notification.", "warn");
     return { sent: false, reason: "not_configured" };
   }
   // Cleaned the same way mailer.ts cleans it for the sender role: a
@@ -445,7 +481,7 @@ export async function sendFlightRequestNotification(
   const cleanedTo = cleanEnvValue(rawSender);
   const cleanedToLength = cleanedTo?.length ?? 0;
   if (!isPlausibleEmail(cleanedTo)) {
-    log(`[flight-request-notification] GMAIL_SENDER_EMAIL is set but does not look like a valid email address — skipping internal notification. (length after cleaning: ${cleanedToLength})`);
+    log(`[flight-request-notification] GMAIL_SENDER_EMAIL is set but does not look like a valid email address — skipping internal notification. (length after cleaning: ${cleanedToLength})`, "error");
     return { sent: false, reason: "send_failed", category: "configuration_invalid" };
   }
   const to = cleanedTo;
@@ -455,9 +491,14 @@ export async function sendFlightRequestNotification(
     // reach the client — Reply-To makes that literally true. Without it,
     // Gmail's own Reply action would otherwise go back to `to` (the same
     // GMAIL_SENDER_EMAIL address), since FROM and TO are the same inbox.
-    // `input.email` is already zod-validated (.email()) before this module
-    // ever sees it, so it is safe to use directly as a header value.
-    const info = await options.mailer.send({ to, subject, html, text, replyTo: input.email });
+    // `input.email` is zod-validated (.email()) before this module sees it;
+    // isPlausibleEmail() is re-checked here because this function is also
+    // called directly with hand-built input, and the value becomes a header.
+    // If it fails (or contains an apostrophe, which that check also
+    // rejects), Reply-To is simply omitted — the notification still goes
+    // out, and the body's own mailto: link still reaches the customer.
+    const replyTo = isPlausibleEmail(input.email) ? input.email : undefined;
+    const info = await options.mailer.send({ to, subject, html, text, replyTo });
     // Nodemailer can resolve `sendMail()` successfully (not throw) while
     // still reporting the recipient in `rejected` rather than `accepted` —
     // e.g. the connection and authentication both succeeded but Gmail
@@ -466,6 +507,7 @@ export async function sendFlightRequestNotification(
     if (info.rejected.length > 0) {
       log(
         `[flight-request-notification] SMTP did not throw, but rejected the recipient: messageId=${info.messageId} rejected=${JSON.stringify(info.rejected)} response="${info.response}"`,
+        "error",
       );
       return { sent: false, reason: "send_failed", category: "envelope_rejected" };
     }
@@ -477,6 +519,7 @@ export async function sendFlightRequestNotification(
     // non-secret protocol metadata.
     log(
       `[flight-request-notification] SMTP accepted the message: messageId=${info.messageId} accepted=${JSON.stringify(info.accepted)} response="${info.response}"`,
+      "info",
     );
     return { sent: true, messageId: info.messageId };
   } catch (err) {
@@ -488,7 +531,7 @@ export async function sendFlightRequestNotification(
     const code = typeof e?.code === "string" || typeof e?.code === "number" ? e.code : undefined;
     const command = typeof e?.command === "string" ? ` command=${e.command}` : "";
     const category = categorizeNodemailerError(code);
-    log(`[flight-request-notification] Failed to send internal notification (${category}): ${message}${code ? ` code=${code}` : ""}${command}`);
+    log(`[flight-request-notification] Failed to send internal notification (${category}): ${message}${code ? ` code=${code}` : ""}${command}`, "error");
     return { sent: false, reason: "send_failed", category };
   }
 }

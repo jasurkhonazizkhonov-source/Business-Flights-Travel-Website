@@ -12,6 +12,10 @@ import { NewsletterSection } from "@/components/sections/NewsletterSection";
 import { CTASection } from "@/components/sections/CTASection";
 import { SITE_DESCRIPTION, SITE_NAME } from "@/lib/constants";
 
+// The hero's flight request form posts its Server Action to this page; see
+// the same setting (and why) in src/app/flights/page.tsx.
+export const maxDuration = 30;
+
 export const metadata: Metadata = {
   title: `${SITE_NAME} | Business-Class Flights & Premium Travel Agency`,
   description: SITE_DESCRIPTION,

@@ -110,12 +110,20 @@ export const gmailMailer: Mailer = {
     // Generated ONCE per logical send — deliberately outside attemptSend(),
     // so the one bounded retry below (if it fires) reuses the SAME
     // Message-ID rather than nodemailer minting a fresh random one per
-    // attempt. SMTP can't fully resolve "did the first attempt actually
-    // land before the connection error?" from the client side; if it did,
-    // and the retry's send also lands, Gmail recognizes an identical
-    // Message-ID arriving twice in the same mailbox and only shows it
-    // once — so a masked-success retry can't surface as two visible
-    // copies of the same notification.
+    // attempt.
+    //
+    // This is BEST-EFFORT duplicate reduction, not exactly-once delivery.
+    // SMTP cannot resolve "did Gmail accept the message before the
+    // connection dropped?" from the client side: Nodemailer reports every
+    // connection-level failure (including one that happens after the DATA
+    // command, while waiting for the final 250) as the same code with the
+    // same `command: "CONN"`, so a retry can't be limited to failures that
+    // are provably pre-delivery. If the first attempt did land and the
+    // retry lands too, an identical Message-ID gives Gmail the chance to
+    // collapse them — that is commonly observed behaviour, but Google does
+    // not document it as a guarantee, so one rare duplicate notification
+    // remains possible. A duplicate internal notification is the accepted
+    // trade-off against silently losing one.
     const messageId = `<${randomUUID()}@businessflights.travel>`;
     const attemptSend = () =>
       transport().sendMail({
@@ -135,9 +143,11 @@ export const gmailMailer: Mailer = {
       // (a cold-start DNS/TLS hiccup is the realistic case on a serverless
       // function's first outbound call) — never for an authentication or
       // envelope rejection, which a retry cannot fix and would only delay
-      // reporting. Still well inside a serverless function's own execution
-      // budget even in the worst case (two 10s-ceiling attempts, not two
-      // full Nodemailer-default 2-minute attempts).
+      // reporting. Worst case against an unreachable server is about 21s
+      // (two 10s timeouts + this 500ms pause; an attempt against a server
+      // that answers each stage just under its timeout could run longer),
+      // which is why the pages hosting the form export maxDuration = 30 —
+      // this runs inside after(), which that limit bounds.
       if (!isTransientConnectionError(err)) throw err;
       await sleep(500);
       info = await attemptSend();

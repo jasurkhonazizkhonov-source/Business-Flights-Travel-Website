@@ -23,9 +23,13 @@ export const airportSchema = z.object({
   // src/lib/email/flight-request-notification.ts), so this is also what
   // keeps a crafted code from injecting a raw newline into an email header.
   iata: z.string().regex(/^[A-Za-z]{3}$/, "Enter a valid 3-letter airport code").toUpperCase(),
-  city: z.string().min(1),
-  name: z.string().min(1),
-  country: z.string().min(1),
+  // Bounded: a multi-city request's later segments are client-supplied
+  // objects (only segment 0 is re-looked-up in our own airport data), and
+  // these strings flow into the notification email and the Lead's notes.
+  // The longest real value in src/data/airports.json is 90 characters.
+  city: z.string().min(1).max(120),
+  name: z.string().min(1).max(120),
+  country: z.string().min(1).max(120),
 });
 export type AirportOption = z.infer<typeof airportSchema>;
 

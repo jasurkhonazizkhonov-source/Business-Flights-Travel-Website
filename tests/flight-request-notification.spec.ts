@@ -10,7 +10,7 @@ import {
   type FlightRequestNotificationInput,
 } from "../src/lib/email/flight-request-notification";
 import type { Mailer, MailMessage } from "../src/lib/email/mailer";
-import { airportSchema } from "../src/lib/validations/flight-request";
+import { airportSchema, flightRequestSchema } from "../src/lib/validations/flight-request";
 
 // Everything here exercises src/lib/email/flight-request-notification.ts
 // directly — it is deliberately dependency-free (pure template building) or
@@ -38,6 +38,25 @@ const BASE: FlightRequestNotificationInput = {
   segments: [{ from: JFK, to: CDG, departureDate: "2026-10-24" }],
   submittedAt: new Date("2026-10-01T16:41:00Z"),
 };
+
+// A request the real zod schema accepts, so schema-level tests change exactly
+// one field at a time. The date is far in the future so "not in the past"
+// never flips this fixture to invalid.
+function validRequest() {
+  return {
+    tripType: "ONE_WAY" as const,
+    segments: [{ from: JFK, to: CDG, departureDate: "2099-01-01" }],
+    cabinClass: "BUSINESS" as const,
+    adults: 1,
+    children: 0,
+    infants: 0,
+    flexibleDates: false,
+    firstName: "Jayan",
+    lastName: "Grondin",
+    email: "jayan@example.com",
+    phone: "+14155550123",
+  };
+}
 
 function fakeMailer(impl?: (m: MailMessage) => void | Promise<void>): { mailer: Mailer; sent: MailMessage[] } {
   const sent: MailMessage[] = [];
@@ -580,20 +599,247 @@ test.describe("security: Message-ID stability across the one bounded SMTP retry 
 });
 
 test.describe("client-side double-submit guard (duplicate Lead / duplicate notification prevention)", () => {
-  // The button already has disabled={pending}, but a fast double-click or
-  // double-Enter can fire two React submit events before that disabled
-  // attribute actually commits to the DOM — see
-  // src/components/flight-form/FlightRequestForm.tsx. This structural check
-  // guards the explicit re-entrancy guard that closes that window; it can't
-  // be exercised as a true browser race from a Node-based unit test.
+  // Behaviourally verified in a real browser (dev server, fetch stubbed so
+  // nothing reached the database): Next.js QUEUES a second Server Action
+  // rather than dropping it, so without a guard two submit events in one tick
+  // ran two actions (3 POSTs vs the 2 a single failing submit produces);
+  // with the ref guard, three submit events produced the single-submit
+  // count. A Node unit test can't drive that race, so this structural check
+  // protects the shape the guard depends on — a REF (updated synchronously),
+  // not the `pending` state value a handler closure would read stale.
   const formSource = fs.readFileSync(path.resolve(__dirname, "../src/components/flight-form/FlightRequestForm.tsx"), "utf8");
 
-  test("handleSubmit returns early when a submission is already pending, before doing any validation or calling submitFlightRequest again", () => {
+  test("handleSubmit returns early on a ref guard, before validation or any submitFlightRequest call", () => {
     const handleSubmitIdx = formSource.indexOf("function handleSubmit(");
-    const guardIdx = formSource.indexOf("if (pending) return;");
+    const guardIdx = formSource.indexOf("if (submittingRef.current) return;");
     const validateIdx = formSource.indexOf("validateClientSide()", handleSubmitIdx);
     expect(handleSubmitIdx).toBeGreaterThan(-1);
     expect(guardIdx).toBeGreaterThan(handleSubmitIdx);
     expect(guardIdx).toBeLessThan(validateIdx);
+  });
+
+  test("the ref is set only once validation passed, and ALWAYS released in a finally (a failed request must not lock the form)", () => {
+    const setIdx = formSource.indexOf("submittingRef.current = true;");
+    const validateIdx = formSource.indexOf("validateClientSide()");
+    const finallyIdx = formSource.indexOf("submittingRef.current = false;");
+    expect(setIdx).toBeGreaterThan(validateIdx);
+    expect(finallyIdx).toBeGreaterThan(setIdx);
+    expect(formSource.slice(setIdx, finallyIdx)).toContain("finally");
+  });
+});
+
+test.describe("deployment runtime for the deferred notification", () => {
+  test("every page that hosts the flight request form sets maxDuration above the SMTP worst case (~21s), since after() work is bounded by it", () => {
+    for (const page of ["../src/app/flights/page.tsx", "../src/app/page.tsx"]) {
+      const source = fs.readFileSync(path.resolve(__dirname, page), "utf8");
+      const m = source.match(/export const maxDuration = (\d+);/);
+      expect(m, `${page} must export maxDuration`).not.toBeNull();
+      expect(Number(m![1])).toBeGreaterThanOrEqual(30);
+    }
+  });
+
+  test("the notification module and the action never opt into the edge runtime (nodemailer needs Node sockets)", () => {
+    for (const f of ["../src/server/actions/submit-flight-request.ts", "../src/lib/email/mailer.ts", "../src/app/flights/page.tsx", "../src/app/page.tsx"]) {
+      expect(fs.readFileSync(path.resolve(__dirname, f), "utf8")).not.toMatch(/runtime\s*=\s*["']edge["']/);
+    }
+  });
+});
+
+test.describe("Reply-To", () => {
+  const prevSender = process.env.GMAIL_SENDER_EMAIL;
+  test.beforeEach(() => {
+    process.env.GMAIL_SENDER_EMAIL = "ops@businessflights.travel";
+  });
+  test.afterEach(() => {
+    if (prevSender === undefined) delete process.env.GMAIL_SENDER_EMAIL;
+    else process.env.GMAIL_SENDER_EMAIL = prevSender;
+  });
+
+  for (const [label, bad] of [
+    ["CR/LF (header injection)", "a@b.com\r\nBcc: attacker@evil.com"],
+    ["a second recipient after a comma — Nodemailer passes an address list through as-is", "a@b.com, attacker@evil.com"],
+    ["a semicolon list", "a@b.com;attacker@evil.com"],
+    ["no @ at all", "not-an-email"],
+    ["an empty string", ""],
+  ] as const) {
+    test(`an unusable customer email (${label}) omits Reply-To but the notification is STILL sent`, async () => {
+      const { mailer, sent } = fakeMailer();
+      const result = await sendFlightRequestNotification({ ...BASE, email: bad }, { mailer });
+      expect(result.sent).toBe(true);
+      expect(sent).toHaveLength(1);
+      expect(sent[0].replyTo).toBeUndefined();
+      expect(sent[0].to).toBe("ops@businessflights.travel"); // the customer value can never reach To
+    });
+  }
+
+  test("the customer's email can never override To, and Reply-To is the exact validated address", async () => {
+    const { mailer, sent } = fakeMailer();
+    await sendFlightRequestNotification({ ...BASE, email: "client+tag@example.org" }, { mailer });
+    expect(sent[0].to).toBe("ops@businessflights.travel");
+    expect(sent[0].replyTo).toBe("client+tag@example.org");
+  });
+
+  test("the zod schema itself rejects the same malicious customer emails before they ever reach the notification", () => {
+    for (const bad of ["a@b.com\r\nBcc: attacker@evil.com", "a@b.com, attacker@evil.com", "a@b.com;attacker@evil.com", "a b@c.com"]) {
+      const r = flightRequestSchema.safeParse({ ...validRequest(), email: bad });
+      expect(r.success, bad).toBe(false);
+    }
+  });
+});
+
+test.describe("HTML + text safety across every customer-controlled field", () => {
+  const PAYLOADS = [
+    "<script>alert(1)</script>",
+    "<img src=x onerror=alert(1)>",
+    "<test>",
+    '"double" and \'single\' quotes',
+    "A & B &amp; C",
+    "line one\nline two\r\nline three",
+    "emoji 🚀✈️ unicode café 日本語",
+  ];
+
+  for (const payload of PAYLOADS) {
+    test(`payload ${JSON.stringify(payload).slice(0, 40)} is inert in the HTML in every text field and readable in the plain text`, () => {
+      const input: FlightRequestNotificationInput = {
+        ...BASE,
+        firstName: payload,
+        lastName: payload,
+        preferredAirline: payload,
+        notes: payload,
+        tripType: "MULTI_CITY",
+        segments: [
+          { from: JFK, to: CDG, departureDate: "2026-10-24" },
+          { from: { iata: "CDG", city: payload, country: payload, name: payload }, to: { iata: "RUN", city: payload, country: payload, name: payload }, departureDate: "2026-10-26" },
+        ],
+      };
+      const { html, text } = buildFlightRequestNotificationEmail(input);
+      // No payload tag/attribute survives as markup…
+      expect(html).not.toContain("<script>alert");
+      expect(html).not.toMatch(/<img[^>]*onerror/i);
+      expect(html).not.toContain("<test>");
+      expect(html).not.toMatch(/<[a-z]+[^>]*\sonerror\s*=/i);
+      // …and the set of real tags is exactly what the template itself emits.
+      const tagNames = new Set([...html.matchAll(/<\/?([a-zA-Z][a-zA-Z0-9]*)/g)].map((m) => m[1].toLowerCase()));
+      expect([...tagNames].filter((t) => !["html", "head", "meta", "title", "body", "span", "table", "tr", "td", "p", "img", "br", "a"].includes(t))).toEqual([]);
+      // Plain text keeps the characters verbatim (it is not HTML-escaped).
+      expect(text).toContain(payload.trim());
+      expect(text).not.toContain("&lt;");
+    });
+  }
+
+  test("a customer email or phone that tries to break out of the double-quoted href attribute cannot add an attribute", () => {
+    const { html } = buildFlightRequestNotificationEmail({ ...BASE, email: 'x"onmouseover="alert(1)@evil.com', phoneE164: '+1"onclick="alert(1)' });
+    expect(html).not.toContain('x"onmouseover');
+    expect(html).not.toContain('+1"onclick');
+    expect(html).not.toMatch(/\sonmouseover\s*=/i);
+    expect(html).not.toMatch(/\sonclick\s*=/i);
+  });
+
+  test("very long notes stay inside the table layout (wrapping styles present, no unbounded fixed widths)", () => {
+    const { html } = buildFlightRequestNotificationEmail({ ...BASE, notes: "W".repeat(2000), firstName: "N".repeat(80), lastName: "M".repeat(80) });
+    expect(html).toContain("word-break:break-word");
+    expect(html).toContain("max-width:600px");
+    expect(html).not.toMatch(/width:\s*[7-9]\d\dpx|width:\s*\d{4,}px/);
+  });
+});
+
+test.describe("subject", () => {
+  test("keeps the real arrows/dashes and strips every control and Unicode line-separator character from the airport codes", () => {
+    // Built from char codes (NUL, BEL, ESC, NEL, LS, PS) so no raw control
+    // or separator character ever has to live in this source file.
+    const evil = { iata: "A" + String.fromCharCode(0, 7, 27, 0x85, 0x2028, 0x2029) + "B", city: "X", country: "X", name: "X" };
+    const subject = buildFlightRequestNotificationSubject({ ...BASE, tripType: "MULTI_CITY", segments: [{ from: JFK, to: CDG, departureDate: "2026-10-24" }, { from: CDG, to: evil, departureDate: "2026-10-26" }] });
+    expect(subject.startsWith("New Flight Request — JFK → ")).toBe(true);
+    expect(subject).not.toMatch(/[\p{Cc}\p{Zl}\p{Zp}]/u);
+  });
+});
+
+test.describe("cabin wording", () => {
+  test("the enum value the action really passes is shown as the label the form uses, in HTML and text", () => {
+    for (const [enumValue, label] of [["ECONOMY", "Economy"], ["PREMIUM_ECONOMY", "Premium Economy"], ["BUSINESS", "Business Class"], ["FIRST", "First Class"]] as const) {
+      const { html, text } = buildFlightRequestNotificationEmail({ ...BASE, cabinClass: enumValue });
+      expect(html).toContain(`>${label}<`);
+      expect(text).toContain(`Cabin Class: ${label}`);
+      expect(html).not.toContain(`>${enumValue}<`);
+      expect(text).not.toContain(`Cabin Class: ${enumValue}`);
+    }
+  });
+  test("an unknown value (or an already-formatted label) is shown as given rather than hidden", () => {
+    expect(buildFlightRequestNotificationEmail({ ...BASE, cabinClass: "Business Class" }).html).toContain(">Business Class<");
+  });
+});
+
+test.describe("one-way vs round-trip and traveler combinations", () => {
+  test("one-way never shows a return date; round-trip shows it", () => {
+    const oneWay = buildFlightRequestNotificationEmail(BASE);
+    expect(oneWay.html).not.toMatch(/Return (Date|Flight)/);
+    expect(oneWay.text).not.toMatch(/Return (Date|Flight)/);
+    const rt = buildFlightRequestNotificationEmail({ ...BASE, tripType: "ROUND_TRIP", returnDate: "2026-11-05" });
+    expect(rt.html).toContain("Return Date");
+    expect(rt.text).toContain("Return Date: Thursday, November 5, 2026");
+  });
+  test("1/0/0 shows just the count; 2/2/1 shows the whole breakdown", () => {
+    expect(buildFlightRequestNotificationEmail(BASE).text).toContain("Travelers: 1 Traveler\n");
+    expect(buildFlightRequestNotificationEmail({ ...BASE, adults: 2, children: 2, infants: 1 }).text).toContain("Travelers: 5 Travelers (2 Adults, 2 Children, 1 Infant)");
+  });
+  test("every submitted, non-empty piece of the request is present in BOTH parts", () => {
+    const full: FlightRequestNotificationInput = { ...BASE, flexibleDates: true, preferredAirline: "Air France", budget: 4200, notes: "Window seat", adults: 2, children: 1, infants: 1, tripType: "ROUND_TRIP", returnDate: "2026-11-05", cabinClass: "FIRST" };
+    const { html, text } = buildFlightRequestNotificationEmail(full);
+    for (const part of ["Jayan Grondin", "jayan@example.com", "+33783905717", "JFK", "CDG", "John F. Kennedy International Airport", "Saturday, October 24, 2026", "Thursday, November 5, 2026", "Air France", "$4,200", "Window seat", "First Class", "2 Adults, 1 Child, 1 Infant", "Flexible Dates"]) {
+      expect(html, `html is missing ${part}`).toContain(part);
+      expect(text, `text is missing ${part}`).toContain(part);
+    }
+  });
+});
+
+test.describe("logging: levels, and no customer data", () => {
+  const prevSender = process.env.GMAIL_SENDER_EMAIL;
+  test.afterEach(() => {
+    if (prevSender === undefined) delete process.env.GMAIL_SENDER_EMAIL;
+    else process.env.GMAIL_SENDER_EMAIL = prevSender;
+  });
+  const PII: FlightRequestNotificationInput = { ...BASE, firstName: "Zelda", lastName: "Quillfeather", email: "zelda.q@example.org", phoneE164: "+442079460958", notes: "my secret passport note 123" };
+  const noPii = (lines: string[]) => {
+    const all = lines.join("\n");
+    for (const needle of ["Zelda", "Quillfeather", "zelda.q@example.org", "+442079460958", "passport"]) expect(all).not.toContain(needle);
+  };
+
+  test("a successful send is logged at info level, never error, with the message id and SMTP response", async () => {
+    process.env.GMAIL_SENDER_EMAIL = "ops@businessflights.travel";
+    const entries: Array<[string, string | undefined]> = [];
+    await sendFlightRequestNotification(PII, { mailer: fakeMailer().mailer, log: (m, level) => entries.push([m, level]) });
+    expect(entries).toHaveLength(1);
+    expect(entries[0][1]).toBe("info");
+    expect(entries[0][0]).toContain("fake-message-id");
+    expect(entries[0][0]).toContain("250 2.0.0 OK");
+    noPii(entries.map((e) => e[0]));
+  });
+
+  test("failures (thrown, rejected-recipient, invalid config) are logged at error level; an unset variable at warn — none contain customer data", async () => {
+    const entries: Array<[string, string | undefined]> = [];
+    const log = (m: string, level?: string) => entries.push([m, level]);
+    process.env.GMAIL_SENDER_EMAIL = "ops@businessflights.travel";
+    await sendFlightRequestNotification(PII, { mailer: { send: async () => { throw Object.assign(new Error("Invalid login"), { code: "EAUTH", command: "AUTH PLAIN" }); } }, log });
+    await sendFlightRequestNotification(PII, { mailer: { send: async (m) => ({ messageId: "id", response: "550", accepted: [], rejected: [m.to] }) }, log });
+    process.env.GMAIL_SENDER_EMAIL = "nonsense";
+    await sendFlightRequestNotification(PII, { mailer: fakeMailer().mailer, log });
+    delete process.env.GMAIL_SENDER_EMAIL;
+    await sendFlightRequestNotification(PII, { mailer: fakeMailer().mailer, log });
+    expect(entries.map((e) => e[1])).toEqual(["error", "error", "error", "warn"]);
+    noPii(entries.map((e) => e[0]));
+  });
+
+  test("ETLS (a TLS failure) is classified as a connection failure, not 'other'", async () => {
+    process.env.GMAIL_SENDER_EMAIL = "ops@businessflights.travel";
+    const r = await sendFlightRequestNotification(BASE, { mailer: { send: async () => { throw Object.assign(new Error("Error initiating TLS"), { code: "ETLS" }); } }, log: () => {} });
+    expect(r).toEqual({ sent: false, reason: "send_failed", category: "connection_failed" });
+  });
+});
+
+test.describe("input bounds on client-supplied airport text", () => {
+  test("airportSchema accepts the longest real airport values and rejects absurd lengths", () => {
+    expect(airportSchema.safeParse({ iata: "AAA", city: "c".repeat(42), name: "n".repeat(90), country: "k".repeat(44) }).success).toBe(true);
+    expect(airportSchema.safeParse({ iata: "AAA", city: "c".repeat(121), name: "n", country: "k" }).success).toBe(false);
+    expect(airportSchema.safeParse({ iata: "AAA", city: "c", name: "n".repeat(100_000), country: "k" }).success).toBe(false);
   });
 });

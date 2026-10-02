@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useRef, useState, useTransition } from "react";
 import { m, AnimatePresence } from "framer-motion";
 import { Plus, CheckCircle2, AlertTriangle, Loader2 } from "lucide-react";
 import { PhoneNumberField } from "@/components/forms/PhoneNumberField";
@@ -64,6 +64,7 @@ export function FlightRequestForm({
 
   const [errors, setErrors] = useState<FormErrors>({});
   const [pending, startTransition] = useTransition();
+  const submittingRef = useRef(false);
   const [result, setResult] = useState<
     | { status: "idle" }
     | { status: "success"; summary: NonNullable<Extract<Awaited<ReturnType<typeof submitFlightRequest>>, { ok: true }>["summary"]> }
@@ -129,13 +130,14 @@ export function FlightRequestForm({
 
   function handleSubmit(formEvent: React.FormEvent) {
     formEvent.preventDefault();
-    // A fast double-click/double-Enter can fire two submit events before
-    // React commits the `disabled={pending}` state to the DOM below — this
-    // guard closes that window so a single customer action can never
-    // create two Leads (and two internal notification emails) for one
-    // request. `pending` itself doesn't block re-entry on its own; this
-    // check does.
-    if (pending) return;
+    // Next.js queues Server Actions rather than dropping a second one — so
+    // a double-click/double-Enter that fires two submit events in a row
+    // would run the second action as soon as the first finishes, creating a
+    // second Lead (and a second internal notification). The `disabled`
+    // button below can't stop that on its own, and a check of the `pending`
+    // state would read a value captured by this render's closure. A ref
+    // updates synchronously, so the very next submit event already sees it.
+    if (submittingRef.current) return;
     const clientErrors = validateClientSide();
     if (Object.keys(clientErrors).length > 0) {
       setErrors(clientErrors);
@@ -169,8 +171,14 @@ export function FlightRequestForm({
       renderedAt,
     };
 
+    submittingRef.current = true;
     startTransition(async () => {
-      const res = await submitFlightRequest(payload);
+      let res: Awaited<ReturnType<typeof submitFlightRequest>>;
+      try {
+        res = await submitFlightRequest(payload);
+      } finally {
+        submittingRef.current = false;
+      }
       if (res.ok) {
         setResult({ status: "success", summary: res.summary });
       } else {

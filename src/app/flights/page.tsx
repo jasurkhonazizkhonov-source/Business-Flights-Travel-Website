@@ -4,6 +4,12 @@ import { Reveal } from "@/components/Reveal";
 import { SITE_NAME, CONTACT_PHONE_DISPLAY } from "@/lib/constants";
 import { resolveAirportByIata } from "@/server/queries/airports";
 
+// Server Actions inherit this page's limit, and so does the after()
+// notification submitFlightRequest schedules: its SMTP worst case is ~21s
+// (two 10s attempts + a 500ms pause, see src/lib/email/mailer.ts), which a
+// 10s platform default would cut off mid-send with no log line.
+export const maxDuration = 30;
+
 export const metadata: Metadata = {
   title: "Request a Business-Class Flight Quote",
   description:

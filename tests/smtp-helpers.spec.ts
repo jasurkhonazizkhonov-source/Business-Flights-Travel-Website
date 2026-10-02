@@ -50,6 +50,13 @@ test.describe("isPlausibleEmail", () => {
     expect(isPlausibleEmail("ops @businessflights.travel")).toBe(false);
     expect(isPlausibleEmail('"ops@businessflights.travel"')).toBe(false);
   });
+
+  test("rejects anything an address-list parser would split or interpret — comma/semicolon lists, comments, brackets, backslash, CR/LF (Nodemailer passes a comma list through as multiple addresses)", () => {
+    for (const bad of ["a@b.com,c@d.com", "a@b.com;c@d.com", "a(comment)@b.com", "a@b.com\r\nBcc: x@y.com", "a[1]@b.com", "a\\b@c.com", "<a@b.com>"]) {
+      expect(isPlausibleEmail(bad), bad).toBe(false);
+    }
+    expect(isPlausibleEmail("first.last+tag@sub.example.co.uk")).toBe(true);
+  });
 });
 
 test.describe("isTransientConnectionError", () => {

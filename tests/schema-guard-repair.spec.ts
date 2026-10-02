@@ -28,8 +28,10 @@ async function healthyDb(): Promise<SqlRunner> {
   await ensureSchema({ db: runner, bundle: MIGRATION_BUNDLE, autoInit: true });
   return runner;
 }
-test.afterAll(async () => {
-  await Promise.all(opened.map((d) => d.close().catch(() => undefined)));
+// Closed after each test, not at the end — see the measurement note in
+// tests/schema-guard.spec.ts (an open PGlite instance is ~150-200 MB).
+test.afterEach(async () => {
+  await Promise.all(opened.splice(0).map((d) => d.close().catch(() => undefined)));
 });
 async function count(runner: SqlRunner, table: string): Promise<number> {
   return Number((await runner.query(`SELECT count(*)::int AS n FROM "${table}"`))[0].n);

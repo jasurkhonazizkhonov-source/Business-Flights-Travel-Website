@@ -31,7 +31,12 @@ export function cleanEnvValue(value: string | undefined): string | undefined {
 
 /** A deliberately lightweight "does this look like an email address at all" check — not full RFC 5322 validation, just enough to catch an empty string, a stray fallback value, or an obviously malformed address BEFORE spending an SMTP round-trip attempting to send to it. */
 export function isPlausibleEmail(value: string | undefined): value is string {
-  return !!value && /^[^\s@"'<>]+@[^\s@"'<>]+\.[^\s@"'<>]+$/.test(value);
+  // Besides whitespace (which covers CR/LF), also excludes the characters
+  // an address-list parser treats as structure — comma/semicolon (a second
+  // recipient), parentheses (comment), brackets and backslash — so a value
+  // that passes can only ever parse as exactly one plain address when used
+  // in a To/Reply-To header.
+  return !!value && /^[^\s@"'<>,;()[\]\\]+@[^\s@"'<>,;()[\]\\]+\.[^\s@"'<>,;()[\]\\]+$/.test(value);
 }
 
 /** Nodemailer/Node network error codes worth one bounded retry — a cold-start DNS/TLS hiccup on a serverless function's first outbound call, not an auth or envelope rejection a retry cannot fix. */

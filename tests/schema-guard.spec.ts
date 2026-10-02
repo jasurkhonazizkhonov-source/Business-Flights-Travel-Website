@@ -58,8 +58,13 @@ function toRunner(raw: PGliteInstance): SqlRunner {
     },
   };
 }
-test.afterAll(async () => {
-  await Promise.all(opened.map((d) => d.close().catch(() => undefined)));
+// Closed after EACH test, not once at the end: a live PGlite instance holds
+// roughly 150-200 MB of WASM heap (measured: 30 open instances ~= 2.8 GB RSS),
+// and holding every test's instance until afterAll made one worker's memory
+// grow into the gigabytes — the cause of the sporadic "RuntimeError:
+// Aborted()" / "Fatal process out of memory" crashes seen in long runs.
+test.afterEach(async () => {
+  await Promise.all(opened.splice(0).map((d) => d.close().catch(() => undefined)));
 });
 
 async function snapshot(runner: SqlRunner) {
