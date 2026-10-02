@@ -10,7 +10,10 @@
 // their logic is extracted out of the "use server" action files instead of
 // only being exercised by replaying a build-generated Server Action id.
 // Only src/lib/email/mailer.ts (never imported here except by type) touches
-// `nodemailer` or reads the Gmail credentials.
+// `nodemailer` or reads GMAIL_APP_PASSWORD. This file DOES read
+// GMAIL_SENDER_EMAIL (never the password) — the same Gmail address is both
+// sender and recipient, so this is simply the one address the feature needs
+// to resolve and gate on; see sendFlightRequestNotification() below.
 import type { Mailer } from "@/lib/email/mailer";
 import { cleanEnvValue, isPlausibleEmail } from "@/lib/email/smtp-helpers";
 import { SITE_NAME, SITE_URL, CONTACT_PHONE_DISPLAY, CONTACT_EMAIL, COMPANY_ADDRESS } from "@/lib/constants";
@@ -371,7 +374,7 @@ type NodemailerErrorCategory =
   | "connection_failed" // ECONNECTION / ESOCKET / ETIMEDOUT / EDNS / ECONNRESET — could not reach (or stay connected to) smtp.gmail.com; src/lib/email/mailer.ts already retries this category once before it ever reaches here
   | "envelope_rejected" // EENVELOPE, OR a "successful" sendMail() that still reports the recipient in `rejected` — Gmail accepted the connection but refused the sender or every recipient address
   | "message_rejected" // EMESSAGE — Gmail rejected the message itself (e.g. content policy)
-  | "configuration_invalid" // FLIGHT_REQUEST_NOTIFICATION_EMAIL (after cleaning) doesn't look like an email address at all — caught before spending an SMTP round-trip on a doomed send
+  | "configuration_invalid" // GMAIL_SENDER_EMAIL (after cleaning) doesn't look like an email address at all — caught before spending an SMTP round-trip on a doomed send
   | "other";
 
 function categorizeNodemailerError(code: unknown): NodemailerErrorCategory {
@@ -405,25 +408,32 @@ export async function sendFlightRequestNotification(
   options: { mailer: Mailer; log?: (message: string) => void },
 ): Promise<SendFlightRequestNotificationResult> {
   const log = options.log ?? ((m: string) => console.error(m));
-  const rawTo = process.env.FLIGHT_REQUEST_NOTIFICATION_EMAIL;
-  if (!rawTo) {
+  // The same Gmail address is both sender and recipient — there is no
+  // separate notification-recipient variable. This file reads
+  // GMAIL_SENDER_EMAIL (never GMAIL_APP_PASSWORD, which stays exclusively
+  // in src/lib/email/mailer.ts) only to resolve that one address and to
+  // decide whether the feature is configured at all; mailer.ts re-reads the
+  // same variable independently to build the actual `from` header, so the
+  // two can never drift apart — both always clean the same raw value the
+  // same way (see src/lib/email/smtp-helpers.ts).
+  const rawSender = process.env.GMAIL_SENDER_EMAIL;
+  if (!rawSender) {
     // Not an error: the feature is simply unconfigured for this environment
-    // (e.g. a fresh deployment before an admin has set the recipient).
-    // Never blocks or alters the customer's own successful response.
-    log("[flight-request-notification] FLIGHT_REQUEST_NOTIFICATION_EMAIL is not set — skipping internal notification.");
+    // (e.g. a fresh deployment before an admin has set it up). Never blocks
+    // or alters the customer's own successful response.
+    log("[flight-request-notification] GMAIL_SENDER_EMAIL is not set — skipping internal notification.");
     return { sent: false, reason: "not_configured" };
   }
-  // Cleaned the same way the sender credentials are (src/lib/email/mailer.ts):
-  // a trailing newline or surrounding quotes pasted into Vercel's dashboard is
-  // just as easy a mistake for the recipient address as for the password.
-  // Validated BEFORE attempting to send — an obviously malformed value
-  // (empty after cleaning, missing an "@", etc.) is caught here with a clear
-  // diagnostic rather than spending a real SMTP round-trip on a doomed send
-  // that Gmail would reject anyway.
-  const cleanedTo = cleanEnvValue(rawTo);
+  // Cleaned the same way mailer.ts cleans it for the sender role: a
+  // trailing newline or surrounding quotes pasted into Vercel's dashboard is
+  // an easy, common mistake. Validated BEFORE attempting to send — an
+  // obviously malformed value (empty after cleaning, missing an "@", etc.)
+  // is caught here with a clear diagnostic rather than spending a real SMTP
+  // round-trip on a doomed send that Gmail would reject anyway.
+  const cleanedTo = cleanEnvValue(rawSender);
   const cleanedToLength = cleanedTo?.length ?? 0;
   if (!isPlausibleEmail(cleanedTo)) {
-    log(`[flight-request-notification] FLIGHT_REQUEST_NOTIFICATION_EMAIL is set but does not look like a valid email address — skipping internal notification. (length after cleaning: ${cleanedToLength})`);
+    log(`[flight-request-notification] GMAIL_SENDER_EMAIL is set but does not look like a valid email address — skipping internal notification. (length after cleaning: ${cleanedToLength})`);
     return { sent: false, reason: "send_failed", category: "configuration_invalid" };
   }
   const to = cleanedTo;

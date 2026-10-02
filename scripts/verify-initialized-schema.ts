@@ -90,7 +90,9 @@ async function main() {
   // persisted Prisma records, not only a test's own assumptions about their shape.
   // Only the SMTP transport itself is faked (as it must be for an automated,
   // credential-free test) — everything else here is the real production code path.
-  process.env.FLIGHT_REQUEST_NOTIFICATION_EMAIL = "ops+e2e@businessflights.travel";
+  // The same Gmail address is both sender and recipient — there is no
+  // separate notification-recipient variable.
+  process.env.GMAIL_SENDER_EMAIL = "ops+e2e@businessflights.travel";
   const persistedContact = await prisma.contact.findUniqueOrThrow({ where: { id: contactId } });
   const emailSegments: FlightRequestSegment[] = [{ from, to, departureDate: "2027-01-15" }];
   const sentMessages: MailMessage[] = [];
@@ -120,7 +122,7 @@ async function main() {
   if (!notifyResult.sent) throw new Error(`expected the real notification function to report sent:true against persisted data, got: ${JSON.stringify(notifyResult)}`);
   if (sentMessages.length !== 1) throw new Error(`expected exactly one email attempt, got ${sentMessages.length}`);
   const built = sentMessages[0];
-  if (built.to !== "ops+e2e@businessflights.travel") throw new Error("notification recipient did not match FLIGHT_REQUEST_NOTIFICATION_EMAIL");
+  if (built.to !== "ops+e2e@businessflights.travel") throw new Error("notification recipient did not match the configured GMAIL_SENDER_EMAIL (sender and recipient must be the same address)");
   if (!built.subject.includes("JFK") || !built.subject.includes("LHR")) throw new Error(`subject did not reflect the actual persisted route: ${built.subject}`);
   if (!built.html.includes(persistedContact.firstName) || !built.html.includes(persistedContact.lastName)) {
     throw new Error("notification HTML did not include the actual persisted contact's name");

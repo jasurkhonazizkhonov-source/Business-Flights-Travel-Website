@@ -19,11 +19,11 @@ const QUOTE_CHARS = /["'‘’“”]/g;
  * human readability; the real secret has no spaces, but selecting/copying
  * that displayed text — the natural thing to do — copies the spaces along
  * with it, and a plain `.trim()` only strips the ends) AND every quote
- * character, from anywhere in the value. None of GMAIL_SENDER_EMAIL,
- * GMAIL_APP_PASSWORD, or FLIGHT_REQUEST_NOTIFICATION_EMAIL can ever
- * legitimately contain whitespace or a quote character, so stripping both
- * unconditionally can only ever fix a copy-paste artifact, never change a
- * correctly-entered value.
+ * character, from anywhere in the value. Neither GMAIL_SENDER_EMAIL (the
+ * one address used as both sender and recipient) nor GMAIL_APP_PASSWORD
+ * can ever legitimately contain whitespace or a quote character, so
+ * stripping both unconditionally can only ever fix a copy-paste artifact,
+ * never change a correctly-entered value.
  */
 export function cleanEnvValue(value: string | undefined): string | undefined {
   return value?.replace(/\s+/g, "").replace(QUOTE_CHARS, "");

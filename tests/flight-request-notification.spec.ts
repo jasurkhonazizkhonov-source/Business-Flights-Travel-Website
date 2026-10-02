@@ -236,14 +236,14 @@ test.describe("buildFlightRequestNotificationEmail — HTML + text content", () 
 });
 
 test.describe("sendFlightRequestNotification — mailer wiring, never throws", () => {
-  const prevTo = process.env.FLIGHT_REQUEST_NOTIFICATION_EMAIL;
+  const prevSender = process.env.GMAIL_SENDER_EMAIL;
   test.afterEach(() => {
-    if (prevTo === undefined) delete process.env.FLIGHT_REQUEST_NOTIFICATION_EMAIL;
-    else process.env.FLIGHT_REQUEST_NOTIFICATION_EMAIL = prevTo;
+    if (prevSender === undefined) delete process.env.GMAIL_SENDER_EMAIL;
+    else process.env.GMAIL_SENDER_EMAIL = prevSender;
   });
 
   test("a valid submission sends exactly one email to the configured recipient", async () => {
-    process.env.FLIGHT_REQUEST_NOTIFICATION_EMAIL = "ops@businessflights.travel";
+    process.env.GMAIL_SENDER_EMAIL = "ops@businessflights.travel";
     const { mailer, sent } = fakeMailer();
     const result = await sendFlightRequestNotification(BASE, { mailer });
     expect(result).toEqual({ sent: true, messageId: "fake-message-id" });
@@ -252,8 +252,8 @@ test.describe("sendFlightRequestNotification — mailer wiring, never throws", (
     expect(sent[0].subject).toBe(buildFlightRequestNotificationSubject(BASE));
   });
 
-  test("FLIGHT_REQUEST_NOTIFICATION_EMAIL unset: skipped safely, mailer never called, never throws", async () => {
-    delete process.env.FLIGHT_REQUEST_NOTIFICATION_EMAIL;
+  test("GMAIL_SENDER_EMAIL unset: skipped safely, mailer never called, never throws", async () => {
+    delete process.env.GMAIL_SENDER_EMAIL;
     const { mailer, sent } = fakeMailer();
     const result = await sendFlightRequestNotification(BASE, { mailer });
     expect(result).toEqual({ sent: false, reason: "not_configured" });
@@ -261,38 +261,45 @@ test.describe("sendFlightRequestNotification — mailer wiring, never throws", (
   });
 
   test("a mailer failure is caught, never thrown, and reported as send_failed", async () => {
-    process.env.FLIGHT_REQUEST_NOTIFICATION_EMAIL = "ops@businessflights.travel";
+    process.env.GMAIL_SENDER_EMAIL = "ops@businessflights.travel";
     const failing: Mailer = { send: async () => { throw new Error("SMTP connection refused"); } };
     const result = await sendFlightRequestNotification(BASE, { mailer: failing });
     expect(result).toEqual({ sent: false, reason: "send_failed", category: "other" });
   });
 
-  test("a recipient address that doesn't look like an email (after cleaning) is caught BEFORE any SMTP attempt — mailer is never called", async () => {
-    process.env.FLIGHT_REQUEST_NOTIFICATION_EMAIL = "not-a-valid-email-address";
+  test("a GMAIL_SENDER_EMAIL that doesn't look like an email (after cleaning) is caught BEFORE any SMTP attempt — mailer is never called", async () => {
+    process.env.GMAIL_SENDER_EMAIL = "not-a-valid-email-address";
     const { mailer, sent } = fakeMailer();
     const result = await sendFlightRequestNotification(BASE, { mailer });
     expect(result).toEqual({ sent: false, reason: "send_failed", category: "configuration_invalid" });
     expect(sent).toHaveLength(0);
   });
 
-  test("an empty-string recipient (after cleaning strips it to nothing, e.g. it was just quote marks) is also caught as configuration_invalid", async () => {
-    process.env.FLIGHT_REQUEST_NOTIFICATION_EMAIL = '""';
+  test("an empty-string GMAIL_SENDER_EMAIL (after cleaning strips it to nothing, e.g. it was just quote marks) is also caught as configuration_invalid", async () => {
+    process.env.GMAIL_SENDER_EMAIL = '""';
     const { mailer, sent } = fakeMailer();
     const result = await sendFlightRequestNotification(BASE, { mailer });
     expect(result).toEqual({ sent: false, reason: "send_failed", category: "configuration_invalid" });
     expect(sent).toHaveLength(0);
   });
 
-  test("a recipient configured with surrounding quotes or internal whitespace is cleaned and still reaches the mailer correctly", async () => {
-    process.env.FLIGHT_REQUEST_NOTIFICATION_EMAIL = '"ops@businessflights.travel"';
+  test("GMAIL_SENDER_EMAIL configured with surrounding quotes or internal whitespace is cleaned and still reaches the mailer correctly, AS BOTH sender and recipient", async () => {
+    process.env.GMAIL_SENDER_EMAIL = '"ops@businessflights.travel"';
     const { mailer, sent } = fakeMailer();
     const result = await sendFlightRequestNotification(BASE, { mailer });
     expect(result).toEqual({ sent: true, messageId: "fake-message-id" });
-    expect(sent[0].to).toBe("ops@businessflights.travel"); // quotes stripped before reaching the mailer
+    expect(sent[0].to).toBe("ops@businessflights.travel"); // quotes stripped before reaching the mailer; same address used as the recipient
+  });
+
+  test("sender and recipient resolve to the SAME configured Gmail address — there is no separate notification-recipient variable", async () => {
+    process.env.GMAIL_SENDER_EMAIL = "team@businessflights.travel";
+    const { mailer, sent } = fakeMailer();
+    await sendFlightRequestNotification(BASE, { mailer });
+    expect(sent[0].to).toBe("team@businessflights.travel");
   });
 
   test("THE KEY NEW CASE — sendMail() resolves without throwing, but reports the recipient in `rejected`: this must NOT be reported as sent, since a non-throwing resolve is not by itself proof of acceptance", async () => {
-    process.env.FLIGHT_REQUEST_NOTIFICATION_EMAIL = "ops@businessflights.travel";
+    process.env.GMAIL_SENDER_EMAIL = "ops@businessflights.travel";
     const rejectingButNotThrowing: Mailer = {
       send: async (message) => ({
         messageId: "fake-message-id",
@@ -308,7 +315,7 @@ test.describe("sendFlightRequestNotification — mailer wiring, never throws", (
   });
 
   test("a Nodemailer EAUTH error is categorized as authentication_failed — the real Gmail App Password / account auth failure mode", async () => {
-    process.env.FLIGHT_REQUEST_NOTIFICATION_EMAIL = "ops@businessflights.travel";
+    process.env.GMAIL_SENDER_EMAIL = "ops@businessflights.travel";
     const failing: Mailer = {
       send: async () => {
         const err = new Error("Invalid login: 535-5.7.8 Username and Password not accepted") as Error & { code: string };
@@ -321,7 +328,7 @@ test.describe("sendFlightRequestNotification — mailer wiring, never throws", (
   });
 
   test("a Nodemailer connection error (ETIMEDOUT/ECONNECTION/ESOCKET) is categorized as connection_failed", async () => {
-    process.env.FLIGHT_REQUEST_NOTIFICATION_EMAIL = "ops@businessflights.travel";
+    process.env.GMAIL_SENDER_EMAIL = "ops@businessflights.travel";
     for (const code of ["ETIMEDOUT", "ECONNECTION", "ESOCKET", "EDNS", "ECONNRESET"]) {
       const failing: Mailer = {
         send: async () => {
@@ -336,7 +343,7 @@ test.describe("sendFlightRequestNotification — mailer wiring, never throws", (
   });
 
   test("a successful send logs the SMTP response/messageId as safe acceptance evidence, not just a boolean", async () => {
-    process.env.FLIGHT_REQUEST_NOTIFICATION_EMAIL = "ops@businessflights.travel";
+    process.env.GMAIL_SENDER_EMAIL = "ops@businessflights.travel";
     const { mailer } = fakeMailer();
     const logs: string[] = [];
     const result = await sendFlightRequestNotification(BASE, { mailer, log: (m) => logs.push(m) });
@@ -345,12 +352,11 @@ test.describe("sendFlightRequestNotification — mailer wiring, never throws", (
     expect(logs.join("\n")).toContain("fake-message-id");
   });
 
-  test("a mailer failure's log line never contains the SMTP credentials, even when real-looking secrets are set in the environment", async () => {
-    process.env.FLIGHT_REQUEST_NOTIFICATION_EMAIL = "ops@businessflights.travel";
+  test("a mailer failure's log line never contains the SMTP App Password, even when a real-looking secret is set in the environment", async () => {
     const prevPass = process.env.GMAIL_APP_PASSWORD;
     const prevUser = process.env.GMAIL_SENDER_EMAIL;
     process.env.GMAIL_APP_PASSWORD = "sekrit-app-password-abcd1234";
-    process.env.GMAIL_SENDER_EMAIL = "reservations@businessflights.travel";
+    process.env.GMAIL_SENDER_EMAIL = "reservations@businessflights.travel"; // the one address, used as both sender and recipient
     try {
       const failing: Mailer = {
         send: async () => {
@@ -364,7 +370,6 @@ test.describe("sendFlightRequestNotification — mailer wiring, never throws", (
       await sendFlightRequestNotification(BASE, { mailer: failing, log: (m) => logs.push(m) });
       const allLogs = logs.join("\n");
       expect(allLogs).not.toContain("sekrit-app-password-abcd1234");
-      expect(allLogs).not.toContain("reservations@businessflights.travel");
       expect(allLogs).toContain("EAUTH"); // safe SMTP protocol metadata is fine to log
     } finally {
       if (prevPass === undefined) delete process.env.GMAIL_APP_PASSWORD;
@@ -389,7 +394,7 @@ test.describe("sendFlightRequestNotification — mailer wiring, never throws", (
 });
 
 test.describe("no secret-shaped NEXT_PUBLIC_* variable, and credentials stay server-only", () => {
-  test("no NEXT_PUBLIC_* source reference exists for GMAIL_APP_PASSWORD or FLIGHT_REQUEST_NOTIFICATION_EMAIL", () => {
+  test("no NEXT_PUBLIC_* source reference exists for GMAIL_APP_PASSWORD or GMAIL_SENDER_EMAIL", () => {
     const root = path.resolve(__dirname, "..");
     const files = [
       "src/lib/email/mailer.ts",
@@ -400,13 +405,26 @@ test.describe("no secret-shaped NEXT_PUBLIC_* variable, and credentials stay ser
     for (const f of files) {
       const content = fs.readFileSync(path.join(root, f), "utf8");
       expect(content).not.toMatch(/NEXT_PUBLIC_[A-Z_]*GMAIL/i);
-      expect(content).not.toMatch(/NEXT_PUBLIC_[A-Z_]*FLIGHT_REQUEST_NOTIFICATION/i);
     }
   });
 
-  test(".env.example documents only variable NAMES — no real email address or password value", () => {
+  test("FLIGHT_REQUEST_NOTIFICATION_EMAIL is no longer referenced anywhere in source — the same GMAIL_SENDER_EMAIL is used for both sender and recipient", () => {
+    const root = path.resolve(__dirname, "..");
+    const files = [
+      "src/lib/email/mailer.ts",
+      "src/lib/email/smtp-helpers.ts",
+      "src/lib/email/flight-request-notification.ts",
+      "src/server/actions/submit-flight-request.ts",
+    ];
+    for (const f of files) {
+      const content = fs.readFileSync(path.join(root, f), "utf8");
+      expect(content).not.toContain("FLIGHT_REQUEST_NOTIFICATION_EMAIL");
+    }
+  });
+
+  test(".env.example documents only variable NAMES — no real email address or password value, and no longer lists FLIGHT_REQUEST_NOTIFICATION_EMAIL", () => {
     const content = fs.readFileSync(path.resolve(__dirname, "../.env.example"), "utf8");
-    expect(content).toMatch(/^FLIGHT_REQUEST_NOTIFICATION_EMAIL=$/m);
+    expect(content).not.toContain("FLIGHT_REQUEST_NOTIFICATION_EMAIL");
     expect(content).toMatch(/^GMAIL_SENDER_EMAIL=$/m);
     expect(content).toMatch(/^GMAIL_APP_PASSWORD=$/m);
   });
