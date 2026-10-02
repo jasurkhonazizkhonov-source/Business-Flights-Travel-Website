@@ -10,6 +10,7 @@ import {
   type FlightRequestNotificationInput,
 } from "../src/lib/email/flight-request-notification";
 import type { Mailer, MailMessage } from "../src/lib/email/mailer";
+import { airportSchema } from "../src/lib/validations/flight-request";
 
 // Everything here exercises src/lib/email/flight-request-notification.ts
 // directly — it is deliberately dependency-free (pure template building) or
@@ -252,6 +253,14 @@ test.describe("sendFlightRequestNotification — mailer wiring, never throws", (
     expect(sent[0].subject).toBe(buildFlightRequestNotificationSubject(BASE));
   });
 
+  test("Reply-To is set to the CUSTOMER's email — hitting Reply in Gmail must reach the client, not loop back to the same GMAIL_SENDER_EMAIL inbox that sent/received it", async () => {
+    process.env.GMAIL_SENDER_EMAIL = "ops@businessflights.travel";
+    const { mailer, sent } = fakeMailer();
+    await sendFlightRequestNotification(BASE, { mailer });
+    expect(sent[0].replyTo).toBe(BASE.email);
+    expect(sent[0].replyTo).not.toBe(sent[0].to);
+  });
+
   test("GMAIL_SENDER_EMAIL unset: skipped safely, mailer never called, never throws", async () => {
     delete process.env.GMAIL_SENDER_EMAIL;
     const { mailer, sent } = fakeMailer();
@@ -475,9 +484,22 @@ test.describe("submit-flight-request.ts call-site ordering (structural regressio
     expect(successReturnIdx).toBeGreaterThan(notifyIdx);
   });
 
-  test("the notification call is awaited with its own .catch() — a rejection can never propagate to the action's try/catch (which would otherwise turn a successful submission into the generic failure response)", () => {
+  test("the notification call has its own .catch() — a rejection can never propagate to the action's try/catch (which would otherwise turn a successful submission into the generic failure response)", () => {
     const notifyBlock = source.slice(source.indexOf("sendFlightRequestNotification("), source.indexOf("sendFlightRequestNotification(") + 1500);
     expect(notifyBlock).toContain(".catch(");
+  });
+
+  test("the notification call is deferred via next/server's after() rather than awaited inline — the customer's response must never block on Gmail being slow or unreachable", () => {
+    expect(source).toContain('import { after } from "next/server"');
+    const afterIdx = source.indexOf("after(() =>");
+    expect(afterIdx).toBeGreaterThan(-1);
+    // Searched FROM afterIdx, not from the start of the file — an earlier
+    // comment elsewhere in this file also contains the literal substring
+    // "sendFlightRequestNotification(" (e.g. "...itself never throws (see
+    // that file)"), which a plain source.indexOf() would match first.
+    const notifyIdx = source.indexOf("sendFlightRequestNotification(", afterIdx);
+    expect(notifyIdx).toBeGreaterThan(afterIdx);
+    expect(notifyIdx - afterIdx).toBeLessThan(50); // the notification call is the thing after() wraps, not something unrelated
   });
 
   test("the notification call does NOT appear inside the action's own catch block (never sent for a failed/rejected submission)", () => {
@@ -491,5 +513,87 @@ test.describe("submit-flight-request.ts call-site ordering (structural regressio
     const notifyIdx = source.indexOf("sendFlightRequestNotification(");
     expect(readyIdx).toBeGreaterThan(-1);
     expect(notifyIdx).toBeGreaterThan(readyIdx);
+  });
+});
+
+test.describe("security: subject/header injection via airport codes", () => {
+  // Only a MULTI_CITY request's later segments can carry a customer-shaped
+  // airport object into buildFlightRequestNotificationSubject() without
+  // ever passing through findAirportByIata()'s canonical-data lookup (see
+  // src/server/actions/submit-flight-request.ts) — segment 0 always goes
+  // through that lookup first. These two layers are each tested directly.
+
+  test("the zod schema rejects an iata value that is 3 code units but not 3 letters (e.g. a 3-character string containing a newline)", () => {
+    const result = airportSchema.safeParse({ iata: "A\nB", city: "X", name: "X", country: "X" });
+    expect(result.success).toBe(false);
+  });
+
+  test("the zod schema still accepts and uppercases a normal lowercase iata code", () => {
+    const result = airportSchema.safeParse({ iata: "jfk", city: "New York", name: "JFK", country: "United States" });
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data.iata).toBe("JFK");
+  });
+
+  test("buildFlightRequestNotificationSubject strips embedded CR/LF from airport codes even when called directly with input that never passed through the zod schema (e.g. scripts/verify-initialized-schema.ts)", () => {
+    const malicious: FlightRequestNotificationInput = {
+      ...BASE,
+      tripType: "MULTI_CITY",
+      segments: [
+        { from: JFK, to: CDG, departureDate: "2026-10-24" },
+        { from: CDG, to: { iata: "A\r\nBcc:attacker@evil.com", city: "X", country: "X", name: "X" }, departureDate: "2026-10-26" },
+      ],
+    };
+    const subject = buildFlightRequestNotificationSubject(malicious);
+    expect(subject).not.toMatch(/[\r\n]/);
+    expect(subject).not.toContain("A\r\nBcc:attacker@evil.com"); // the raw CR/LF-bearing value must not survive unmodified
+  });
+});
+
+test.describe("security: Message-ID stability across the one bounded SMTP retry (duplicate-email prevention)", () => {
+  // mailer.ts is deliberately never imported by a test (it is `server-only`
+  // and touches the real nodemailer/Gmail credentials — see its own file
+  // header and smtp-helpers.ts's). This is a structural regression guard
+  // in the same spirit as the "submit-flight-request.ts call-site ordering"
+  // checks above: it protects a behavioral property a unit test of this
+  // untestable file can't, by making sure the code shape that property
+  // depends on doesn't silently drift.
+  const mailerSource = fs.readFileSync(path.resolve(__dirname, "../src/lib/email/mailer.ts"), "utf8");
+
+  test("the Message-ID is generated once, before attemptSend is defined — not inside it — so the one bounded retry reuses the same id instead of minting a new one per attempt", () => {
+    const messageIdIdx = mailerSource.indexOf("const messageId =");
+    const attemptSendDefIdx = mailerSource.indexOf("const attemptSend =");
+    const retryCallIdx = mailerSource.lastIndexOf("attemptSend()");
+    expect(messageIdIdx).toBeGreaterThan(-1);
+    expect(attemptSendDefIdx).toBeGreaterThan(messageIdIdx);
+    expect(retryCallIdx).toBeGreaterThan(attemptSendDefIdx);
+  });
+
+  test("the generated messageId is actually passed into sendMail(), not just computed and discarded", () => {
+    const sendMailBlock = mailerSource.slice(mailerSource.indexOf("transport().sendMail({"), mailerSource.indexOf("transport().sendMail({") + 400);
+    expect(sendMailBlock).toContain("messageId,");
+  });
+
+  test("the From header uses the display name \"Business Flights Travel\" wrapping the same GMAIL_SENDER_EMAIL-derived address used as the recipient — never a different or hardcoded address", () => {
+    expect(mailerSource).toContain('from: `"Business Flights Travel" <${from}>`');
+    expect(mailerSource).toContain("cleanEnvValue(process.env.GMAIL_SENDER_EMAIL)");
+  });
+});
+
+test.describe("client-side double-submit guard (duplicate Lead / duplicate notification prevention)", () => {
+  // The button already has disabled={pending}, but a fast double-click or
+  // double-Enter can fire two React submit events before that disabled
+  // attribute actually commits to the DOM — see
+  // src/components/flight-form/FlightRequestForm.tsx. This structural check
+  // guards the explicit re-entrancy guard that closes that window; it can't
+  // be exercised as a true browser race from a Node-based unit test.
+  const formSource = fs.readFileSync(path.resolve(__dirname, "../src/components/flight-form/FlightRequestForm.tsx"), "utf8");
+
+  test("handleSubmit returns early when a submission is already pending, before doing any validation or calling submitFlightRequest again", () => {
+    const handleSubmitIdx = formSource.indexOf("function handleSubmit(");
+    const guardIdx = formSource.indexOf("if (pending) return;");
+    const validateIdx = formSource.indexOf("validateClientSide()", handleSubmitIdx);
+    expect(handleSubmitIdx).toBeGreaterThan(-1);
+    expect(guardIdx).toBeGreaterThan(handleSubmitIdx);
+    expect(guardIdx).toBeLessThan(validateIdx);
   });
 });

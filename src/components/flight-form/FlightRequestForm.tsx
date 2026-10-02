@@ -129,6 +129,13 @@ export function FlightRequestForm({
 
   function handleSubmit(formEvent: React.FormEvent) {
     formEvent.preventDefault();
+    // A fast double-click/double-Enter can fire two submit events before
+    // React commits the `disabled={pending}` state to the DOM below — this
+    // guard closes that window so a single customer action can never
+    // create two Leads (and two internal notification emails) for one
+    // request. `pending` itself doesn't block re-entry on its own; this
+    // check does.
+    if (pending) return;
     const clientErrors = validateClientSide();
     if (Object.keys(clientErrors).length > 0) {
       setErrors(clientErrors);

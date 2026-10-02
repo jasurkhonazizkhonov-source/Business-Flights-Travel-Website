@@ -1,6 +1,7 @@
 "use server";
 
 import { headers } from "next/headers";
+import { after } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { isSpamSubmission } from "@/lib/anti-spam";
@@ -177,36 +178,45 @@ export async function submitFlightRequest(input: FlightRequestInput): Promise<Su
 
     // Internal-only notification to the Business Flights Travel team — NOT
     // the customer-facing response below, which is unchanged either way.
-    // Runs AFTER the Lead is already persisted, so an email failure can
+    // Queued AFTER the Lead is already persisted, so an email failure can
     // never roll back (or appear to roll back) a successful submission;
     // sendFlightRequestNotification() itself never throws (see that file),
     // and this still never fails the customer's response even if it did.
+    // Deferred via next/server's after() rather than awaited inline: the
+    // SMTP path has a real worst-case latency (connect timeout + one
+    // bounded retry, ~20s — see src/lib/email/mailer.ts) that must never
+    // make the customer's own request hang just because Gmail is slow or
+    // unreachable. after() still runs this to completion on the server
+    // (e.g. Vercel keeps the function alive for it) — it just never
+    // delays the response below.
     const emailSegments: FlightRequestSegment[] = data.segments.map((seg, i) =>
       i === 0 ? { from: fromAirport, to: toAirport, departureDate: seg.departureDate } : seg,
     );
-    await sendFlightRequestNotification(
-      {
-        firstName: data.firstName,
-        lastName: data.lastName,
-        email: data.email,
-        phoneE164: phone.e164,
-        tripType: data.tripType,
-        cabinClass: data.cabinClass,
-        adults: data.adults,
-        children: data.children,
-        infants: data.infants,
-        flexibleDates: data.flexibleDates,
-        preferredAirline: data.preferredAirline,
-        budget: data.budget,
-        notes: data.notes,
-        segments: emailSegments,
-        returnDate: data.returnDate,
-        submittedAt: new Date(),
-      },
-      { mailer: gmailMailer },
-    ).catch((err) => {
-      console.error("[submitFlightRequest] internal notification email failed", err);
-    });
+    after(() =>
+      sendFlightRequestNotification(
+        {
+          firstName: data.firstName,
+          lastName: data.lastName,
+          email: data.email,
+          phoneE164: phone.e164,
+          tripType: data.tripType,
+          cabinClass: data.cabinClass,
+          adults: data.adults,
+          children: data.children,
+          infants: data.infants,
+          flexibleDates: data.flexibleDates,
+          preferredAirline: data.preferredAirline,
+          budget: data.budget,
+          notes: data.notes,
+          segments: emailSegments,
+          returnDate: data.returnDate,
+          submittedAt: new Date(),
+        },
+        { mailer: gmailMailer },
+      ).catch((err) => {
+        console.error("[submitFlightRequest] internal notification email failed", err);
+      }),
+    );
 
     return {
       ok: true,

@@ -59,6 +59,18 @@ function escapeHtml(value: string): string {
   return value.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
 }
 
+// A literal CR/LF embedded in a value that reaches the email SUBJECT (a
+// header, not the body) could inject a fake header line into the raw SMTP
+// message. src/lib/validations/flight-request.ts already constrains
+// airport IATA codes to exactly 3 letters, but this module is also called
+// directly with hand-built input that never passes through that schema
+// (see scripts/verify-initialized-schema.ts), so the one place this module
+// builds a header value defends itself unconditionally rather than trusting
+// the caller.
+function subjectSafe(value: string): string {
+  return value.replace(/[\r\n]+/g, " ");
+}
+
 const WEEKDAY_MONTH_DAY_YEAR = { weekday: "long", year: "numeric", month: "long", day: "numeric", timeZone: "UTC" } as const;
 
 /** "2026-10-24" -> "Saturday, October 24, 2026" — parsed/formatted in UTC so the calendar date can never shift with server timezone. */
@@ -114,7 +126,7 @@ const TRIP_TYPE_LABEL: Record<FlightRequestNotificationInput["tripType"], string
 export function buildFlightRequestNotificationSubject(input: FlightRequestNotificationInput): string {
   const first = input.segments[0];
   const last = input.segments[input.segments.length - 1];
-  return `New Flight Request — ${first.from.iata} → ${last.to.iata} — ${travelerLabel(input)}`;
+  return `New Flight Request — ${subjectSafe(first.from.iata)} → ${subjectSafe(last.to.iata)} — ${travelerLabel(input)}`;
 }
 
 function formatBudget(budget: number): string {
@@ -439,7 +451,13 @@ export async function sendFlightRequestNotification(
   const to = cleanedTo;
   try {
     const { subject, html, text } = buildFlightRequestNotificationEmail(input);
-    const info = await options.mailer.send({ to, subject, html, text });
+    // The email's own body tells the reader to "Reply to this email" to
+    // reach the client — Reply-To makes that literally true. Without it,
+    // Gmail's own Reply action would otherwise go back to `to` (the same
+    // GMAIL_SENDER_EMAIL address), since FROM and TO are the same inbox.
+    // `input.email` is already zod-validated (.email()) before this module
+    // ever sees it, so it is safe to use directly as a header value.
+    const info = await options.mailer.send({ to, subject, html, text, replyTo: input.email });
     // Nodemailer can resolve `sendMail()` successfully (not throw) while
     // still reporting the recipient in `rejected` rather than `accepted` —
     // e.g. the connection and authentication both succeeded but Gmail

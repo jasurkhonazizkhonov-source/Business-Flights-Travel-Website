@@ -1,5 +1,6 @@
 import "server-only";
 import nodemailer from "nodemailer";
+import { randomUUID } from "node:crypto";
 import { cleanEnvValue, isTransientConnectionError } from "@/lib/email/smtp-helpers";
 
 // Thin, server-only Gmail SMTP sender. Deliberately the only module in this
@@ -40,6 +41,15 @@ export interface MailMessage {
   subject: string;
   html: string;
   text: string;
+  /**
+   * Optional Reply-To. FROM and TO are both GMAIL_SENDER_EMAIL (the same
+   * inbox sends and receives this notification), so without this, hitting
+   * "Reply" in Gmail would just reply to that same inbox — silently
+   * contradicting the email's own body text ("Reply to this email... to
+   * contact the client directly"). flight-request-notification.ts sets
+   * this to the customer's own (zod-validated) email address.
+   */
+  replyTo?: string;
 }
 
 // `info` is exactly Nodemailer's own SentMessageInfo — the actual SMTP
@@ -97,13 +107,25 @@ function sleep(ms: number): Promise<void> {
 export const gmailMailer: Mailer = {
   async send(message) {
     const from = cleanEnvValue(process.env.GMAIL_SENDER_EMAIL); // re-read, not captured, in case transport() hasn't run yet this instance
+    // Generated ONCE per logical send — deliberately outside attemptSend(),
+    // so the one bounded retry below (if it fires) reuses the SAME
+    // Message-ID rather than nodemailer minting a fresh random one per
+    // attempt. SMTP can't fully resolve "did the first attempt actually
+    // land before the connection error?" from the client side; if it did,
+    // and the retry's send also lands, Gmail recognizes an identical
+    // Message-ID arriving twice in the same mailbox and only shows it
+    // once — so a masked-success retry can't surface as two visible
+    // copies of the same notification.
+    const messageId = `<${randomUUID()}@businessflights.travel>`;
     const attemptSend = () =>
       transport().sendMail({
         from: `"Business Flights Travel" <${from}>`,
         to: message.to,
+        replyTo: message.replyTo,
         subject: message.subject,
         html: message.html,
         text: message.text,
+        messageId,
       });
     let info;
     try {

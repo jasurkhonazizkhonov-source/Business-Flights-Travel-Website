@@ -16,7 +16,13 @@ import { TRIP_TYPES, CABIN_CLASSES } from "./flight-request-options";
 export { TRIP_TYPES, CABIN_CLASSES };
 
 export const airportSchema = z.object({
-  iata: z.string().length(3).toUpperCase(),
+  // Exactly 3 letters, nothing else — a real IATA code is always this shape.
+  // `.length(3)` alone would accept any 3 code units, including a literal
+  // CR/LF (e.g. "A\nB"); a multi-city request's later segments reach the
+  // notification email's Subject line with this value (see
+  // src/lib/email/flight-request-notification.ts), so this is also what
+  // keeps a crafted code from injecting a raw newline into an email header.
+  iata: z.string().regex(/^[A-Za-z]{3}$/, "Enter a valid 3-letter airport code").toUpperCase(),
   city: z.string().min(1),
   name: z.string().min(1),
   country: z.string().min(1),
