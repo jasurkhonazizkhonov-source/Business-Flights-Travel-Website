@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import { m } from "framer-motion";
 import { CheckCircle2, AlertTriangle, Loader2 } from "lucide-react";
 import { PhoneNumberField } from "@/components/forms/PhoneNumberField";
+import { FieldError } from "@/components/forms/FieldError";
 import { submitContactMessage } from "@/server/actions/submit-contact-message";
 // Imported from the zod-free options module, not from
 // @/lib/validations/contact, so this client component's bundle doesn't
@@ -117,12 +118,13 @@ export function ContactForm() {
             onChange={(e) => setFirstName(e.target.value)}
             aria-required="true"
             aria-invalid={Boolean(errors.firstName)}
+            aria-describedby={errors.firstName ? "c-firstName-error" : undefined}
             className={cn(
-              "w-full rounded-xl border bg-white px-3.5 py-3 text-sm outline-none focus:border-[var(--color-gold-500)] focus:ring-2 focus:ring-[var(--color-gold-400)]/30",
-              errors.firstName ? "border-red-400" : "border-[var(--color-navy-950)]/12",
+              "w-full rounded-xl border bg-white px-3.5 py-3 text-sm outline-none focus:border-[var(--color-navy-700)] focus:ring-2 focus:ring-[var(--color-gold-400)]/55",
+              errors.firstName ? "border-red-500" : "border-[var(--color-navy-950)]/12",
             )}
           />
-          {errors.firstName && <p className="mt-1 text-xs text-red-600">{errors.firstName}</p>}
+          {errors.firstName && <FieldError id="c-firstName-error">{errors.firstName}</FieldError>}
         </div>
         <div id="field-lastName">
           <label htmlFor="c-lastName" className="mb-1.5 block text-xs font-semibold tracking-wide text-[var(--color-navy-700)]">
@@ -134,12 +136,13 @@ export function ContactForm() {
             onChange={(e) => setLastName(e.target.value)}
             aria-required="true"
             aria-invalid={Boolean(errors.lastName)}
+            aria-describedby={errors.lastName ? "c-lastName-error" : undefined}
             className={cn(
-              "w-full rounded-xl border bg-white px-3.5 py-3 text-sm outline-none focus:border-[var(--color-gold-500)] focus:ring-2 focus:ring-[var(--color-gold-400)]/30",
-              errors.lastName ? "border-red-400" : "border-[var(--color-navy-950)]/12",
+              "w-full rounded-xl border bg-white px-3.5 py-3 text-sm outline-none focus:border-[var(--color-navy-700)] focus:ring-2 focus:ring-[var(--color-gold-400)]/55",
+              errors.lastName ? "border-red-500" : "border-[var(--color-navy-950)]/12",
             )}
           />
-          {errors.lastName && <p className="mt-1 text-xs text-red-600">{errors.lastName}</p>}
+          {errors.lastName && <FieldError id="c-lastName-error">{errors.lastName}</FieldError>}
         </div>
         <div id="field-email">
           <label htmlFor="c-email" className="mb-1.5 block text-xs font-semibold tracking-wide text-[var(--color-navy-700)]">
@@ -152,12 +155,13 @@ export function ContactForm() {
             onChange={(e) => setEmail(e.target.value)}
             aria-required="true"
             aria-invalid={Boolean(errors.email)}
+            aria-describedby={errors.email ? "c-email-error" : undefined}
             className={cn(
-              "w-full rounded-xl border bg-white px-3.5 py-3 text-sm outline-none focus:border-[var(--color-gold-500)] focus:ring-2 focus:ring-[var(--color-gold-400)]/30",
-              errors.email ? "border-red-400" : "border-[var(--color-navy-950)]/12",
+              "w-full rounded-xl border bg-white px-3.5 py-3 text-sm outline-none focus:border-[var(--color-navy-700)] focus:ring-2 focus:ring-[var(--color-gold-400)]/55",
+              errors.email ? "border-red-500" : "border-[var(--color-navy-950)]/12",
             )}
           />
-          {errors.email && <p className="mt-1 text-xs text-red-600">{errors.email}</p>}
+          {errors.email && <FieldError id="c-email-error">{errors.email}</FieldError>}
         </div>
         <PhoneNumberField id="c-phone" fieldKey="phone" label="Phone" value={phone} onChange={setPhone} error={errors.phone} />
         <div id="field-subject" className="sm:col-span-2">
@@ -170,9 +174,10 @@ export function ContactForm() {
             onChange={(e) => setSubject(e.target.value as ContactSubject)}
             aria-required="true"
             aria-invalid={Boolean(errors.subject)}
+            aria-describedby={errors.subject ? "c-subject-error" : undefined}
             className={cn(
-              "w-full rounded-xl border bg-white px-3.5 py-3 text-sm outline-none focus:border-[var(--color-gold-500)] focus:ring-2 focus:ring-[var(--color-gold-400)]/30",
-              errors.subject ? "border-red-400" : "border-[var(--color-navy-950)]/12",
+              "w-full rounded-xl border bg-white px-3.5 py-3 text-sm outline-none focus:border-[var(--color-navy-700)] focus:ring-2 focus:ring-[var(--color-gold-400)]/55",
+              errors.subject ? "border-red-500" : "border-[var(--color-navy-950)]/12",
               subject === "" && "text-[var(--color-navy-950)]/65",
             )}
           >
@@ -185,7 +190,7 @@ export function ContactForm() {
               </option>
             ))}
           </select>
-          {errors.subject && <p className="mt-1 text-xs text-red-600">{errors.subject}</p>}
+          {errors.subject && <FieldError id="c-subject-error">{errors.subject}</FieldError>}
         </div>
         <div id="field-message" className="sm:col-span-2">
           <label htmlFor="c-message" className="mb-1.5 block text-xs font-semibold tracking-wide text-[var(--color-navy-700)]">
@@ -199,12 +204,13 @@ export function ContactForm() {
             placeholder="How can we help?"
             aria-required="true"
             aria-invalid={Boolean(errors.message)}
+            aria-describedby={errors.message ? "c-message-error" : undefined}
             className={cn(
-              "w-full rounded-xl border bg-white px-3.5 py-3 text-sm outline-none focus:border-[var(--color-gold-500)] focus:ring-2 focus:ring-[var(--color-gold-400)]/30",
-              errors.message ? "border-red-400" : "border-[var(--color-navy-950)]/12",
+              "w-full rounded-xl border bg-white px-3.5 py-3 text-sm outline-none focus:border-[var(--color-navy-700)] focus:ring-2 focus:ring-[var(--color-gold-400)]/55",
+              errors.message ? "border-red-500" : "border-[var(--color-navy-950)]/12",
             )}
           />
-          {errors.message && <p className="mt-1 text-xs text-red-600">{errors.message}</p>}
+          {errors.message && <FieldError id="c-message-error">{errors.message}</FieldError>}
         </div>
       </div>
 

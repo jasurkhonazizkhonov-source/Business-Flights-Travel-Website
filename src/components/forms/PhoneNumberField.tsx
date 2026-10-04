@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import dynamic from "next/dynamic";
 import { cn } from "@/lib/cn";
+import { FieldError } from "@/components/forms/FieldError";
 
 // react-phone-number-input + country-flag-icons' full ~245-flag SVG set +
 // libphonenumber-js metadata are, together, the single largest client
@@ -110,8 +111,8 @@ export function PhoneNumberField({
       </label>
       <div
         className={cn(
-          "rounded-xl border bg-white px-3.5 py-3 text-sm focus-within:border-[var(--color-gold-500)] focus-within:ring-2 focus-within:ring-[var(--color-gold-400)]/30",
-          error ? "border-red-400" : "border-[var(--color-navy-950)]/12",
+          "rounded-xl border bg-white px-3.5 py-3 text-sm focus-within:border-[var(--color-navy-700)] focus-within:ring-2 focus-within:ring-[var(--color-gold-400)]/55",
+          error ? "border-red-500" : "border-[var(--color-navy-950)]/12",
         )}
       >
         {richReady ? (
@@ -139,9 +140,7 @@ export function PhoneNumberField({
         )}
       </div>
       {error && (
-        <p id={errorId} className="mt-1 text-xs text-red-600">
-          {error}
-        </p>
+        <FieldError id={errorId}>{error}</FieldError>
       )}
     </div>
   );

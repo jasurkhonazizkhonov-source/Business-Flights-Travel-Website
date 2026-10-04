@@ -7,6 +7,7 @@ import { useClickOutside } from "@/hooks/useClickOutside";
 import { cn } from "@/lib/cn";
 import { prefetchAirports, searchAirports } from "@/data/airports";
 import type { AirportOption } from "@/lib/validations/flight-request";
+import { FieldError } from "@/components/forms/FieldError";
 
 function labelFor(airport: AirportOption | null): string {
   return airport ? `${airport.city} (${airport.iata})` : "";
@@ -180,7 +181,7 @@ export function AirportAutocomplete({
       <div
         className={cn(
           "flex items-center gap-2.5 rounded-xl border bg-white px-3.5 py-3 transition-colors",
-          error ? "border-red-400" : "border-[var(--color-navy-950)]/12 focus-within:border-[var(--color-gold-500)] focus-within:ring-2 focus-within:ring-[var(--color-gold-400)]/30",
+          error ? "border-red-500" : "border-[var(--color-navy-950)]/12 focus-within:border-[var(--color-navy-700)] focus-within:ring-2 focus-within:ring-[var(--color-gold-400)]/30",
         )}
       >
         <Icon size={17} className="shrink-0 text-[var(--color-navy-600)]" aria-hidden="true" />
@@ -205,7 +206,7 @@ export function AirportAutocomplete({
         />
         {loading && <Loader2 size={15} className="animate-spin text-[var(--color-navy-950)]/40" aria-hidden="true" />}
       </div>
-      {error && <p className="mt-1 text-xs text-red-600">{error}</p>}
+      {error && <FieldError>{error}</FieldError>}
 
       {/* Mounted whenever there are results at all, independent of `open` —
           visibility/interactivity are driven reactively by `animate` and

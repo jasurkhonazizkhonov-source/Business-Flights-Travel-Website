@@ -12,7 +12,9 @@ import { flightRequestSchema, type FlightRequestInput } from "@/lib/validations/
 import { distributeNewWebsiteLead } from "@/server/lead-distribution";
 import { resolveContact } from "@/server/contact";
 import { ensureSchemaReady, noteWriteFailure } from "@/server/schema-ready";
-import { sendFlightRequestNotification, type FlightRequestSegment } from "@/lib/email/flight-request-notification";
+import { sendFlightRequestNotification, formatBudget, type FlightRequestSegment } from "@/lib/email/flight-request-notification";
+import { captureSubmissionInfo } from "@/lib/submission-info";
+import { saveLeadSubmissionInfo } from "@/server/save-submission-info";
 import { gmailMailer } from "@/lib/email/mailer";
 import { deriveLeadId } from "@/lib/submission-id";
 import { createWebsiteLead } from "@/server/create-website-lead";
@@ -100,6 +102,11 @@ export async function submitFlightRequest(input: FlightRequestInput): Promise<Su
     return { ok: false, error: message, fieldErrors: { phone: message } };
   }
 
+  // What the server itself can tell about this request: the full IP address
+  // (only from the headers the platform in front of the app sets — never a
+  // form field) and the platform's approximate location. Unknown stays unknown.
+  const { info: submissionInfo, ipUnavailable } = captureSubmissionInfo(headerList);
+
   // Step timings (milliseconds only — never any customer data) go to the
   // server log so a slow request can be attributed to a step instead of
   // guessed at; the database is far from the function (see docs/ENVIRONMENT.md),
@@ -167,7 +174,14 @@ export async function submitFlightRequest(input: FlightRequestInput): Promise<Su
       email: data.email,
     });
 
-    const notesParts = [data.notes?.trim(), formatSegmentsForNotes(data)].filter(Boolean);
+    // The Lead's `budget` column holds the NUMBER only. When the customer
+    // chose a currency other than USD, say so in the notes so the amount is
+    // never read as dollars by whoever opens the Lead.
+    const budgetNote =
+      data.budget !== undefined && data.budgetCurrency && data.budgetCurrency !== "USD"
+        ? `Budget entered by the customer: ${formatBudget(data.budget, data.budgetCurrency)} (the Budget field holds the number only; it is in ${data.budgetCurrency}, not USD).`
+        : "";
+    const notesParts = [data.notes?.trim(), formatSegmentsForNotes(data), budgetNote].filter(Boolean);
 
     lap("contact");
 
@@ -215,13 +229,33 @@ export async function submitFlightRequest(input: FlightRequestInput): Promise<Su
       passengers: data.adults + data.children + data.infants,
       cabinClass: data.cabinClass,
     };
-    console.info(`[submitFlightRequest] persisted in ${Math.round(performance.now() - startedAt)}ms (steps, ms: ${JSON.stringify(timings)})${created.duplicate ? " — duplicate of an already-saved submission" : ""}`);
+    // Never the address itself — only whether one was captured and, if not, the
+    // value-free reason (see src/lib/client-ip.ts).
+    const ipStatus = submissionInfo.ip ? "captured" : `unavailable (${ipUnavailable ?? "unknown"})`;
+    console.info(
+      `[submitFlightRequest] persisted in ${Math.round(performance.now() - startedAt)}ms (steps, ms: ${JSON.stringify(timings)}; ip ${ipStatus}; location ${submissionInfo.location ? "captured" : "unavailable"})${created.duplicate ? " — duplicate of an already-saved submission" : ""}`,
+    );
 
     // The same submission already saved this Lead (a retried or repeated
     // POST): the customer's request IS saved, so they get the same success —
     // but the Lead was already queued and announced the first time, so
     // neither happens again.
     if (created.duplicate) return { ok: true, summary };
+
+    // What the server itself learned about the request (full IP + approximate
+    // location) is stored against the Lead for the CRM's permission-gated
+    // section. Best-effort and after the response: it is a separate table, so
+    // it can never block, fail or roll back the submission — if it cannot be
+    // saved (e.g. the CRM's migration has not reached this database yet) the
+    // category is logged and the notification email still carries the values.
+    await afterResponse(
+      () =>
+        saveLeadSubmissionInfo(prisma, created.id, submissionInfo, data.budget !== undefined ? data.budgetCurrency : undefined).then(
+          () => undefined,
+          (err) => console.error(`[submitFlightRequest] submission info not saved: ${describeDbError(err)}`),
+        ),
+      "submission info",
+    );
 
     // Best-effort queue assignment. It is not needed for the customer's
     // response (an unassigned Lead is simply picked up later by the CRM's own
@@ -271,10 +305,12 @@ export async function submitFlightRequest(input: FlightRequestInput): Promise<Su
           flexibleDates: data.flexibleDates,
           preferredAirline: data.preferredAirline,
           budget: data.budget,
+          budgetCurrency: data.budgetCurrency,
           notes: data.notes,
           segments: emailSegments,
           returnDate: data.returnDate,
-          submittedAt: new Date(),
+          submittedAt: submissionInfo.capturedAt,
+          submission: { ip: submissionInfo.ip, location: submissionInfo.location, locationSource: submissionInfo.locationSource },
         },
         { mailer: gmailMailer },
       ).catch((err) => {

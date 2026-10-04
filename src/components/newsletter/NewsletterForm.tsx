@@ -62,7 +62,7 @@ export function NewsletterForm({ variant = "dark" }: { variant?: "dark" | "light
             "min-h-11 w-full rounded-full border px-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-[var(--color-gold-400)]/40 sm:max-w-xs",
             isDark
               ? "border-white/20 bg-white/5 text-white placeholder:text-white/40 focus:border-[var(--color-gold-400)]"
-              : "border-[var(--color-navy-950)]/15 bg-white text-[var(--color-navy-950)] placeholder:text-[var(--color-navy-950)]/40 focus:border-[var(--color-gold-500)]",
+              : "border-[var(--color-navy-950)]/15 bg-white text-[var(--color-navy-950)] placeholder:text-[var(--color-navy-950)]/40 focus:border-[var(--color-gold-400)]",
           )}
         />
         <div className="hidden" aria-hidden="true">

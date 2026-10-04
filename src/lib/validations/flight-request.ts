@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { TRIP_TYPES, CABIN_CLASSES } from "./flight-request-options";
+import { TRIP_TYPES, CABIN_CLASSES, BUDGET_CURRENCIES } from "./flight-request-options";
 
 // Shared between the client form (react-hook-free controlled state, see
 // components/flight-form/FlightRequestForm.tsx) and the server action
@@ -88,6 +88,9 @@ export const flightRequestSchema = z
     flexibleDates: z.boolean().default(false),
     preferredAirline: z.string().max(120).optional().or(z.literal("")),
     budget: z.number().positive().max(1_000_000).optional(),
+    // The currency the customer chose for `budget` — never converted. Optional
+    // so an older cached client (whose label said USD) still validates.
+    budgetCurrency: z.enum(BUDGET_CURRENCIES).optional(),
     notes: z.string().max(2000).optional().or(z.literal("")),
 
     firstName: z.string().trim().min(1, "First name is required").max(80),

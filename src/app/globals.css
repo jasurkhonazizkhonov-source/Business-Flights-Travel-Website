@@ -80,6 +80,42 @@ h1, h2, h3, h4, .font-display {
   color: var(--color-navy-950);
 }
 
+/* Keyboard focus for links, buttons and other non-field controls (form
+   fields keep their own border + ring treatment). Two tones — a navy outline
+   with a cream/white halo outside it — so the indicator keeps >= 3:1 contrast
+   on both the cream/white pages and the navy hero/footer. :focus-visible
+   means it appears for keyboard users, not on every mouse click. */
+:where(a, button, summary, [role="button"], [role="tab"], [role="menuitem"], [tabindex]:not([tabindex="-1"])):focus-visible {
+  outline: 2px solid var(--color-navy-700);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.85);
+}
+
+/* Balanced headings and no single-word last lines in running copy. */
+h1, h2, h3 {
+  text-wrap: balance;
+}
+p, li {
+  text-wrap: pretty;
+}
+
+/* Figures (prices, dates, counts) line up in columns. */
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Branded loading placeholder (src/app/loading.tsx). Opacity-only pulse so
+   it never animates layout; the reduced-motion rule above flattens it. */
+@keyframes bfw-skeleton {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
+}
+.bfw-skeleton {
+  background: var(--color-cream-100);
+  border-radius: 0.75rem;
+  animation: bfw-skeleton 1.4s ease-in-out infinite;
+}
+
 /* react-phone-number-input: restyle to match the form's premium field
    chrome instead of the library's default plain-browser look. */
 .PhoneInput {

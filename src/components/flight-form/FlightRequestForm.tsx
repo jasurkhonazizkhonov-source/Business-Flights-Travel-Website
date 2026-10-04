@@ -4,6 +4,7 @@ import { useRef, useState, useTransition } from "react";
 import { m, AnimatePresence } from "framer-motion";
 import { Plus, CheckCircle2, AlertTriangle, Loader2 } from "lucide-react";
 import { PhoneNumberField } from "@/components/forms/PhoneNumberField";
+import { FieldError } from "@/components/forms/FieldError";
 import { SegmentRow, type SegmentState } from "./SegmentRow";
 import { DateField } from "./DateField";
 import { PassengerCabinField } from "./PassengerCabinField";
@@ -13,7 +14,7 @@ import type { AirportOption, FlightRequestInput } from "@/lib/validations/flight
 // @/lib/validations/flight-request, so this client component's bundle
 // doesn't pull in zod and the full validation schema — see the comment in
 // flight-request-options.ts.
-import { TRIP_TYPES } from "@/lib/validations/flight-request-options";
+import { TRIP_TYPES, BUDGET_CURRENCIES, DEFAULT_BUDGET_CURRENCY, type BudgetCurrency } from "@/lib/validations/flight-request-options";
 import { cn } from "@/lib/cn";
 import { PRIMARY_CTA_LABEL } from "@/lib/constants";
 import { isValidEmail } from "@/lib/validate";
@@ -53,6 +54,7 @@ export function FlightRequestForm({
   const [flexibleDates, setFlexibleDates] = useState(false);
   const [preferredAirline, setPreferredAirline] = useState("");
   const [budget, setBudget] = useState("");
+  const [budgetCurrency, setBudgetCurrency] = useState<BudgetCurrency>(DEFAULT_BUDGET_CURRENCY);
   const [notes, setNotes] = useState("");
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
@@ -170,6 +172,7 @@ export function FlightRequestForm({
       flexibleDates,
       preferredAirline: preferredAirline || undefined,
       budget: budget ? Number(budget) : undefined,
+      budgetCurrency: budget ? budgetCurrency : undefined,
       notes: notes || undefined,
       firstName,
       lastName,
@@ -285,8 +288,8 @@ export function FlightRequestForm({
           onCabinClassChange={setCabinClass}
         />
       </div>
-      {errors.infants && <p className="mt-1 text-xs text-red-600">{errors.infants}</p>}
-      {errors.adults && <p className="mt-1 text-xs text-red-600">{errors.adults}</p>}
+      {errors.infants && <FieldError>{errors.infants}</FieldError>}
+      {errors.adults && <FieldError>{errors.adults}</FieldError>}
 
       {/* More options */}
       <button
@@ -324,22 +327,37 @@ export function FlightRequestForm({
                   value={preferredAirline}
                   onChange={(e) => setPreferredAirline(e.target.value)}
                   placeholder="e.g. Emirates"
-                  className="w-full rounded-xl border border-[var(--color-navy-950)]/12 bg-white px-3.5 py-3 text-sm outline-none focus:border-[var(--color-gold-500)] focus:ring-2 focus:ring-[var(--color-gold-400)]/30"
+                  className="w-full rounded-xl border border-[var(--color-navy-950)]/12 bg-white px-3.5 py-3 text-sm outline-none focus:border-[var(--color-navy-700)] focus:ring-2 focus:ring-[var(--color-gold-400)]/55"
                 />
               </div>
               <div>
                 <label htmlFor="budget" className="mb-1.5 block text-xs font-semibold tracking-wide text-[var(--color-navy-700)]">
-                  Approximate Budget (USD, optional)
+                  Approximate Budget (optional)
                 </label>
-                <input
-                  id="budget"
-                  type="number"
-                  min={0}
-                  value={budget}
-                  onChange={(e) => setBudget(e.target.value)}
-                  placeholder="e.g. 4000"
-                  className="w-full rounded-xl border border-[var(--color-navy-950)]/12 bg-white px-3.5 py-3 text-sm outline-none focus:border-[var(--color-gold-500)] focus:ring-2 focus:ring-[var(--color-gold-400)]/30"
-                />
+                <div className="flex gap-2">
+                  <select
+                    id="budgetCurrency"
+                    aria-label="Budget currency"
+                    value={budgetCurrency}
+                    onChange={(e) => setBudgetCurrency(e.target.value as BudgetCurrency)}
+                    className="w-[5.25rem] shrink-0 rounded-xl border border-[var(--color-navy-950)]/12 bg-white px-2.5 py-3 text-sm outline-none focus:border-[var(--color-navy-700)] focus:ring-2 focus:ring-[var(--color-gold-400)]/55"
+                  >
+                    {BUDGET_CURRENCIES.map((code) => (
+                      <option key={code} value={code}>
+                        {code}
+                      </option>
+                    ))}
+                  </select>
+                  <input
+                    id="budget"
+                    type="number"
+                    min={0}
+                    value={budget}
+                    onChange={(e) => setBudget(e.target.value)}
+                    placeholder="e.g. 4000"
+                    className="min-w-0 flex-1 rounded-xl border border-[var(--color-navy-950)]/12 bg-white px-3.5 py-3 text-sm outline-none focus:border-[var(--color-navy-700)] focus:ring-2 focus:ring-[var(--color-gold-400)]/55"
+                  />
+                </div>
               </div>
               <div className="sm:col-span-3">
                 <label htmlFor="notes" className="mb-1.5 block text-xs font-semibold tracking-wide text-[var(--color-navy-700)]">
@@ -351,7 +369,7 @@ export function FlightRequestForm({
                   onChange={(e) => setNotes(e.target.value)}
                   rows={3}
                   placeholder="Seat preferences, connecting travelers, special requests…"
-                  className="w-full rounded-xl border border-[var(--color-navy-950)]/12 bg-white px-3.5 py-3 text-sm outline-none focus:border-[var(--color-gold-500)] focus:ring-2 focus:ring-[var(--color-gold-400)]/30"
+                  className="w-full rounded-xl border border-[var(--color-navy-950)]/12 bg-white px-3.5 py-3 text-sm outline-none focus:border-[var(--color-navy-700)] focus:ring-2 focus:ring-[var(--color-gold-400)]/55"
                 />
               </div>
             </div>
@@ -377,12 +395,14 @@ export function FlightRequestForm({
               value={firstName}
               onChange={(e) => setFirstName(e.target.value)}
               autoComplete="given-name"
+              aria-invalid={Boolean(errors.firstName)}
+              aria-describedby={errors.firstName ? "firstName-error" : undefined}
               className={cn(
-                "w-full rounded-xl border bg-white px-3.5 py-3 text-sm outline-none focus:border-[var(--color-gold-500)] focus:ring-2 focus:ring-[var(--color-gold-400)]/30",
-                errors.firstName ? "border-red-400" : "border-[var(--color-navy-950)]/12",
+                "w-full rounded-xl border bg-white px-3.5 py-3 text-sm outline-none focus:border-[var(--color-navy-700)] focus:ring-2 focus:ring-[var(--color-gold-400)]/55",
+                errors.firstName ? "border-red-500" : "border-[var(--color-navy-950)]/12",
               )}
             />
-            {errors.firstName && <p className="mt-1 text-xs text-red-600">{errors.firstName}</p>}
+            {errors.firstName && <FieldError id="firstName-error">{errors.firstName}</FieldError>}
           </div>
           <div id="field-lastName">
             <label htmlFor="lastName" className="mb-1.5 block text-xs font-semibold tracking-wide text-[var(--color-navy-700)]">
@@ -393,12 +413,14 @@ export function FlightRequestForm({
               value={lastName}
               onChange={(e) => setLastName(e.target.value)}
               autoComplete="family-name"
+              aria-invalid={Boolean(errors.lastName)}
+              aria-describedby={errors.lastName ? "lastName-error" : undefined}
               className={cn(
-                "w-full rounded-xl border bg-white px-3.5 py-3 text-sm outline-none focus:border-[var(--color-gold-500)] focus:ring-2 focus:ring-[var(--color-gold-400)]/30",
-                errors.lastName ? "border-red-400" : "border-[var(--color-navy-950)]/12",
+                "w-full rounded-xl border bg-white px-3.5 py-3 text-sm outline-none focus:border-[var(--color-navy-700)] focus:ring-2 focus:ring-[var(--color-gold-400)]/55",
+                errors.lastName ? "border-red-500" : "border-[var(--color-navy-950)]/12",
               )}
             />
-            {errors.lastName && <p className="mt-1 text-xs text-red-600">{errors.lastName}</p>}
+            {errors.lastName && <FieldError id="lastName-error">{errors.lastName}</FieldError>}
           </div>
           <div id="field-email">
             <label htmlFor="email" className="mb-1.5 block text-xs font-semibold tracking-wide text-[var(--color-navy-700)]">
@@ -410,12 +432,14 @@ export function FlightRequestForm({
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               autoComplete="email"
+              aria-invalid={Boolean(errors.email)}
+              aria-describedby={errors.email ? "email-error" : undefined}
               className={cn(
-                "w-full rounded-xl border bg-white px-3.5 py-3 text-sm outline-none focus:border-[var(--color-gold-500)] focus:ring-2 focus:ring-[var(--color-gold-400)]/30",
-                errors.email ? "border-red-400" : "border-[var(--color-navy-950)]/12",
+                "w-full rounded-xl border bg-white px-3.5 py-3 text-sm outline-none focus:border-[var(--color-navy-700)] focus:ring-2 focus:ring-[var(--color-gold-400)]/55",
+                errors.email ? "border-red-500" : "border-[var(--color-navy-950)]/12",
               )}
             />
-            {errors.email && <p className="mt-1 text-xs text-red-600">{errors.email}</p>}
+            {errors.email && <FieldError id="email-error">{errors.email}</FieldError>}
           </div>
           <PhoneNumberField id="phone" label="Phone Number" value={phone} onChange={setPhone} error={errors.phone} />
         </div>

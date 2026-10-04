@@ -437,6 +437,7 @@ model Lead {
   Account_Lead_offeredToIdToAccount         Account?             @relation("Lead_offeredToIdToAccount", fields: [offeredToId], references: [id])
   Contact_Lead_referredByContactIdToContact Contact?             @relation("Lead_referredByContactIdToContact", fields: [referredByContactId], references: [id])
   LeadStatusHistory                         LeadStatusHistory[]
+  LeadSubmissionInfo                        LeadSubmissionInfo?
   Note                                      Note[]
   Notification                              Notification[]
   Quote                                     Quote[]
@@ -482,6 +483,29 @@ model LeadStatusHistory {
   Lead        Lead        @relation(fields: [leadId], references: [id], onDelete: Cascade)
 
   @@index([leadId])
+}
+
+// One row per Lead: what the SERVER learned about the submitting request —
+// the full IP address it received, the platform's approximate (IP-derived,
+// never exact) location, and the currency the customer chose for their budget.
+// A separate table so an ordinary Lead query never loads these values; written
+// best-effort after the response (see src/server/actions/submit-flight-request.ts),
+// read only by the CRM's permission-gated lead section. Plaintext, like the
+// Contact email/phone beside it. Migration 20261004000100_lead_submission_info.
+model LeadSubmissionInfo {
+  id             String   @id @default(cuid())
+  leadId         String   @unique
+  ipAddress      String?
+  ipVersion      String?
+  city           String?
+  region         String?
+  country        String?
+  countryCode    String?
+  timeZone       String?
+  geoSource      String?
+  budgetCurrency String?
+  capturedAt     DateTime @default(now())
+  Lead           Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
 }
 
 model Note {

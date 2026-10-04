@@ -46,4 +46,8 @@ test("schema built from empty by the initializer accepts the website's real Pris
   // concurrent -> exactly one Lead; no key / different keys -> separate Leads;
   // a genuine failure is never mistaken for a duplicate.
   expect(result.idempotency).toMatchObject({ leadHasOneActivityAndHistory: true, realFailurePropagates: true });
+  // The submission details (full IP + approximate location): table created by
+  // the bundled migration, retry-safe, kept out of ordinary Lead queries, and
+  // removed with its Lead.
+  expect(result.submissionInfo).toMatchObject({ storedFromBundledMigration: true, notLoadedWithOrdinaryLeadQuery: true, cascadeOnLeadDelete: true });
 });

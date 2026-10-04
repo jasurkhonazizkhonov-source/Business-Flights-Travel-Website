@@ -15,3 +15,13 @@
 // canonical import path.
 export const TRIP_TYPES = ["ONE_WAY", "ROUND_TRIP", "MULTI_CITY"] as const;
 export const CABIN_CLASSES = ["ECONOMY", "PREMIUM_ECONOMY", "BUSINESS", "FIRST"] as const;
+
+// ISO 4217 codes offered next to the budget field. The customer's chosen
+// currency is preserved end to end (internal email, CRM) and the amount is
+// never converted — "AUD 8,000" is shown as AUD, not as a dollar figure.
+export const BUDGET_CURRENCIES = [
+  "USD", "EUR", "GBP", "AUD", "CAD", "NZD", "CHF", "AED", "SAR", "QAR", "INR", "PKR",
+  "SGD", "HKD", "JPY", "KRW", "CNY", "THB", "MYR", "ZAR", "TRY", "BRL", "MXN", "EGP",
+] as const;
+export type BudgetCurrency = (typeof BUDGET_CURRENCIES)[number];
+export const DEFAULT_BUDGET_CURRENCY: BudgetCurrency = "USD";

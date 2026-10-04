@@ -17,6 +17,8 @@
 import type { Mailer } from "@/lib/email/mailer";
 import { cleanEnvValue, isPlausibleEmail } from "@/lib/email/smtp-helpers";
 import { SITE_NAME, SITE_URL, CONTACT_PHONE_DISPLAY, CONTACT_EMAIL, COMPANY_ADDRESS } from "@/lib/constants";
+import { formatLocation, type ApproximateLocation } from "@/lib/ip-geo";
+import type { IpVersion } from "@/lib/client-ip";
 
 export interface FlightRequestAirport {
   iata: string;
@@ -49,10 +51,18 @@ export interface FlightRequestNotificationInput {
   flexibleDates: boolean;
   preferredAirline?: string;
   budget?: number;
+  /** ISO 4217 code the customer chose for `budget`. Never converted; absent => the amount is shown flagged as having no currency. */
+  budgetCurrency?: string;
   notes?: string;
   segments: FlightRequestSegment[];
   returnDate?: string; // "YYYY-MM-DD", only meaningful for ROUND_TRIP
   submittedAt: Date;
+  /** What the SERVER learned about the request (never a form field). Every part is optional; nothing absent is shown. */
+  submission?: {
+    ip?: { address: string; version: IpVersion };
+    location?: ApproximateLocation;
+    locationSource?: string;
+  };
 }
 
 function escapeHtml(value: string): string {
@@ -113,28 +123,6 @@ function travelerLabel(input: FlightRequestNotificationInput): string {
   return `${n} ${n === 1 ? "Traveler" : "Travelers"}`;
 }
 
-// Adults/children/infants are three separate fields the form actually
-// collects — shown here whenever the mix isn't simply "all adults", since
-// an infant (lap seat, no fare of its own) or a child materially changes
-// what the specialist needs to plan for, and collapsing them into just a
-// total would drop information the customer genuinely submitted. Kept out
-// of the SUBJECT line (which stays the short traveler count) and out of
-// the Trip Summary tile for an adults-only request, so the common case
-// doesn't read as redundant ("3 Travelers (3 Adults)").
-function travelerBreakdown(input: FlightRequestNotificationInput): string {
-  const parts: string[] = [];
-  if (input.adults > 0) parts.push(`${input.adults} Adult${input.adults === 1 ? "" : "s"}`);
-  if (input.children > 0) parts.push(`${input.children} Child${input.children === 1 ? "" : "ren"}`);
-  if (input.infants > 0) parts.push(`${input.infants} Infant${input.infants === 1 ? "" : "s"}`);
-  return parts.join(", ");
-}
-
-function travelerDisplay(input: FlightRequestNotificationInput): string {
-  const label = travelerLabel(input);
-  if (input.children === 0 && input.infants === 0) return label; // all-adults: the plain count already says it all
-  return `${label} (${travelerBreakdown(input)})`;
-}
-
 const TRIP_TYPE_LABEL: Record<FlightRequestNotificationInput["tripType"], string> = {
   ONE_WAY: "One Way",
   ROUND_TRIP: "Round Trip",
@@ -148,9 +136,6 @@ export function buildFlightRequestNotificationSubject(input: FlightRequestNotifi
   return `New Flight Request — ${subjectSafe(first.from.iata)} → ${subjectSafe(last.to.iata)} — ${travelerLabel(input)}`;
 }
 
-function formatBudget(budget: number): string {
-  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(budget);
-}
 
 // ---------------------------------------------------------------------------
 // HTML building blocks. Table-based layout, inline styles only, no external
@@ -187,7 +172,10 @@ function airportBlock(a: FlightRequestAirport): string {
   );
 }
 
-function flightCard(title: string, from: FlightRequestAirport, to: FlightRequestAirport, dateLabel: string, dateValue: string): string {
+// `date` is optional: a one-way or round-trip request's dates live in the
+// "Travel Dates" section, while each leg of a multi-city request carries its
+// own date on its card.
+function flightCard(title: string, from: FlightRequestAirport, to: FlightRequestAirport, date?: { label: string; value: string }): string {
   return (
     `<tr><td style="padding:0 24px 16px;">` +
     `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${CREAM_100};border:1px solid ${BORDER};border-radius:8px;">` +
@@ -195,47 +183,169 @@ function flightCard(title: string, from: FlightRequestAirport, to: FlightRequest
     `<tr><td style="padding:0 18px;">` +
     `<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>` +
     `<td valign="top" style="width:50%;padding:0 8px 14px 0;">` +
-    `<p style="margin:0 0 4px;font-size:11px;color:${MUTED};text-transform:uppercase;letter-spacing:.04em;">Departure</p>${airportBlock(from)}` +
+    `<p style="margin:0 0 4px;font-size:11px;color:${MUTED};text-transform:uppercase;letter-spacing:.04em;">From</p>${airportBlock(from)}` +
     `</td>` +
     `<td valign="top" style="width:50%;padding:0 0 14px 8px;border-left:1px solid ${BORDER};">` +
-    `<p style="margin:0 0 4px;font-size:11px;color:${MUTED};text-transform:uppercase;letter-spacing:.04em;">Arrival</p>${airportBlock(to)}` +
+    `<p style="margin:0 0 4px;font-size:11px;color:${MUTED};text-transform:uppercase;letter-spacing:.04em;">To</p>${airportBlock(to)}` +
     `</td>` +
     `</tr></table>` +
     `</td></tr>` +
-    `<tr><td style="padding:0 18px 14px;border-top:1px solid ${BORDER};">` +
-    `<p style="margin:12px 0 0;font-size:12px;color:${MUTED};">${escapeHtml(dateLabel)}</p>` +
-    `<p style="margin:2px 0 0;font-size:14px;font-weight:600;color:${NAVY_950};">${escapeHtml(dateValue)}</p>` +
-    `</td></tr>` +
+    (date
+      ? `<tr><td style="padding:0 18px 14px;border-top:1px solid ${BORDER};">` +
+        `<p style="margin:12px 0 0;font-size:12px;color:${MUTED};">${escapeHtml(date.label)}</p>` +
+        `<p style="margin:2px 0 0;font-size:14px;font-weight:600;color:${NAVY_950};">${escapeHtml(date.value)}</p>` +
+        `</td></tr>`
+      : "") +
     `</table></td></tr>`
   );
 }
 
-function itineraryHtml(input: FlightRequestNotificationInput): string {
+function routeHtml(input: FlightRequestNotificationInput): string {
+  const first = input.segments[0];
   if (input.tripType === "MULTI_CITY") {
     return input.segments
-      .map((seg, i) => flightCard(`Flight ${i + 1}`, seg.from, seg.to, "Departure Date", formatIsoDateLong(seg.departureDate)))
+      .map((seg, i) => flightCard(`Flight ${i + 1}`, seg.from, seg.to, { label: "Departure Date", value: formatIsoDateLong(seg.departureDate) }))
       .join("");
   }
-  const outbound = input.segments[0];
-  if (input.tripType === "ONE_WAY") {
-    return flightCard("Flight", outbound.from, outbound.to, "Departure Date", formatIsoDateLong(outbound.departureDate));
-  }
-  // ROUND_TRIP: the return leg is the reverse of the outbound segment, on returnDate.
-  const outboundCard = flightCard("Outbound Flight", outbound.from, outbound.to, "Departure Date", formatIsoDateLong(outbound.departureDate));
-  const returnCard = input.returnDate ? flightCard("Return Flight", outbound.to, outbound.from, "Return Date", formatIsoDateLong(input.returnDate)) : "";
-  return outboundCard + returnCard;
+  return flightCard(input.tripType === "ROUND_TRIP" ? "Round Trip" : "One Way", first.from, first.to);
 }
 
-function additionalInfoHtml(input: FlightRequestNotificationInput): string {
-  const rows: string[] = [];
-  if (input.flexibleDates) rows.push(fieldRow("Flexible Dates", "Yes — the traveler can shift dates for a better fare"));
-  if (input.preferredAirline?.trim()) rows.push(fieldRow("Preferred Airline", escapeHtml(input.preferredAirline.trim())));
-  if (typeof input.budget === "number") rows.push(fieldRow("Budget", escapeHtml(formatBudget(input.budget))));
-  if (input.notes?.trim()) {
-    rows.push(fieldRow("Notes", escapeHtml(input.notes.trim()).replace(/\r?\n/g, "<br>")));
+function routePlainText(input: FlightRequestNotificationInput): string {
+  const leg = (title: string, from: FlightRequestAirport, to: FlightRequestAirport, date?: string) =>
+    `${title}\n` +
+    `  From: ${from.iata} — ${from.city}, ${from.country} (${from.name})\n` +
+    `  To:   ${to.iata} — ${to.city}, ${to.country} (${to.name})\n` +
+    (date ? `  Departure Date: ${date}\n` : "");
+  if (input.tripType === "MULTI_CITY") return input.segments.map((seg, i) => leg(`Flight ${i + 1}`, seg.from, seg.to, formatIsoDateLong(seg.departureDate))).join("\n");
+  const first = input.segments[0];
+  return leg(input.tripType === "ROUND_TRIP" ? "Round Trip" : "One Way", first.from, first.to);
+}
+
+// ---------------------------------------------------------------------------
+// The key/value sections. Built ONCE as data and rendered into both the HTML
+// and the plain-text part, so the two can never drift apart, and a field the
+// customer left blank simply produces no row (and a section with no rows is
+// never rendered at all).
+// ---------------------------------------------------------------------------
+type Row = { label: string; value: string; href?: string; multiline?: boolean };
+type Section = { title: string; rows: Row[]; note?: string };
+
+export const IP_LOCATION_NOTE =
+  "Location is approximate and estimated from the IP address. It can be inaccurate (VPNs, proxies, mobile and corporate networks, privacy relays) and does not show where the customer physically is. The IP address itself is the value the server received.";
+
+/** "AUD 8,000" — the customer's own currency, never converted. Without one, the amount is shown plainly and flagged rather than assumed to be dollars. */
+export function formatBudget(amount: number, currency?: string): string {
+  const plain = new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 }).format(amount);
+  if (currency && /^[A-Z]{3}$/.test(currency)) {
+    try {
+      const formatted = new Intl.NumberFormat("en-US", { style: "currency", currency, currencyDisplay: "code", minimumFractionDigits: 0, maximumFractionDigits: 2 }).format(amount);
+      return formatted.replace(/\s+/g, " ");
+    } catch {
+      return `${currency} ${plain}`;
+    }
   }
-  if (rows.length === 0) return ""; // never render an empty section
-  return sectionLabel("Additional Information") + rows.join("");
+  return `${plain} (currency not specified)`;
+}
+
+function countryDisplay(location: NonNullable<FlightRequestNotificationInput["submission"]>["location"]): string | undefined {
+  if (!location) return undefined;
+  if (location.country && location.countryCode) return `${location.country} (${location.countryCode})`;
+  return location.country ?? location.countryCode;
+}
+
+function buildSections(input: FlightRequestNotificationInput): Section[] {
+  const sections: Section[] = [];
+  const fullName = `${input.firstName} ${input.lastName}`;
+
+  const dates: Row[] = [{ label: "Trip Type", value: TRIP_TYPE_LABEL[input.tripType] }];
+  if (input.tripType !== "MULTI_CITY") {
+    dates.push({ label: "Departure Date", value: formatIsoDateLong(input.segments[0].departureDate) });
+    if (input.tripType === "ROUND_TRIP" && input.returnDate) dates.push({ label: "Return Date", value: formatIsoDateLong(input.returnDate) });
+  }
+  if (input.flexibleDates) dates.push({ label: "Flexible Dates", value: "Yes — the traveler can shift dates for a better fare" });
+  sections.push({ title: "Travel Dates", rows: dates });
+
+  const travelers: Row[] = [
+    { label: "Total Travelers", value: String(travelerCount(input)) },
+    { label: "Adults", value: String(input.adults) },
+  ];
+  if (input.children > 0) travelers.push({ label: "Children", value: String(input.children) });
+  if (input.infants > 0) travelers.push({ label: "Infants", value: String(input.infants) });
+  sections.push({ title: "Travelers", rows: travelers });
+
+  const cabin: Row[] = [{ label: "Cabin Class", value: cabinLabel(input.cabinClass) }];
+  if (input.preferredAirline?.trim()) cabin.push({ label: "Preferred Airline", value: input.preferredAirline.trim() });
+  sections.push({ title: "Cabin & Preferences", rows: cabin });
+
+  if (typeof input.budget === "number") {
+    sections.push({ title: "Budget", rows: [{ label: "Approximate Budget", value: formatBudget(input.budget, input.budgetCurrency) }] });
+  }
+
+  sections.push({
+    title: "Customer",
+    rows: [
+      { label: "Full Name", value: fullName },
+      { label: "Email Address", value: input.email, href: `mailto:${input.email}` },
+      { label: "Phone Number", value: input.phoneE164, href: `tel:${input.phoneE164.replace(/\s+/g, "")}` },
+    ],
+  });
+
+  if (input.notes?.trim()) {
+    sections.push({ title: "Additional Information", rows: [{ label: "Special Requests / Notes", value: input.notes.trim(), multiline: true }] });
+  }
+  return sections;
+}
+
+function buildSubmissionSection(input: FlightRequestNotificationInput): Section {
+  const ip = input.submission?.ip;
+  const location = input.submission?.location;
+  const rows: Row[] = [];
+  if (ip) {
+    rows.push({ label: "IP Address", value: ip.address });
+    rows.push({ label: "IP Version", value: ip.version === "v6" ? "IPv6" : "IPv4" });
+  }
+  if (location) {
+    const approx = formatLocation(location);
+    if (approx) rows.push({ label: "Approximate Location", value: approx });
+    const country = countryDisplay(location);
+    if (country) rows.push({ label: "Country", value: country });
+    if (location.timeZone) rows.push({ label: "Time Zone", value: location.timeZone });
+    if (input.submission?.locationSource) rows.push({ label: "Location Source", value: input.submission.locationSource });
+  }
+  rows.push({ label: "Submitted", value: formatSubmittedAt(input.submittedAt) });
+  rows.push({ label: "Source", value: `${SITE_NAME} Website` });
+  return {
+    title: ip || location ? "Submission & IP Information" : "Submission Details",
+    rows,
+    note: location || ip ? IP_LOCATION_NOTE : undefined,
+  };
+}
+
+function sectionHtml(section: Section): string {
+  if (section.rows.length === 0) return "";
+  const rows = section.rows.map((r) => {
+    const valueHtml = r.multiline ? escapeHtml(r.value).replace(/\r?\n/g, "<br>") : escapeHtml(r.value);
+    // href is only ever built from an already-validated email / E.164 number, and is
+    // HTML-escaped anyway so a stray quote can never end the attribute.
+    const withLink = r.href ? `<a href="${escapeHtml(r.href)}" style="color:${NAVY_900};text-decoration:underline;">${valueHtml}</a>` : valueHtml;
+    return fieldRow(r.label, withLink);
+  });
+  const note = section.note ? `<tr><td style="padding:8px 24px 0;"><p style="margin:0;font-size:11px;line-height:1.5;color:${MUTED};">${escapeHtml(section.note)}</p></td></tr>` : "";
+  return (
+    sectionLabel(section.title) +
+    `<tr><td style="padding:4px 24px 8px;">` +
+    `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid ${BORDER};border-radius:8px;overflow:hidden;">` +
+    rows.join("\n") +
+    `</table></td></tr>` +
+    note
+  );
+}
+
+function sectionText(section: Section): string {
+  if (section.rows.length === 0) return "";
+  const lines = [section.title.toUpperCase(), ...section.rows.map((r) => `${r.label}: ${r.value}`)];
+  if (section.note) lines.push("", section.note);
+  return lines.join("\n");
 }
 
 /** Builds the subject, HTML body, and plain-text fallback. Pure — no I/O, fully deterministic given `input`. */
@@ -254,6 +364,8 @@ export function buildFlightRequestNotificationEmail(input: FlightRequestNotifica
   const mailtoHref = escapeHtml(`mailto:${input.email}`);
   const telHref = escapeHtml(`tel:${input.phoneE164.replace(/\s+/g, "")}`);
   const logoUrl = `${SITE_URL}/brand/logo-white.png`;
+  const sections = buildSections(input);
+  const submission = buildSubmissionSection(input);
 
   const html = `<!DOCTYPE html>
 <html lang="en">
@@ -274,30 +386,12 @@ export function buildFlightRequestNotificationEmail(input: FlightRequestNotifica
 <p style="margin:6px 0 0;font-size:14px;color:${GOLD_500};">From ${escapeHtml(fullName)}</p>
 </td></tr>
 
-${sectionLabel("Trip Summary")}
-<tr><td style="padding:4px 24px 8px;">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
-<td width="33%" valign="top" style="padding:8px 4px;"><p style="margin:0 0 2px;font-size:11px;color:${MUTED};">Trip Type</p><p style="margin:0;font-size:14px;font-weight:600;color:${NAVY_950};">${escapeHtml(TRIP_TYPE_LABEL[input.tripType])}</p></td>
-<td width="34%" valign="top" style="padding:8px 4px;"><p style="margin:0 0 2px;font-size:11px;color:${MUTED};">Cabin Class</p><p style="margin:0;font-size:14px;font-weight:600;color:${NAVY_950};">${escapeHtml(cabinLabel(input.cabinClass))}</p></td>
-<td width="33%" valign="top" style="padding:8px 4px;"><p style="margin:0 0 2px;font-size:11px;color:${MUTED};">Travelers</p><p style="margin:0;font-size:14px;font-weight:600;color:${NAVY_950};">${escapeHtml(travelerDisplay(input))}</p></td>
-</tr></table>
-</td></tr>
+${sectionLabel("Route")}
+${routeHtml(input)}
 
-${sectionLabel("Client Information")}
-<tr><td style="padding:4px 24px 8px;">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid ${BORDER};border-radius:8px;overflow:hidden;">
-${fieldRow("Full Name", escapeHtml(fullName))}
-${fieldRow("Email Address", `<a href="${mailtoHref}" style="color:${NAVY_900};text-decoration:underline;">${escapeHtml(input.email)}</a>`)}
-${fieldRow("Phone Number", `<a href="${telHref}" style="color:${NAVY_900};text-decoration:underline;">${escapeHtml(input.phoneE164)}</a>`)}
-</table>
-</td></tr>
+${sections.map(sectionHtml).join("\n")}
 
-${sectionLabel("Flight Itinerary")}
-${itineraryHtml(input)}
-
-${additionalInfoHtml(input)}
-
-<tr><td style="padding:24px 24px 28px;">
+<tr><td style="padding:24px 24px 8px;">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${NAVY_900};border-radius:8px;">
 <tr><td style="padding:20px 20px 16px;text-align:center;">
 <p style="margin:0 0 14px;font-size:14px;color:#ffffff;">Please respond to this client as soon as possible.<br>Reply to this email or contact the client directly.</p>
@@ -309,13 +403,8 @@ ${additionalInfoHtml(input)}
 </table>
 </td></tr>
 
-${sectionLabel("Submission Details")}
-<tr><td style="padding:4px 24px 24px;">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid ${BORDER};border-radius:8px;overflow:hidden;">
-${fieldRow("Submitted", escapeHtml(formatSubmittedAt(input.submittedAt)))}
-${fieldRow("Source", `${escapeHtml(SITE_NAME)} Website`)}
-</table>
-</td></tr>
+${sectionHtml(submission)}
+<tr><td style="padding:0 0 16px;font-size:0;line-height:0;">&nbsp;</td></tr>
 
 <tr><td style="padding:18px 24px;background:${CREAM_100};border-top:1px solid ${BORDER};text-align:center;">
 <p style="margin:0;font-size:11px;color:${MUTED};">${escapeHtml(SITE_NAME)} &middot; ${escapeHtml(COMPANY_ADDRESS)}</p>
@@ -328,66 +417,22 @@ ${fieldRow("Source", `${escapeHtml(SITE_NAME)} Website`)}
 </body>
 </html>`;
 
-  const text = buildPlainText(input, fullName);
+  const text = [
+    "BUSINESS FLIGHTS TRAVEL — NEW FLIGHT REQUEST",
+    `From: ${fullName}`,
+    "",
+    "ROUTE",
+    routePlainText(input),
+    ...sections.map(sectionText).filter(Boolean).flatMap((s) => [s, ""]),
+    "ACTION REQUIRED",
+    "Please respond to this client as soon as possible. Reply to this email or contact the client directly.",
+    "",
+    sectionText(submission),
+    "",
+    `${SITE_NAME} — ${COMPANY_ADDRESS}`,
+    `${CONTACT_PHONE_DISPLAY} — ${CONTACT_EMAIL}`,
+  ].join("\n");
   return { subject, html, text };
-}
-
-function plainTextItinerary(input: FlightRequestNotificationInput): string {
-  const leg = (title: string, from: FlightRequestAirport, to: FlightRequestAirport, dateLabel: string, dateValue: string) =>
-    `${title}\n` +
-    `  Departure: ${from.iata} — ${from.city}, ${from.country} (${from.name})\n` +
-    `  Arrival:   ${to.iata} — ${to.city}, ${to.country} (${to.name})\n` +
-    `  ${dateLabel}: ${dateValue}\n`;
-
-  if (input.tripType === "MULTI_CITY") {
-    return input.segments.map((seg, i) => leg(`Flight ${i + 1}`, seg.from, seg.to, "Departure Date", formatIsoDateLong(seg.departureDate))).join("\n");
-  }
-  const outbound = input.segments[0];
-  if (input.tripType === "ONE_WAY") return leg("Flight", outbound.from, outbound.to, "Departure Date", formatIsoDateLong(outbound.departureDate));
-  const out = leg("Outbound Flight", outbound.from, outbound.to, "Departure Date", formatIsoDateLong(outbound.departureDate));
-  const ret = input.returnDate ? "\n" + leg("Return Flight", outbound.to, outbound.from, "Return Date", formatIsoDateLong(input.returnDate)) : "";
-  return out + ret;
-}
-
-function buildPlainText(input: FlightRequestNotificationInput, fullName: string): string {
-  const lines: string[] = [];
-  lines.push("BUSINESS FLIGHTS TRAVEL — NEW FLIGHT REQUEST");
-  lines.push(`From: ${fullName}`);
-  lines.push("");
-  lines.push("TRIP SUMMARY");
-  lines.push(`Trip Type: ${TRIP_TYPE_LABEL[input.tripType]}`);
-  lines.push(`Cabin Class: ${cabinLabel(input.cabinClass)}`);
-  lines.push(`Travelers: ${travelerDisplay(input)}`);
-  lines.push("");
-  lines.push("CLIENT INFORMATION");
-  lines.push(`Full Name: ${fullName}`);
-  lines.push(`Email Address: ${input.email}`);
-  lines.push(`Phone Number: ${input.phoneE164}`);
-  lines.push("");
-  lines.push("FLIGHT ITINERARY");
-  lines.push(plainTextItinerary(input));
-
-  const extra: string[] = [];
-  if (input.flexibleDates) extra.push("Flexible Dates: Yes — the traveler can shift dates for a better fare");
-  if (input.preferredAirline?.trim()) extra.push(`Preferred Airline: ${input.preferredAirline.trim()}`);
-  if (typeof input.budget === "number") extra.push(`Budget: ${formatBudget(input.budget)}`);
-  if (input.notes?.trim()) extra.push(`Notes: ${input.notes.trim()}`);
-  if (extra.length) {
-    lines.push("ADDITIONAL INFORMATION");
-    lines.push(...extra);
-    lines.push("");
-  }
-
-  lines.push("ACTION REQUIRED");
-  lines.push("Please respond to this client as soon as possible. Reply to this email or contact the client directly.");
-  lines.push("");
-  lines.push("SUBMISSION DETAILS");
-  lines.push(`Submitted: ${formatSubmittedAt(input.submittedAt)}`);
-  lines.push(`Source: ${SITE_NAME} Website`);
-  lines.push("");
-  lines.push(`${SITE_NAME} — ${COMPANY_ADDRESS}`);
-  lines.push(`${CONTACT_PHONE_DISPLAY} — ${CONTACT_EMAIL}`);
-  return lines.join("\n");
 }
 
 type LogLevel = "info" | "warn" | "error";

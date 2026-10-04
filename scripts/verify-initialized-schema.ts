@@ -22,6 +22,7 @@ import { sendFlightRequestNotification, type FlightRequestSegment } from "../src
 import type { Mailer, MailMessage } from "../src/lib/email/mailer";
 import { createWebsiteLead } from "../src/server/create-website-lead";
 import { deriveLeadId } from "../src/lib/submission-id";
+import { saveLeadSubmissionInfo } from "../src/server/save-submission-info";
 
 async function main() {
   const pg = new PGlite();
@@ -233,6 +234,27 @@ async function main() {
   }
   if (!realFailureThrew) throw new Error("a real persistence failure must propagate, not be reported as a duplicate");
   if ((await prisma.lead.count()) !== leadsAfterAll) throw new Error("a failed attempt must not leave a Lead behind");
+  // --- Submission info (full IP + approximate location), against the real engine:
+  // the table exists because the BUNDLED migration created it, a retried save
+  // never writes a second row or overwrites the first, an ordinary Lead query
+  // never loads these values, and deleting the Lead removes the row.
+  const infoA = { ip: { address: "203.0.113.42", version: "v4" as const }, location: { city: "San Francisco", regionCode: "CA", region: "California", country: "United States", countryCode: "US", timeZone: "America/Los_Angeles" }, locationSource: "Vercel edge geolocation (approximate)", capturedAt: new Date("2026-10-04T10:00:00Z") };
+  if (!(await saveLeadSubmissionInfo(prisma, idA, infoA, "AUD"))) throw new Error("saveLeadSubmissionInfo reported nothing stored for a populated record");
+  await saveLeadSubmissionInfo(prisma, idA, { ...infoA, ip: { address: "198.51.100.77", version: "v4" as const } }, "EUR"); // the retried call
+  const infoRows = await prisma.leadSubmissionInfo.findMany({ where: { leadId: idA } });
+  if (infoRows.length !== 1) throw new Error(`a retried save must leave exactly one row, found ${infoRows.length}`);
+  const stored = infoRows[0];
+  if (stored.ipAddress !== "203.0.113.42" || stored.ipVersion !== "v4" || stored.city !== "San Francisco" || stored.region !== "California" || stored.countryCode !== "US" || stored.timeZone !== "America/Los_Angeles" || stored.budgetCurrency !== "AUD") {
+    throw new Error(`stored submission info does not match what was saved (a retry must not overwrite it): ${JSON.stringify(stored)}`);
+  }
+  const plainLead = (await prisma.lead.findUnique({ where: { id: idA } })) as Record<string, unknown>;
+  if ("ipAddress" in plainLead || "LeadSubmissionInfo" in plainLead) throw new Error("an ordinary Lead query must not carry the submission info");
+  const throwaway = await createWebsiteLead(prisma, leadInput());
+  await saveLeadSubmissionInfo(prisma, throwaway.id, infoA);
+  await prisma.lead.delete({ where: { id: throwaway.id } });
+  if ((await prisma.leadSubmissionInfo.count({ where: { leadId: throwaway.id } })) !== 0) throw new Error("deleting a Lead must delete its submission info");
+  if (await saveLeadSubmissionInfo(prisma, idA, { capturedAt: new Date() })) throw new Error("a record with nothing to store must not touch the database");
+  summary.submissionInfo = { storedFromBundledMigration: true, retrySafe: "one row, original values kept", notLoadedWithOrdinaryLeadQuery: true, cascadeOnLeadDelete: true };
   summary.idempotency = { sameKeyTwice: "one Lead, second reported duplicate", concurrentSameKey: "4 attempts -> 1 Lead", noKeyOrDifferentKey: "separate Leads", leadHasOneActivityAndHistory: true, realFailurePropagates: true };
 
   console.log(JSON.stringify({ ok: true, ...summary }));

@@ -119,21 +119,22 @@ test.describe("buildFlightRequestNotificationEmail — HTML + text content", () 
     expect(text).toContain("Phone Number: +33783905717");
   });
 
-  test("one-way itinerary renders a single, unlabeled 'Flight' card with the correct airports and date", () => {
+  test("one-way: a single 'One Way' route card with the airports; the date lives in Travel Dates, not on the card", () => {
     const { html, text } = buildFlightRequestNotificationEmail(BASE);
-    expect(html).toContain(">Flight<");
+    expect(html).toContain(">One Way<");
     expect(html).not.toContain("Outbound Flight");
     expect(html).not.toContain("Return Flight");
     expect(html).toContain("JFK");
     expect(html).toContain("New York, United States");
     expect(html).toContain("John F. Kennedy International Airport");
     expect(html).toContain("CDG");
-    expect(html).toContain("Saturday, October 24, 2026");
-    expect(text).toContain("Departure: JFK");
-    expect(text).toContain("Arrival:   CDG");
+    expect(text).toContain("From: JFK");
+    expect(text).toContain("To:   CDG");
+    expect(html).toContain("Departure Date");
+    expect(text).toContain("Departure Date: Saturday, October 24, 2026");
   });
 
-  test("round trip renders BOTH outbound and return itinerary cards, return as the reverse leg on returnDate", () => {
+  test("round trip: one 'Round Trip' route card, and Travel Dates carries BOTH the departure and the return date", () => {
     const roundTrip: FlightRequestNotificationInput = {
       ...BASE,
       tripType: "ROUND_TRIP",
@@ -141,15 +142,11 @@ test.describe("buildFlightRequestNotificationEmail — HTML + text content", () 
       returnDate: "2026-10-06",
     };
     const { html, text } = buildFlightRequestNotificationEmail(roundTrip);
-    expect(html).toContain("Outbound Flight");
-    expect(html).toContain("Return Flight");
-    // outbound: RUN -> CDG; return: CDG -> RUN (reverse)
-    const outboundIdx = html.indexOf("Outbound Flight");
-    const returnIdx = html.indexOf("Return Flight");
-    expect(html.slice(outboundIdx, returnIdx)).toContain("Saint-Denis, Réunion");
-    expect(html.slice(returnIdx)).toContain("Tuesday, October 6, 2026"); // return date formatted, in the return section specifically
-    expect(text).toContain("Return Flight");
-    expect(text).toContain("Tuesday, October 6, 2026");
+    expect(html).toContain(">Round Trip<");
+    expect(html).toContain("Saint-Denis, Réunion");
+    expect(text).toContain("Departure Date: Saturday, October 24, 2026");
+    expect(text).toContain("Return Date: Tuesday, October 6, 2026");
+    expect(html).toContain("Tuesday, October 6, 2026");
   });
 
   test("multi-city renders one card per submitted segment, each correctly labeled and dated", () => {
@@ -161,50 +158,88 @@ test.describe("buildFlightRequestNotificationEmail — HTML + text content", () 
         { from: CDG, to: RUN, departureDate: "2026-10-26" },
       ],
     };
-    const { html } = buildFlightRequestNotificationEmail(multi);
+    const { html, text } = buildFlightRequestNotificationEmail(multi);
     expect(html).toContain("Flight 1");
     expect(html).toContain("Flight 2");
     expect(html).toContain("Saturday, October 24, 2026");
     expect(html).toContain("Monday, October 26, 2026");
+    expect(text).toContain("Flight 2");
+    expect(text).toContain("Departure Date: Monday, October 26, 2026");
+    // A multi-city request has no single departure/return date row.
+    expect(text).not.toMatch(/^Return Date:/m);
   });
 
-  test("optional fields (flexible dates, preferred airline, budget, notes) render when present", () => {
+  test("optional fields (flexible dates, preferred airline, budget, notes) render when present, in HTML and text", () => {
     const withExtras: FlightRequestNotificationInput = {
       ...BASE,
       flexibleDates: true,
       preferredAirline: "Air France",
       budget: 8500,
+      budgetCurrency: "USD",
       notes: "Prefers aisle seat.\nTraveling for a wedding.",
     };
     const { html, text } = buildFlightRequestNotificationEmail(withExtras);
     expect(html).toContain("Additional Information");
     expect(html).toContain("Flexible Dates");
     expect(html).toContain("Air France");
-    expect(html).toContain("$8,500");
+    expect(html).toContain("USD 8,500");
     expect(html).toContain("Prefers aisle seat.");
     expect(html).toContain("Traveling for a wedding.");
+    expect(text).toContain("Flexible Dates: Yes");
     expect(text).toContain("Preferred Airline: Air France");
-    expect(text).toContain("Budget: $8,500");
+    expect(text).toContain("Approximate Budget: USD 8,500");
+    expect(text).toContain("Prefers aisle seat.\nTraveling for a wedding.");
   });
 
-  test("traveler breakdown: an adults-only request shows just the plain count (no redundant '(3 Adults)')", () => {
-    const { html, text } = buildFlightRequestNotificationEmail({ ...BASE, adults: 3, children: 0, infants: 0 });
-    expect(html).toContain("3 Travelers");
-    expect(html).not.toContain("(3 Adults)");
-    expect(text).toContain("Travelers: 3 Travelers");
-    expect(text).not.toContain("(3 Adults)");
+  test("the budget keeps the customer's own currency — AUD is shown as AUD, never converted or shown as a bare dollar figure", () => {
+    const aud = buildFlightRequestNotificationEmail({ ...BASE, budget: 8000, budgetCurrency: "AUD" });
+    expect(aud.html).toContain("AUD 8,000");
+    expect(aud.text).toContain("Approximate Budget: AUD 8,000");
+    expect(aud.html).not.toContain("$");
+    expect(aud.text).not.toContain("$");
+    for (const [code, amount] of [["EUR", "EUR 1,500"], ["GBP", "GBP 1,500"], ["AED", "AED 1,500"], ["JPY", "JPY 1,500"]] as const) {
+      expect(buildFlightRequestNotificationEmail({ ...BASE, budget: 1500, budgetCurrency: code }).text, code).toContain(`Approximate Budget: ${amount}`);
+    }
   });
 
-  test("traveler breakdown: adults + children + an infant are all shown, since the form collects them as separate fields", () => {
-    const mixed: FlightRequestNotificationInput = { ...BASE, adults: 2, children: 1, infants: 1 };
-    const { html, text } = buildFlightRequestNotificationEmail(mixed);
-    expect(html).toContain("4 Travelers (2 Adults, 1 Child, 1 Infant)");
-    expect(text).toContain("Travelers: 4 Travelers (2 Adults, 1 Child, 1 Infant)");
+  test("a budget with NO currency is shown plainly and flagged — never assumed to be dollars", () => {
+    const { html, text } = buildFlightRequestNotificationEmail({ ...BASE, budget: 8500 });
+    expect(text).toContain("Approximate Budget: 8,500 (currency not specified)");
+    expect(html).toContain("8,500 (currency not specified)");
+    expect(html + text).not.toContain("$");
   });
 
-  test("traveler breakdown: plural children/infants are pluralized correctly", () => {
-    const { html } = buildFlightRequestNotificationEmail({ ...BASE, adults: 2, children: 2, infants: 2 });
-    expect(html).toContain("2 Adults, 2 Children, 2 Infants");
+  test("no budget at all -> no Budget section anywhere", () => {
+    const { html, text } = buildFlightRequestNotificationEmail(BASE);
+    expect(html).not.toContain(">Budget<");
+    expect(text).not.toContain("BUDGET");
+  });
+
+  test("travelers: total and adults always; children and infants only when there are some (never an empty zero row)", () => {
+    const adultsOnly = buildFlightRequestNotificationEmail({ ...BASE, adults: 3, children: 0, infants: 0 });
+    expect(adultsOnly.text).toContain("Total Travelers: 3");
+    expect(adultsOnly.text).toContain("Adults: 3");
+    expect(adultsOnly.text).not.toContain("Children:");
+    expect(adultsOnly.text).not.toContain("Infants:");
+    expect(adultsOnly.html).not.toContain(">Children<");
+    const mixed = buildFlightRequestNotificationEmail({ ...BASE, adults: 2, children: 1, infants: 1 });
+    expect(mixed.text).toContain("Total Travelers: 4");
+    expect(mixed.text).toContain("Adults: 2");
+    expect(mixed.text).toContain("Children: 1");
+    expect(mixed.text).toContain("Infants: 1");
+    expect(mixed.html).toContain(">Children<");
+    expect(mixed.html).toContain(">Infants<");
+  });
+
+  test("sections appear in the agreed order: Route, Travel Dates, Travelers, Cabin & Preferences, Budget, Customer, Additional Information, then Submission", () => {
+    const { html, text } = buildFlightRequestNotificationEmail({ ...BASE, budget: 1000, budgetCurrency: "USD", notes: "hello", submission: { ip: { address: "203.0.113.42", version: "v4" } } });
+    const order = (s: string, labels: string[]) => labels.map((l) => s.indexOf(l));
+    const htmlIdx = order(html, [">Route<", ">Travel Dates<", ">Travelers<", ">Cabin &amp; Preferences<", ">Budget<", ">Customer<", ">Additional Information<", ">Submission &amp; IP Information<"]);
+    const textIdx = order(text, ["ROUTE", "TRAVEL DATES", "TRAVELERS", "CABIN & PREFERENCES", "BUDGET", "CUSTOMER", "ADDITIONAL INFORMATION", "SUBMISSION & IP INFORMATION"]);
+    for (const idx of [htmlIdx, textIdx]) {
+      expect(idx.every((i) => i >= 0), JSON.stringify(idx)).toBe(true);
+      expect([...idx].sort((a, b) => a - b)).toEqual(idx);
+    }
   });
 
   test("absent optional fields create NO empty/broken 'Additional Information' section at all", () => {
@@ -231,8 +266,7 @@ test.describe("buildFlightRequestNotificationEmail — HTML + text content", () 
     const { text } = buildFlightRequestNotificationEmail(BASE);
     expect(text.length).toBeGreaterThan(50);
     expect(text).toContain("NEW FLIGHT REQUEST");
-    expect(text).toContain("FLIGHT ITINERARY");
-    expect(text).toContain("ACTION REQUIRED");
+    for (const heading of ["ROUTE", "TRAVEL DATES", "TRAVELERS", "CABIN & PREFERENCES", "CUSTOMER", "ACTION REQUIRED", "SUBMISSION DETAILS"]) expect(text, heading).toContain(heading);
     expect(text).toContain("Submitted: Thursday, October 1, 2026, 4:41 PM UTC");
   });
 
@@ -783,14 +817,16 @@ test.describe("one-way vs round-trip and traveler combinations", () => {
     expect(rt.html).toContain("Return Date");
     expect(rt.text).toContain("Return Date: Thursday, November 5, 2026");
   });
-  test("1/0/0 shows just the count; 2/2/1 shows the whole breakdown", () => {
-    expect(buildFlightRequestNotificationEmail(BASE).text).toContain("Travelers: 1 Traveler\n");
-    expect(buildFlightRequestNotificationEmail({ ...BASE, adults: 2, children: 2, infants: 1 }).text).toContain("Travelers: 5 Travelers (2 Adults, 2 Children, 1 Infant)");
+  test("1/0/0 shows the total and adults only; 2/2/1 shows every non-zero count", () => {
+    const one = buildFlightRequestNotificationEmail(BASE).text;
+    expect(one).toContain("Total Travelers: 1\nAdults: 1\n");
+    const five = buildFlightRequestNotificationEmail({ ...BASE, adults: 2, children: 2, infants: 1 }).text;
+    expect(five).toContain("Total Travelers: 5\nAdults: 2\nChildren: 2\nInfants: 1");
   });
   test("every submitted, non-empty piece of the request is present in BOTH parts", () => {
-    const full: FlightRequestNotificationInput = { ...BASE, flexibleDates: true, preferredAirline: "Air France", budget: 4200, notes: "Window seat", adults: 2, children: 1, infants: 1, tripType: "ROUND_TRIP", returnDate: "2026-11-05", cabinClass: "FIRST" };
+    const full: FlightRequestNotificationInput = { ...BASE, flexibleDates: true, preferredAirline: "Air France", budget: 4200, budgetCurrency: "AUD", notes: "Window seat", adults: 2, children: 1, infants: 1, tripType: "ROUND_TRIP", returnDate: "2026-11-05", cabinClass: "FIRST" };
     const { html, text } = buildFlightRequestNotificationEmail(full);
-    for (const part of ["Jayan Grondin", "jayan@example.com", "+33783905717", "JFK", "CDG", "John F. Kennedy International Airport", "Saturday, October 24, 2026", "Thursday, November 5, 2026", "Air France", "$4,200", "Window seat", "First Class", "2 Adults, 1 Child, 1 Infant", "Flexible Dates"]) {
+    for (const part of ["Jayan Grondin", "jayan@example.com", "+33783905717", "JFK", "CDG", "John F. Kennedy International Airport", "Saturday, October 24, 2026", "Thursday, November 5, 2026", "Air France", "AUD 4,200", "Window seat", "First Class", "Children", "Infants", "Flexible Dates"]) {
       expect(html, `html is missing ${part}`).toContain(part);
       expect(text, `text is missing ${part}`).toContain(part);
     }
@@ -956,8 +992,9 @@ test.describe("after() can never turn a saved request into a customer-facing err
     expect(helper).toMatch(/try \{\s*after\(task\);\s*\} catch \(err\) \{[\s\S]*await task\(\);/);
   });
   test("both best-effort tasks (queue distribution, internal notification) go through that helper and catch their own failures", () => {
-    expect(source.match(/await afterResponse\(/g)).toHaveLength(2);
+    expect(source.match(/await afterResponse\(/g)).toHaveLength(3); // queue distribution, submission info, internal notification
     expect(source).toMatch(/distribution failed/);
+    expect(source).toMatch(/submission info not saved/);
     expect(source).toMatch(/internal notification email failed/);
   });
 });

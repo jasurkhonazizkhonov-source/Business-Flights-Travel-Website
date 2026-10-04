@@ -8,6 +8,7 @@ import { format } from "date-fns";
 import { useClickOutside } from "@/hooks/useClickOutside";
 import { usePopoverAlign } from "@/hooks/usePopoverAlign";
 import { cn } from "@/lib/cn";
+import { FieldError } from "@/components/forms/FieldError";
 
 // react-day-picker (+ its CSS, pulled in inside DayPickerCalendar.tsx) is
 // fetched as its own chunk instead of bundling straight into this
@@ -79,7 +80,7 @@ export function DateField({
           {selected ? format(selected, "EEE, MMM d, yyyy") : placeholder}
         </span>
       </button>
-      {error && <p className="mt-1 text-xs text-red-600">{error}</p>}
+      {error && <FieldError>{error}</FieldError>}
 
       {/* Always mounted (not conditionally rendered via AnimatePresence) —
           visibility/interactivity are driven reactively by `animate` and
