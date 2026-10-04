@@ -330,8 +330,8 @@ export function FlightRequestForm({
                   className="w-full rounded-xl border border-[var(--color-navy-950)]/12 bg-white px-3.5 py-3 text-sm outline-none focus:border-[var(--color-navy-700)] focus:ring-2 focus:ring-[var(--color-gold-400)]/55"
                 />
               </div>
-              <div>
-                <label htmlFor="budget" className="mb-1.5 block text-xs font-semibold tracking-wide text-[var(--color-navy-700)]">
+              <div className="sm:col-span-2">
+                <label htmlFor="budget"className="mb-1.5 block text-xs font-semibold tracking-wide text-[var(--color-navy-700)]">
                   Approximate Budget (optional)
                 </label>
                 <div className="flex gap-2">
