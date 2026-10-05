@@ -17,7 +17,7 @@
 import type { Mailer } from "@/lib/email/mailer";
 import { cleanEnvValue, isPlausibleEmail } from "@/lib/email/smtp-helpers";
 import { SITE_NAME, SITE_URL, CONTACT_PHONE_DISPLAY, CONTACT_EMAIL, COMPANY_ADDRESS } from "@/lib/constants";
-import { formatLocation, type ApproximateLocation } from "@/lib/ip-geo";
+import type { ApproximateLocation } from "@/lib/ip-geo";
 import type { IpVersion } from "@/lib/client-ip";
 
 export interface FlightRequestAirport {
@@ -247,12 +247,6 @@ export function formatBudget(amount: number, currency?: string): string {
   return `${plain} (currency not specified)`;
 }
 
-function countryDisplay(location: NonNullable<FlightRequestNotificationInput["submission"]>["location"]): string | undefined {
-  if (!location) return undefined;
-  if (location.country && location.countryCode) return `${location.country} (${location.countryCode})`;
-  return location.country ?? location.countryCode;
-}
-
 function buildSections(input: FlightRequestNotificationInput): Section[] {
   const sections: Section[] = [];
   const fullName = `${input.firstName} ${input.lastName}`;
@@ -305,10 +299,12 @@ function buildSubmissionSection(input: FlightRequestNotificationInput): Section 
     rows.push({ label: "IP Version", value: ip.version === "v6" ? "IPv6" : "IPv4" });
   }
   if (location) {
-    const approx = formatLocation(location);
-    if (approx) rows.push({ label: "Approximate Location", value: approx });
-    const country = countryDisplay(location);
-    if (country) rows.push({ label: "Country", value: country });
+    // One labelled row per field, each prefixed "Approximate" — never a
+    // single "Customer Location" line — and only the ones actually obtained.
+    if (location.city) rows.push({ label: "Approximate City", value: location.city });
+    if (location.region ?? location.regionCode) rows.push({ label: "Approximate Region", value: (location.region ?? location.regionCode) as string });
+    if (location.country ?? location.countryCode) rows.push({ label: "Approximate Country", value: (location.country ?? location.countryCode) as string });
+    if (location.country && location.countryCode) rows.push({ label: "Country Code", value: location.countryCode });
     if (location.timeZone) rows.push({ label: "Time Zone", value: location.timeZone });
     if (input.submission?.locationSource) rows.push({ label: "Location Source", value: input.submission.locationSource });
   }

@@ -193,15 +193,18 @@ test.describe("the internal notification: Submission & IP Information", () => {
 
   test("the full IP and every obtained location field appear in BOTH the HTML and the plain text, labelled approximate", () => {
     const { html, text } = buildFlightRequestNotificationEmail({ ...BASE, submission });
-    for (const part of ["Submission &amp; IP Information", "203.0.113.42", "IPv4", "Approximate Location", "San Francisco, California, United States", "United States (US)", "America/Los_Angeles", "Vercel edge geolocation (approximate)"]) {
+    for (const part of ["Submission &amp; IP Information", "203.0.113.42", "IPv4", "Approximate City", "San Francisco", "Approximate Region", "California", "Approximate Country", "United States", "Country Code", "America/Los_Angeles", "Vercel edge geolocation (approximate)"]) {
       expect(html, `html missing ${part}`).toContain(part);
     }
     expect(text).toContain("SUBMISSION & IP INFORMATION");
     expect(text).toContain("IP Address: 203.0.113.42");
     expect(text).toContain("IP Version: IPv4");
-    expect(text).toContain("Approximate Location: San Francisco, California, United States");
-    expect(text).toContain("Country: United States (US)");
+    expect(text).toContain("Approximate City: San Francisco");
+    expect(text).toContain("Approximate Region: California");
+    expect(text).toContain("Approximate Country: United States");
+    expect(text).toContain("Country Code: US");
     expect(text).toContain("Time Zone: America/Los_Angeles");
+    expect(text).not.toMatch(/Customer Location|Exact Location/i);
     expect(text).toContain("Location Source: Vercel edge geolocation (approximate)");
     expect(html).toContain(IP_LOCATION_NOTE.slice(0, 40));
     expect(text).toContain(IP_LOCATION_NOTE);
@@ -226,15 +229,27 @@ test.describe("the internal notification: Submission & IP Information", () => {
     const { text } = buildFlightRequestNotificationEmail({ ...BASE, submission: { ip: { address: "198.51.100.9", version: "v4" } } });
     expect(text).toContain("SUBMISSION & IP INFORMATION");
     expect(text).toContain("IP Address: 198.51.100.9");
-    expect(text).not.toContain("Approximate Location");
+    expect(text).not.toContain("Approximate City");
+    expect(text).not.toContain("Country Code");
     expect(text).not.toContain("Time Zone");
   });
 
   test("location only (no IP): no IP rows; the location is still labelled approximate", () => {
     const { text } = buildFlightRequestNotificationEmail({ ...BASE, submission: { location: submission.location, locationSource: submission.locationSource } });
     expect(text).not.toContain("IP Address");
-    expect(text).toContain("Approximate Location: San Francisco, California, United States");
+    expect(text).toContain("Approximate City: San Francisco");
     expect(text).toContain(IP_LOCATION_NOTE);
+  });
+
+  test("a region known only by its code, and a country known only by its code, are shown as supplied — and only the fields obtained get a row", () => {
+    const { text } = buildFlightRequestNotificationEmail({
+      ...BASE,
+      submission: { ip: { address: "203.0.113.7", version: "v4" }, location: { regionCode: "BY", countryCode: "DE" } },
+    });
+    expect(text).toContain("Approximate Region: BY");
+    expect(text).toContain("Approximate Country: DE");
+    expect(text).not.toContain("Approximate City");
+    expect(text).not.toContain("Country Code"); // no separate code row when it is already the country value
   });
 
   test("when neither was obtained, the section is a plain 'Submission Details' with no IP wording or disclaimer, and the email still sends content", () => {
@@ -327,11 +342,13 @@ test.describe("privacy and boundary guards (structural)", () => {
     }
   });
 
-  test("the submission info is written best-effort through the after() helper, never inside the Lead transaction, and a duplicate skips it", () => {
+  test("the submission info is written best-effort through the after() helper, never inside the Lead transaction, and a duplicate re-runs only that idempotent upsert", () => {
     const saveIdx = action.indexOf("saveLeadSubmissionInfo(prisma");
-    const dupIdx = action.indexOf("if (created.duplicate) return");
-    expect(saveIdx).toBeGreaterThan(dupIdx);
-    expect(action.lastIndexOf("afterResponse(", saveIdx)).toBeGreaterThan(dupIdx);
+    const createIdx = action.indexOf("await createWebsiteLead(");
+    expect(saveIdx).toBeGreaterThan(createIdx);
+    expect(action.lastIndexOf("afterResponse(", saveIdx)).toBeGreaterThan(createIdx);
+    expect(action).toContain("submission info not saved for lead");
+    expect(action).toMatch(/if \(created\.duplicate\) \{\s*await saveSubmissionInfo\(\);\s*return \{ ok: true, summary \};/);
     expect(read("src/server/create-website-lead.ts")).not.toContain("LeadSubmissionInfo");
     expect(action.slice(action.indexOf("await createWebsiteLead("), action.indexOf("lap(\"lead\")"))).not.toContain("LeadSubmissionInfo");
   });

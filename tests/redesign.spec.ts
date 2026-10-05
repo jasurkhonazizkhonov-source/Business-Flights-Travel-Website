@@ -174,6 +174,17 @@ test.describe("FAQ and footer", () => {
   });
 
   test("footer legal links are reachable and pages render", async ({ page }) => {
+    // A returning visitor who has already answered the cookie notice. On a
+    // phone the notice is a fixed bottom sheet that sits over the footer, so
+    // whether this click lands depends on whether the (deferred) notice has
+    // mounted yet — pre-recording the choice makes the test independent of
+    // that timing instead of racing it.
+    await page.addInitScript(() => {
+      window.localStorage.setItem(
+        "bft-cookie-consent",
+        JSON.stringify({ version: 1, decidedAt: new Date().toISOString(), preferences: { necessary: true, analytics: false, marketing: false } }),
+      );
+    });
     await page.goto("/");
     // Scoped to the dedicated "Legal" nav specifically — the newsletter
     // widget embedded in the same footer also links to Privacy Policy in

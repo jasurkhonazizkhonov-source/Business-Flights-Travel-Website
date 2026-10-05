@@ -28,7 +28,11 @@ const LEGAL_LINKS = [
 
 export function Footer() {
   return (
-    <footer className="border-t border-white/10 bg-[var(--color-navy-950)] text-[var(--color-cream-100)]">
+    // pb-20: room beneath the last line so the fixed "Call for the Best Deals"
+    // button never covers the legal text when the page is scrolled to the end.
+    // pb-20: room beneath the last line so the fixed "Call for the Best Deals"
+    // button never covers the legal text when the page is scrolled to the end.
+    <footer className="border-t border-white/10 bg-[var(--color-navy-950)] pb-20 text-[var(--color-cream-100)]">
       <AirlineStrip />
       <div className="mx-auto max-w-7xl px-4 py-12 sm:px-6 sm:py-16 lg:px-8">
         <div className="grid gap-10 sm:grid-cols-2 sm:gap-x-8 sm:gap-y-12 lg:grid-cols-[1.2fr_0.9fr_0.9fr_1.2fr]">

@@ -913,12 +913,18 @@ test.describe("server-side idempotency and request latency (structural + pure pa
   test("the Lead is created through the idempotent helper with a derived id, and a duplicate returns success BEFORE queueing or notifying", () => {
     const createIdx = actionSource.indexOf("await createWebsiteLead(");
     const deriveIdx = actionSource.indexOf("deriveLeadId(data.submissionId)");
-    const dupIdx = actionSource.indexOf("if (created.duplicate) return { ok: true, summary };");
-    const firstAfterIdx = actionSource.indexOf("await afterResponse(");
+    const dupIdx = actionSource.indexOf("if (created.duplicate) {");
+    const dupReturnIdx = actionSource.indexOf("return { ok: true, summary };", dupIdx);
+    const dupBlock = actionSource.slice(dupIdx, dupReturnIdx);
     expect(createIdx).toBeGreaterThan(-1);
     expect(deriveIdx).toBeGreaterThan(createIdx);
     expect(dupIdx).toBeGreaterThan(deriveIdx);
-    expect(firstAfterIdx).toBeGreaterThan(dupIdx); // no after() work is registered on the duplicate path
+    // The duplicate path may only re-run the idempotent submission-info upsert —
+    // never the queue distribution or the notification email.
+    expect(dupBlock).toContain("saveSubmissionInfo()");
+    expect(dupBlock).not.toMatch(/distributeNewWebsiteLead|sendFlightRequestNotification/);
+    expect(actionSource.indexOf("distributeNewWebsiteLead(created.id)")).toBeGreaterThan(dupReturnIdx);
+    expect(actionSource.indexOf("sendFlightRequestNotification(")).toBeGreaterThan(dupReturnIdx);
   });
 
   test("queue distribution runs in after() (not awaited inline), after the Lead exists, and its failure is caught and logged", () => {
@@ -992,7 +998,10 @@ test.describe("after() can never turn a saved request into a customer-facing err
     expect(helper).toMatch(/try \{\s*after\(task\);\s*\} catch \(err\) \{[\s\S]*await task\(\);/);
   });
   test("both best-effort tasks (queue distribution, internal notification) go through that helper and catch their own failures", () => {
-    expect(source.match(/await afterResponse\(/g)).toHaveLength(3); // queue distribution, submission info, internal notification
+    // Three call sites — submission info (via saveSubmissionInfo), queue distribution, internal notification — plus the helper's own definition.
+    expect(source.match(/\bafterResponse\(/g)).toHaveLength(4);
+    expect(source.match(/await afterResponse\(/g)).toHaveLength(2);
+    expect(source.match(/await saveSubmissionInfo\(\)/g)).toHaveLength(2); // duplicate path + normal path
     expect(source).toMatch(/distribution failed/);
     expect(source).toMatch(/submission info not saved/);
     expect(source).toMatch(/internal notification email failed/);

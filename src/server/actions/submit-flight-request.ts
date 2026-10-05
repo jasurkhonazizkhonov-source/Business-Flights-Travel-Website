@@ -236,26 +236,38 @@ export async function submitFlightRequest(input: FlightRequestInput): Promise<Su
       `[submitFlightRequest] persisted in ${Math.round(performance.now() - startedAt)}ms (steps, ms: ${JSON.stringify(timings)}; ip ${ipStatus}; location ${submissionInfo.location ? "captured" : "unavailable"})${created.duplicate ? " — duplicate of an already-saved submission" : ""}`,
     );
 
-    // The same submission already saved this Lead (a retried or repeated
-    // POST): the customer's request IS saved, so they get the same success —
-    // but the Lead was already queued and announced the first time, so
-    // neither happens again.
-    if (created.duplicate) return { ok: true, summary };
-
     // What the server itself learned about the request (full IP + approximate
     // location) is stored against the Lead for the CRM's permission-gated
     // section. Best-effort and after the response: it is a separate table, so
     // it can never block, fail or roll back the submission — if it cannot be
     // saved (e.g. the CRM's migration has not reached this database yet) the
-    // category is logged and the notification email still carries the values.
-    await afterResponse(
-      () =>
-        saveLeadSubmissionInfo(prisma, created.id, submissionInfo, data.budget !== undefined ? data.budgetCurrency : undefined).then(
-          () => undefined,
-          (err) => console.error(`[submitFlightRequest] submission info not saved: ${describeDbError(err)}`),
-        ),
-      "submission info",
-    );
+    // category and the Lead id (an internal id, not customer data) are logged
+    // and the notification email still carries the values.
+    //
+    // It is an upsert with an empty update, so it is safe to run again for the
+    // same Lead: a retried POST of the same submission (the `duplicate` case
+    // below) therefore also attempts it, which heals a first attempt that
+    // failed, and can never create a second row or overwrite the first.
+    const saveSubmissionInfo = () =>
+      afterResponse(
+        () =>
+          saveLeadSubmissionInfo(prisma, created.id, submissionInfo, data.budget !== undefined ? data.budgetCurrency : undefined).then(
+            () => undefined,
+            (err) => console.error(`[submitFlightRequest] submission info not saved for lead ${created.id}: ${describeDbError(err)}`),
+          ),
+        "submission info",
+      );
+
+    // The same submission already saved this Lead (a retried or repeated
+    // POST): the customer's request IS saved, so they get the same success —
+    // but the Lead was already queued and announced the first time, so
+    // neither happens again (only the idempotent submission-info write may).
+    if (created.duplicate) {
+      await saveSubmissionInfo();
+      return { ok: true, summary };
+    }
+
+    await saveSubmissionInfo();
 
     // Best-effort queue assignment. It is not needed for the customer's
     // response (an unassigned Lead is simply picked up later by the CRM's own
