@@ -91,6 +91,19 @@ h1, h2, h3, h4, .font-display {
   box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.85);
 }
 
+/* Touch: no 300 ms tap delay / double-tap zoom on controls, and a deliberate
+   (subtle navy) tap highlight instead of the browser's default grey flash. */
+a, button, summary, select, label, [role="button"], [role="tab"] {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: rgba(10, 26, 48, 0.08);
+}
+
+/* Anchored sections (e.g. /destinations#europe) land below the sticky header
+   instead of underneath it. */
+[id] {
+  scroll-margin-top: 5.5rem;
+}
+
 /* Balanced headings and no single-word last lines in running copy. */
 h1, h2, h3 {
   text-wrap: balance;
@@ -154,6 +167,11 @@ p, li {
   --rdp-accent-background-color: var(--color-cream-100);
   --rdp-today-color: var(--color-gold-600);
   font-family: var(--font-sans);
+}
+/* Weekday headers stay a readable 12px even where the narrow-phone rule below
+   shrinks the rest of the calendar. */
+.bfw-daypicker .rdp-weekday {
+  font-size: 0.75rem;
 }
 .bfw-daypicker .rdp-day_button:hover:not([disabled]) {
   background-color: var(--color-cream-100);

@@ -1,17 +1,19 @@
 import type { Metadata } from "next";
 import { LegalLayout, LegalSection } from "@/components/legal/LegalLayout";
 import { CONTACT_EMAIL, CONTACT_PHONE_DISPLAY, COMPANY_LEGAL_NAME, COMPANY_ADDRESS, SITE_NAME } from "@/lib/constants";
+import { pageMetadata } from "@/lib/seo";
 
 // Drafted to match what the site actually does (flight request form,
 // contact form, newsletter signup, CRM integration) — see docs/LEGAL.md
 // for attorney-review status and what's intentionally written in general
 // terms rather than left unstated.
 
-export const metadata: Metadata = {
+export const metadata: Metadata = pageMetadata({
   title: "Privacy Policy",
-  description: `How ${SITE_NAME} collects, uses, and protects information submitted through our website and flight request forms.`,
-  alternates: { canonical: "/privacy-policy" },
-};
+  description:
+    "How Business Flights Travel collects, uses, and protects information submitted through our website and flight request forms.",
+  path: "/privacy-policy",
+});
 
 const LAST_UPDATED = "September 7, 2026";
 

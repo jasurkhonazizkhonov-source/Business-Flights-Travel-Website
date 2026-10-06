@@ -3,6 +3,7 @@ import { FlightRequestForm } from "@/components/flight-form/FlightRequestForm";
 import { Reveal } from "@/components/Reveal";
 import { SITE_NAME, CONTACT_PHONE_DISPLAY } from "@/lib/constants";
 import { resolveAirportByIata } from "@/server/queries/airports";
+import { pageMetadata } from "@/lib/seo";
 
 // Server Actions inherit this page's limit, and so does the after()
 // notification submitFlightRequest schedules: its SMTP worst case is ~21s
@@ -10,12 +11,12 @@ import { resolveAirportByIata } from "@/server/queries/airports";
 // 10s platform default would cut off mid-send with no log line.
 export const maxDuration = 30;
 
-export const metadata: Metadata = {
+export const metadata: Metadata = pageMetadata({
   title: "Request a Business-Class Flight Quote",
   description:
-    "Request business-class, first-class, or international flights in minutes. Round-trip, one-way, or multi-city — a dedicated specialist follows up with tailored options.",
-  alternates: { canonical: "/flights" },
-};
+    "Request business-class, first-class, or international flights in minutes. Round-trip, one-way, or multi-city — a specialist follows up with tailored options.",
+  path: "/flights",
+});
 
 const processSteps = [
   {

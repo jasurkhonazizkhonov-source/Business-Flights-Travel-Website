@@ -2,12 +2,14 @@ import type { Metadata } from "next";
 import { Reveal } from "@/components/Reveal";
 import { HowItWorksSteps } from "@/components/sections/HowItWorksSteps";
 import { CTASection } from "@/components/sections/CTASection";
+import { pageMetadata } from "@/lib/seo";
 
-export const metadata: Metadata = {
-  title: "How It Works",
-  description: "How a Business Flights Travel flight request becomes a booked business-class itinerary, from submission to booking assistance.",
-  alternates: { canonical: "/how-it-works" },
-};
+export const metadata: Metadata = pageMetadata({
+  title: "How Our Flight Request Process Works",
+  description:
+    "How a Business Flights Travel flight request becomes a booked business-class itinerary, from submission to booking assistance.",
+  path: "/how-it-works",
+});
 
 export default function HowItWorksPage() {
   return (

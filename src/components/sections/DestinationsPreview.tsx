@@ -20,7 +20,7 @@ export function DestinationsPreview() {
               A starting point, from Europe to the Gulf to the Pacific
             </h2>
           </div>
-          <Link href="/destinations" className="inline-flex shrink-0 items-center gap-1.5 text-sm font-semibold text-[var(--color-navy-800)] hover:text-[var(--color-gold-600)]">
+          <Link href="/destinations" className="inline-flex shrink-0 items-center gap-1.5 py-1.5 text-sm font-semibold text-[var(--color-navy-800)] hover:text-[var(--color-gold-600)]">
             Browse all destinations <ArrowRight size={16} />
           </Link>
         </div>

@@ -295,7 +295,7 @@ export function FlightRequestForm({
       <button
         type="button"
         onClick={() => setShowMore((v) => !v)}
-        className="mt-4 text-xs font-semibold text-[var(--color-navy-700)] underline decoration-dotted underline-offset-4 hover:text-[var(--color-gold-600)]"
+        className="mt-2 inline-flex min-h-8 items-center text-xs font-semibold text-[var(--color-navy-700)] underline decoration-dotted underline-offset-4 hover:text-[var(--color-gold-600)]"
       >
         {showMore ? "Hide additional preferences" : "Add preferences (airline, budget, notes)"}
       </button>

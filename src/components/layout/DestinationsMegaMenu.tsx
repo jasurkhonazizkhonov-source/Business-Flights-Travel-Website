@@ -30,7 +30,7 @@ export function DestinationsMegaMenu({ active, regions }: { active: boolean; reg
         aria-haspopup="true"
         aria-expanded={open}
         className={cn(
-          "flex items-center gap-1 whitespace-nowrap text-[0.8rem] font-medium tracking-wide text-[var(--color-navy-800)] transition-colors hover:text-[var(--color-gold-600)] xl:text-[0.85rem]",
+          "flex items-center gap-1 whitespace-nowrap py-2 text-[0.8rem] font-medium tracking-wide text-[var(--color-navy-800)] transition-colors hover:text-[var(--color-gold-600)] xl:text-[0.85rem]",
           active && "text-[var(--color-gold-600)]",
         )}
       >

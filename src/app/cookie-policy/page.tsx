@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { LegalLayout, LegalSection } from "@/components/legal/LegalLayout";
 import { CONTACT_EMAIL, SITE_NAME } from "@/lib/constants";
+import { pageMetadata } from "@/lib/seo";
 
 // The "what this site actually sets" section below should be re-verified
 // against real cookie/storage usage at each future deploy — see docs/LEGAL.md.
@@ -12,11 +13,12 @@ import { CONTACT_EMAIL, SITE_NAME } from "@/lib/constants";
 // tooling is ever added, gate its loader behind that check and update this
 // policy in the same change rather than adding new consent plumbing.
 
-export const metadata: Metadata = {
+export const metadata: Metadata = pageMetadata({
   title: "Cookie Policy",
-  description: `How ${SITE_NAME} uses cookies and similar technologies on this website, and how to control them.`,
-  alternates: { canonical: "/cookie-policy" },
-};
+  description:
+    "How Business Flights Travel uses cookies and similar technologies on this website, and how to control them.",
+  path: "/cookie-policy",
+});
 
 const LAST_UPDATED = "September 7, 2026";
 

@@ -30,6 +30,14 @@ for (const { name, path } of PAGES) {
     // contrast. Confirmed by hand for the specific case this surfaced
     // (gold-500/navy-950 CTA button, 7.14:1 at rest — comfortably passes).
     await page.waitForTimeout(900);
+    // The floating call button is mounted late (deferred chunk) and fades in over
+    // 250 ms; scanning it mid-fade reads its label at partial opacity and can
+    // report a transient contrast failure. Wait until it has fully appeared.
+    await page.waitForFunction(() => {
+      const fab = document.querySelector('a.fixed[href^="tel:"]');
+      // (On pages with their own primary button in view it deliberately hides itself: aria-hidden.)
+      return !fab || fab.getAttribute("aria-hidden") === "true" || getComputedStyle(fab).opacity === "1";
+    });
     const results = await new AxeBuilder({ page })
       // Best-practice rules (e.g. "region", "landmark-unique") are useful
       // guidance but not WCAG failures on their own — scoring only against

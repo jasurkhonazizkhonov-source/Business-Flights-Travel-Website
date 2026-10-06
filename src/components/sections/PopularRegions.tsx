@@ -3,13 +3,19 @@ import { ArrowRight } from "lucide-react";
 import { Reveal } from "@/components/Reveal";
 import { REGIONS, getDestinationsByRegion } from "@/data/destinations";
 
+const COUNT_WORDS = ["Zero", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten"];
+
 export function PopularRegions() {
+  // The heading counts the regions actually listed below, so it can never drift
+  // from the data (it said "Six" while seven cards were shown).
+  const listed = REGIONS.filter((region) => getDestinationsByRegion(region.slug).length > 0).length;
+  const countWord = COUNT_WORDS[listed] ?? String(listed);
   return (
     <section className="mx-auto max-w-7xl px-4 py-16 sm:px-6 sm:py-20 lg:px-8">
       <Reveal>
         <p className="text-xs font-semibold tracking-[0.25em] text-[var(--color-gold-600)]">EXPLORE BY REGION</p>
         <h2 className="mt-3 max-w-xl text-[clamp(1.5rem,3.4vw,2.25rem)] font-display font-semibold leading-tight text-[var(--color-navy-950)]">
-          Six regions, one dedicated specialist
+          {countWord} regions, one dedicated specialist
         </h2>
       </Reveal>
       <div className="mt-8 grid grid-cols-2 gap-3 sm:mt-10 sm:gap-4 lg:grid-cols-3">

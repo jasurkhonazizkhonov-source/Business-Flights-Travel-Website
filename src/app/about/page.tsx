@@ -5,13 +5,14 @@ import { MapPin, Search, MessagesSquare, PlaneTakeoff, Users2, Building2, Briefc
 import { Reveal } from "@/components/Reveal";
 import { CTASection } from "@/components/sections/CTASection";
 import { COMPANY_ADDRESS, CONTACT_PHONE_DISPLAY, CONTACT_PHONE_E164, SITE_NAME, SITE_URL } from "@/lib/constants";
+import { pageMetadata } from "@/lib/seo";
 
-export const metadata: Metadata = {
-  title: "About Us",
+export const metadata: Metadata = pageMetadata({
+  title: "About Our San Francisco Travel Agency",
   description:
-    "Business Flights Travel is a San Francisco-based agency focused specifically on business-class, first-class, and international flight requests, handled personally by a travel specialist.",
-  alternates: { canonical: "/about" },
-};
+    "A San Francisco agency focused on business-class, first-class, and international flights — every request researched and handled personally by a travel specialist.",
+  path: "/about",
+});
 
 const howWeHelp = [
   {

@@ -68,7 +68,7 @@ export function FloatingDealsButton() {
           <span className="sm:hidden">Best Deals</span>
           <span className="hidden sm:inline">Call for the Best Deals</span>
         </span>
-        <span className="hidden text-[0.7rem] font-medium text-[var(--color-navy-950)]/80 sm:inline">{CONTACT_PHONE_DISPLAY}</span>
+        <span className="hidden text-xs font-medium text-[var(--color-navy-950)]/85 sm:inline">{CONTACT_PHONE_DISPLAY}</span>
       </span>
     </m.a>
   );

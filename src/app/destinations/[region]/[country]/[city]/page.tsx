@@ -7,7 +7,7 @@ import { Reveal } from "@/components/Reveal";
 import { DestinationCard } from "@/components/destinations/DestinationCard";
 import { destinations, destinationPath, getDestination, regionLabel } from "@/data/destinations";
 import { blogPosts } from "@/data/blog-posts";
-import { SITE_URL } from "@/lib/constants";
+import { SITE_NAME, SITE_URL } from "@/lib/constants";
 import { pickRelatedDestinations } from "@/lib/related-destinations";
 import { FARE_DISCLAIMER, formatFareUSD } from "@/lib/fares";
 
@@ -43,16 +43,24 @@ export async function generateMetadata({ params }: PageProps<"/destinations/[reg
   if (!destination) return {};
   const title = `Business Class Flights to ${destination.city}`;
   const description = `Business-class flight guidance for ${destination.city}, ${destination.country} — starting fares, airport info, best times to travel, and how to request a quote.`;
+  const fullTitle = `${title} | ${SITE_NAME}`;
   return {
     title,
     description,
     alternates: { canonical: destinationPath(destination) },
-    openGraph: { title, description, images: [{ url: destination.heroImage }] },
+    openGraph: {
+      type: "website",
+      title: fullTitle,
+      description,
+      url: destinationPath(destination),
+      siteName: SITE_NAME,
+      images: [{ url: destination.heroImage, alt: `${destination.city}, ${destination.country}` }],
+    },
     // Without an explicit twitter.images, Next falls back to the generic
     // branded twitter-image.tsx rather than reusing openGraph.images — set
     // it explicitly so sharing this page on X/Twitter also shows the real
     // destination photo, not the generic brand card.
-    twitter: { title, description, images: [destination.heroImage] },
+    twitter: { card: "summary_large_image", title: fullTitle, description, images: [destination.heroImage] },
   };
 }
 
@@ -279,7 +287,7 @@ export default async function DestinationPage({ params }: PageProps<"/destinatio
                   })}
                 </ul>
               </div>
-              <p className="text-[11px] leading-relaxed text-[var(--color-navy-950)]/65">*{FARE_DISCLAIMER}</p>
+              <p className="text-xs leading-relaxed text-[var(--color-navy-950)]/70">*{FARE_DISCLAIMER}</p>
             </aside>
           </Reveal>
         </div>

@@ -5,13 +5,14 @@ import { CheckCircle2, Armchair, Utensils, Wifi, Clock } from "lucide-react";
 import { Reveal } from "@/components/Reveal";
 import { CTASection } from "@/components/sections/CTASection";
 import { PRIMARY_CTA_LABEL } from "@/lib/constants";
+import { pageMetadata } from "@/lib/seo";
 
-export const metadata: Metadata = {
-  title: "Business Class Flights",
+export const metadata: Metadata = pageMetadata({
+  title: "Business-Class Flight Booking Assistance",
   description:
     "Business-class flight booking assistance for international and long-haul travel — cabin comparisons, fare search, and a dedicated specialist for every request.",
-  alternates: { canonical: "/business-class" },
-};
+  path: "/business-class",
+});
 
 const capabilities = [
   "Business-class fare search across airlines and alliances, not a single engine",

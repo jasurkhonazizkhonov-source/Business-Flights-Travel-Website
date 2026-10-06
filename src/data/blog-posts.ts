@@ -160,7 +160,7 @@ export const blogPosts: BlogPost[] = [
     tags: ["business class flight deals", "discounted business class flights", "business class airfare"],
     seoTitle: "How to Find Business-Class Flight Deals | Business Flights Travel",
     seoDescription:
-      "A practical guide to how business-class pricing actually works, and how a specialist agency finds fares and premium-cabin space a standard search engine won't show.",
+      "A practical guide to how business-class pricing works, and how a specialist agency finds fares and premium-cabin space a standard search won't show.",
     content: [
       {
         type: "p",
@@ -438,7 +438,7 @@ export const blogPosts: BlogPost[] = [
     tags: ["business class vs first class", "luxury flights", "premium cabin flights"],
     seoTitle: "Business Class vs. First Class: What's the Real Difference? | Business Flights Travel",
     seoDescription:
-      "How business class and first class actually differ — seat privacy, service, price, and which airlines still offer first class — so you can decide which fits your trip.",
+      "How business class and first class differ — seat privacy, service, price, and which airlines still offer first class — so you can decide which fits your trip.",
     content: [
       {
         type: "p",
@@ -506,7 +506,7 @@ export const blogPosts: BlogPost[] = [
     tags: ["lie-flat seats", "business class cabins", "business class seat selection"],
     seoTitle: "Business-Class Seat Types Explained | Business Flights Travel",
     seoDescription:
-      "Lie-flat, angled-flat, and staggered business-class seats aren't the same product. A practical guide to what each configuration actually means for your flight.",
+      "Lie-flat, angled-flat, and staggered business-class seats aren't the same product. A practical guide to what each configuration means for your flight.",
     content: [
       {
         type: "p",
@@ -562,7 +562,7 @@ export const blogPosts: BlogPost[] = [
     tags: ["business class inclusions", "business class fare", "premium cabin benefits"],
     seoTitle: "What Does Business Class Include? | Business Flights Travel",
     seoDescription:
-      "A realistic breakdown of what's typically included in a business-class fare — seat, baggage, dining, lounge access, and priority services — and what actually varies by airline.",
+      "What's typically included in a business-class fare — seat, baggage, dining, lounge access, and priority services — and what varies by airline.",
     content: [
       {
         type: "p",
@@ -626,7 +626,7 @@ export const blogPosts: BlogPost[] = [
     tags: ["business class value", "long-haul travel", "premium cabin decision"],
     seoTitle: "Is Business Class Worth It for Long-Haul Flights? | Business Flights Travel",
     seoDescription:
-      "A practical framework for deciding whether business class is worth the price difference for a specific long-haul trip — flight length, timing, and what you're actually paying for.",
+      "A practical framework for deciding whether business class is worth the price difference on a long-haul trip — flight length, timing, and what you're paying for.",
     content: [
       {
         type: "p",
@@ -748,7 +748,7 @@ export const blogPosts: BlogPost[] = [
     tags: ["direct aisle access", "business class seat map", "business class cabins"],
     seoTitle: "Direct Aisle Access in Business Class Explained | Business Flights Travel",
     seoDescription:
-      "Direct aisle access means never climbing over a seatmate to reach the aisle. Here's why the seat map matters as much as the cabin name, and how to check before you book.",
+      "Direct aisle access means never climbing over a seatmate to reach the aisle. Why the seat map matters as much as the cabin name, and how to check.",
     content: [
       {
         type: "p",
@@ -810,7 +810,7 @@ export const blogPosts: BlogPost[] = [
     tags: ["business class suites", "business class seat privacy", "business class cabins"],
     seoTitle: "Business-Class Suites vs. Traditional Seats | Business Flights Travel",
     seoDescription:
-      "A growing number of airlines sell an enclosed business-class \"suite\" with a closing door. Here's what it actually adds over a traditional open business-class seat.",
+      "A growing number of airlines sell an enclosed business-class suite with a door. Here's what it adds over a traditional open business-class seat.",
     content: [
       {
         type: "p",
@@ -906,7 +906,7 @@ export const blogPosts: BlogPost[] = [
     tags: ["business class baggage", "business class fare", "airline baggage policy"],
     seoTitle: "Business-Class Baggage Allowance Explained | Business Flights Travel",
     seoDescription:
-      "What's typically included in a business-class baggage allowance — checked bags, weight limits, and carry-on — and why it's worth confirming before you pack.",
+      "What's typically included in a business-class baggage allowance — checked bags, weight limits, and carry-on — and why to confirm it before you pack.",
     content: [
       {
         type: "p",
@@ -1022,7 +1022,7 @@ export const blogPosts: BlogPost[] = [
     tags: ["business class to Europe", "international travel planning", "transatlantic flights"],
     seoTitle: "Planning a Business-Class Trip to Europe | Business Flights Travel",
     seoDescription:
-      "What to think through when planning a business-class trip to Europe — routing, timing, and cabin choice for one of the most heavily served transatlantic markets.",
+      "What to think through when planning a business-class trip to Europe — routing, timing, and cabin choice for one of the busiest transatlantic markets.",
     content: [
       {
         type: "p",
@@ -1122,7 +1122,7 @@ export const blogPosts: BlogPost[] = [
     tags: ["business class to Middle East", "Gulf carriers", "international routing"],
     seoTitle: "Business-Class Flights to the Middle East | Business Flights Travel",
     seoDescription:
-      "What to consider when planning business-class flights to the Middle East — as a destination in its own right, and as a connecting hub for onward international travel.",
+      "What to consider when planning business-class flights to the Middle East — as a destination in its own right and as a connecting hub for onward travel.",
     content: [
       {
         type: "p",
@@ -1462,7 +1462,7 @@ export const blogPosts: BlogPost[] = [
     tags: ["airline miles","points redemption","award travel","business class deals"],
     seoTitle: "Redeeming Miles and Points for Business Class | Business Flights Travel",
     seoDescription:
-      "A realistic look at using airline miles and credit card points for business-class travel — where the value is strong, and where availability becomes the real constraint.",
+      "A realistic look at using airline miles and credit card points for business-class travel — where the value is strong, and where availability is the constraint.",
     content: [
       { type: "p", text: "Miles and points can turn a five-figure business-class fare into a fraction of that cost in cash plus taxes and fees. The catch is rarely the redemption rate — it's finding an actual seat released for awards on the date you need it." },
       { type: "h2", text: "Why award availability is the real bottleneck" },

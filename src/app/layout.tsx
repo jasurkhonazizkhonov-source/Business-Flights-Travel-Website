@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Instrument_Sans, Playfair_Display } from "next/font/google";
 import { Header } from "@/components/layout/Header";
 import { Footer } from "@/components/layout/Footer";
@@ -12,6 +12,7 @@ import {
   SITE_NAME,
   SITE_URL,
   CONTACT_PHONE_E164,
+  CONTACT_EMAIL,
   COMPANY_ADDRESS_PARTS,
   SOCIAL_LINKS,
 } from "@/lib/constants";
@@ -34,6 +35,12 @@ const playfair = Playfair_Display({
   subsets: ["latin"],
   display: "swap",
 });
+
+// Browser UI colour (mobile address bar) matches the cream page and header.
+export const viewport: Viewport = {
+  themeColor: "#fbf9f5",
+  colorScheme: "light",
+};
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
@@ -104,6 +111,15 @@ const organizationJsonLd = {
   logo: brandMarkUrl,
   image: brandMarkUrl,
   telephone: CONTACT_PHONE_E164,
+  email: CONTACT_EMAIL,
+  // How customers reach the agency, stated exactly as the site does.
+  contactPoint: {
+    "@type": "ContactPoint",
+    contactType: "customer service",
+    telephone: CONTACT_PHONE_E164,
+    email: CONTACT_EMAIL,
+    availableLanguage: "English",
+  },
   address: {
     "@type": "PostalAddress",
     ...COMPANY_ADDRESS_PARTS,

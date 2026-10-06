@@ -30,8 +30,6 @@ export function Footer() {
   return (
     // pb-20: room beneath the last line so the fixed "Call for the Best Deals"
     // button never covers the legal text when the page is scrolled to the end.
-    // pb-20: room beneath the last line so the fixed "Call for the Best Deals"
-    // button never covers the legal text when the page is scrolled to the end.
     <footer className="border-t border-white/10 bg-[var(--color-navy-950)] pb-20 text-[var(--color-cream-100)]">
       <AirlineStrip />
       <div className="mx-auto max-w-7xl px-4 py-12 sm:px-6 sm:py-16 lg:px-8">
@@ -62,8 +60,12 @@ export function Footer() {
             )}
           </div>
 
+          {/* Explore + Popular Destinations sit side by side on a phone (two short
+              lists) instead of stacking into one very long column; from `sm` the
+              wrapper dissolves (`contents`) and they join the footer grid as before. */}
+          <div className="grid grid-cols-2 gap-6 sm:contents">
           <div>
-            <h3 className="text-xs font-semibold tracking-[0.2em] text-white/50">EXPLORE</h3>
+            <h3 className="min-h-8 text-xs font-semibold tracking-[0.2em] text-white/50 sm:min-h-0">EXPLORE</h3>
             <ul className="mt-4 space-y-2.5 text-sm">
               {NAV_LINKS.map((link) => (
                 <li key={link.href}>
@@ -76,7 +78,7 @@ export function Footer() {
           </div>
 
           <div>
-            <h3 className="text-xs font-semibold tracking-[0.2em] text-white/50">POPULAR DESTINATIONS</h3>
+            <h3 className="min-h-8 text-xs font-semibold tracking-[0.2em] text-white/50 sm:min-h-0">POPULAR DESTINATIONS</h3>
             <ul className="mt-4 space-y-2.5 text-sm">
               {featuredDestinations.map((d) => (
                 <li key={d.citySlug}>
@@ -94,6 +96,7 @@ export function Footer() {
                 </Link>
               </li>
             </ul>
+          </div>
           </div>
 
           <div>
@@ -165,14 +168,14 @@ export function Footer() {
           ))}
         </div>
 
-        <div className="mt-8 flex flex-col gap-4 border-t border-white/10 pt-8 text-xs text-[var(--color-cream-100)]/50">
+        <div className="mt-8 flex flex-col gap-4 border-t border-white/10 pt-8 text-xs text-[var(--color-cream-100)]/65">
           <nav aria-label="Legal" className="flex flex-wrap gap-x-6 gap-y-2">
             {LEGAL_LINKS.map((link) => (
-              <Link key={link.href} href={link.href} className="hover:text-[var(--color-cream-100)]/80">
+              <Link key={link.href} href={link.href} className="py-1.5 hover:text-[var(--color-cream-100)]/90">
                 {link.label}
               </Link>
             ))}
-            <CookieSettingsLink className="hover:text-[var(--color-cream-100)]/80" />
+            <CookieSettingsLink className="py-1.5 hover:text-[var(--color-cream-100)]/90" />
           </nav>
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <p>© {new Date().getFullYear()} Business Flights Travel. All rights reserved.</p>

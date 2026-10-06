@@ -5,13 +5,14 @@ import { DestinationCard } from "@/components/destinations/DestinationCard";
 import { PopularAirlines } from "@/components/sections/PopularAirlines";
 import { REGIONS, getFeaturedDestinations, getDestinationsByRegion } from "@/data/destinations";
 import { FARE_DISCLAIMER } from "@/lib/fares";
+import { pageMetadata } from "@/lib/seo";
 
-export const metadata: Metadata = {
+export const metadata: Metadata = pageMetadata({
   title: "Business-Class Flight Destinations",
   description:
-    "Explore business-class flight destinations from the United States, organized by region — Europe, the Middle East, Asia, Africa, Oceania, North America, and South America.",
-  alternates: { canonical: "/destinations" },
-};
+    "Business-class flight destinations from the United States by region — Europe, the Middle East, Asia, Africa, Oceania, North America, and South America.",
+  path: "/destinations",
+});
 
 const featured = getFeaturedDestinations(8);
 

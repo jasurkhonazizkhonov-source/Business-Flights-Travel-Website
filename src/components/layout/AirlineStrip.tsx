@@ -16,7 +16,7 @@ export function AirlineStrip() {
   return (
     <div className="border-b border-white/10 bg-[var(--color-navy-900)] py-8">
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-        <p className="text-center text-[0.65rem] font-semibold tracking-[0.2em] text-white/55">
+        <p className="text-center text-xs font-semibold tracking-[0.2em] text-white/60">
           AIRLINES TRAVELERS MAY CONSIDER
         </p>
         <div className="mt-6 grid grid-cols-3 gap-x-4 gap-y-6 sm:grid-cols-5 lg:grid-cols-9 lg:gap-x-3">

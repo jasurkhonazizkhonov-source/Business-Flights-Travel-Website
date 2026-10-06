@@ -18,24 +18,31 @@ export async function generateMetadata({ params }: PageProps<"/blog/[slug]">): P
   const { slug } = await params;
   const post = getBlogPostBySlug(slug);
   if (!post) return {};
+  // seoTitle already includes the "| Business Flights Travel" suffix, so the
+  // title must bypass the root layout's title template (`%s | Business Flights
+  // Travel`) — otherwise the suffix is appended twice. When that full title would
+  // run past ~65 characters (search results cut it off), the brand suffix is
+  // dropped: the site name still appears in the result's site-name line.
+  const brandSuffix = ` | ${SITE_NAME}`;
+  const title = post.seoTitle.length > 65 && post.seoTitle.endsWith(brandSuffix) ? post.seoTitle.slice(0, -brandSuffix.length) : post.seoTitle;
+  const url = `/blog/${post.slug}`;
   return {
-    // seoTitle already includes the "| Business Flights Travel" suffix, so
-    // this must bypass the root layout's title template (`%s | Business
-    // Flights Travel`) — otherwise the suffix is appended twice.
-    title: { absolute: post.seoTitle },
+    title: { absolute: title },
     description: post.seoDescription,
-    alternates: { canonical: `/blog/${post.slug}` },
+    alternates: { canonical: url },
     openGraph: {
       type: "article",
-      title: post.seoTitle,
+      title,
       description: post.seoDescription,
-      images: [{ url: post.featuredImage }],
+      url,
+      siteName: SITE_NAME,
+      images: [{ url: post.featuredImage, alt: post.title }],
       publishedTime: post.publishedAt,
       modifiedTime: post.updatedAt,
     },
     // Without this, Next falls back to the generic branded twitter-image.tsx
     // instead of reusing openGraph.images.
-    twitter: { title: post.seoTitle, description: post.seoDescription, images: [post.featuredImage] },
+    twitter: { card: "summary_large_image", title, description: post.seoDescription, images: [post.featuredImage] },
   };
 }
 

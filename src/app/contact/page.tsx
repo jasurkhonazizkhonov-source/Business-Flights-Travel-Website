@@ -4,12 +4,14 @@ import { Phone, Mail, ArrowRight } from "lucide-react";
 import { Reveal } from "@/components/Reveal";
 import { ContactForm } from "@/components/contact/ContactForm";
 import { CONTACT_EMAIL, CONTACT_PHONE_DISPLAY, PRIMARY_CTA_LABEL } from "@/lib/constants";
+import { pageMetadata } from "@/lib/seo";
 
-export const metadata: Metadata = {
-  title: "Contact Us",
-  description: "Get in touch with Business Flights Travel for business-class flight assistance, or submit a flight request directly.",
-  alternates: { canonical: "/contact" },
-};
+export const metadata: Metadata = pageMetadata({
+  title: "Contact a Business-Class Flight Specialist",
+  description:
+    "Get in touch with Business Flights Travel for business-class flight assistance, or submit a flight request directly.",
+  path: "/contact",
+});
 
 export default function ContactPage() {
   return (

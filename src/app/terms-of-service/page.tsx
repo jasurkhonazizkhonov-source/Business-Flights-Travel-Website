@@ -1,16 +1,18 @@
 import type { Metadata } from "next";
 import { LegalLayout, LegalSection } from "@/components/legal/LegalLayout";
 import { CONTACT_EMAIL, COMPANY_LEGAL_NAME, COMPANY_ADDRESS, SITE_NAME } from "@/lib/constants";
+import { pageMetadata } from "@/lib/seo";
 
 // The Governing Law and Limitation of Liability sections below are
 // deliberately written without naming a specific state/country or court
 // jurisdiction — see docs/LEGAL.md for why, and for attorney-review status.
 
-export const metadata: Metadata = {
+export const metadata: Metadata = pageMetadata({
   title: "Terms of Service",
-  description: `The terms that govern your use of the ${SITE_NAME} website and flight request service.`,
-  alternates: { canonical: "/terms-of-service" },
-};
+  description:
+    "The terms that govern your use of the Business Flights Travel website and flight request service.",
+  path: "/terms-of-service",
+});
 
 const LAST_UPDATED = "August 20, 2026";
 

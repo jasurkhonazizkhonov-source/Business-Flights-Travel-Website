@@ -86,7 +86,7 @@ export function Header({ navMenuRegions }: { navMenuRegions: NavMenuRegion[] }) 
                 key={link.href}
                 href={link.href}
                 className={cn(
-                  "whitespace-nowrap text-[0.8rem] font-medium tracking-wide text-[var(--color-navy-800)] transition-colors hover:text-[var(--color-gold-600)] xl:text-[0.85rem]",
+                  "whitespace-nowrap py-2 text-[0.8rem] font-medium tracking-wide text-[var(--color-navy-800)] transition-colors hover:text-[var(--color-gold-600)] xl:text-[0.85rem]",
                   active && "text-[var(--color-gold-600)]",
                 )}
               >

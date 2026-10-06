@@ -34,17 +34,24 @@ export function DestinationCard({
           className="object-cover transition-transform duration-700 ease-out group-hover:scale-110"
           priority={priority}
         />
-        <div className="absolute inset-0 bg-gradient-to-t from-[var(--color-navy-950)] via-[var(--color-navy-950)]/15 to-transparent" />
+        {/* The scrim reaches further up the photo than a bare fade-to-navy so
+            the white text below keeps >= 4.5:1 over bright skylines (e.g.
+            Copenhagen's façades, Dubai's sky), not just over dark ones. */}
+        <div className="absolute inset-0 bg-gradient-to-t from-[var(--color-navy-950)] via-[var(--color-navy-950)]/55 via-45% to-transparent" />
       </div>
-      <div className="absolute inset-x-0 bottom-0 p-3.5 sm:p-5">
+      <div className="absolute inset-x-0 bottom-0 p-3.5 [text-shadow:0_1px_6px_rgba(10,26,48,0.55)] sm:p-5">
         <h3 className="flex items-center gap-1.5 font-display text-base font-semibold text-white sm:text-xl">
           {destination.city}
           <ArrowUpRight size={16} className="hidden opacity-0 transition-opacity group-hover:opacity-100 sm:inline" />
         </h3>
-        <p className="truncate text-xs text-white/70 sm:text-sm">
-          {destination.country} <span className="text-white/40">· {destination.iata}</span>
+        <p className="truncate text-xs text-white/85 sm:text-sm">
+          {destination.country}
+          {/* The airport code is a nicety, not needed to identify the card — dropped on
+              the two-up phone grid where a long country name (e.g. United Arab Emirates)
+              would otherwise wrap onto a second line. */}
+          <span className="hidden text-white/65 sm:inline"> · {destination.iata}</span>
         </p>
-        <p className="mt-1.5 text-xs font-medium text-white/85 sm:text-sm">From {formatFareUSD(destination.startingFareUSD)}*</p>
+        <p className="mt-1.5 text-xs font-medium text-white sm:text-sm">From {formatFareUSD(destination.startingFareUSD)}*</p>
       </div>
     </Link>
   );

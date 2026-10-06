@@ -10,16 +10,37 @@ import { BlogPreview } from "@/components/sections/BlogPreview";
 import { HomeFAQ } from "@/components/sections/HomeFAQ";
 import { NewsletterSection } from "@/components/sections/NewsletterSection";
 import { CTASection } from "@/components/sections/CTASection";
-import { SITE_DESCRIPTION, SITE_NAME } from "@/lib/constants";
+import { SITE_NAME } from "@/lib/constants";
 
 // The hero's flight request form posts its Server Action to this page; see
 // the same setting (and why) in src/app/flights/page.tsx.
 export const maxDuration = 30;
 
+// Under ~65 characters (longer titles are cut off in search results) and
+// ~155 characters of description; SITE_DESCRIPTION, which the structured data
+// and footer use, is longer than a snippet shows.
+const HOME_TITLE = `Business-Class & International Flights | ${SITE_NAME}`;
+const HOME_DESCRIPTION =
+  "Premium business-class and international flights, arranged personally by a dedicated travel specialist. Request a round-trip, one-way, or multi-city quote.";
+
 export const metadata: Metadata = {
-  title: `${SITE_NAME} | Business-Class Flights & Premium Travel Agency`,
-  description: SITE_DESCRIPTION,
+  title: { absolute: HOME_TITLE },
+  description: HOME_DESCRIPTION,
   alternates: { canonical: "/" },
+  openGraph: {
+    type: "website",
+    title: HOME_TITLE,
+    description: HOME_DESCRIPTION,
+    url: "/",
+    siteName: SITE_NAME,
+    images: [{ url: "/opengraph-image", width: 1200, height: 630, alt: `${SITE_NAME} — Business-class and international flights, arranged personally` }],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: HOME_TITLE,
+    description: HOME_DESCRIPTION,
+    images: [{ url: "/twitter-image", width: 1200, height: 630, alt: `${SITE_NAME} — Business-class and international flights, arranged personally` }],
+  },
 };
 
 // Homepage sections are each unique to this page — the deeper explanations

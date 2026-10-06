@@ -5,13 +5,14 @@ import { Reveal } from "@/components/Reveal";
 import { PostCard } from "@/components/blog/PostCard";
 import { blogPosts } from "@/data/blog-posts";
 import { formatIsoDate } from "@/lib/format-date";
+import { pageMetadata } from "@/lib/seo";
 
-export const metadata: Metadata = {
+export const metadata: Metadata = pageMetadata({
   title: "Business Travel Journal",
   description:
     "Guides and insights on business-class travel, airline comparisons, corporate travel planning, and international flight booking.",
-  alternates: { canonical: "/blog" },
-};
+  path: "/blog",
+});
 
 export default function BlogIndexPage() {
   // Sorted by publish date rather than relying on array order — the most
