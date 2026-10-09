@@ -14,11 +14,27 @@ import { CONTACT_PHONE_DISPLAY, CONTACT_PHONE_E164 } from "@/lib/constants";
 // near the bottom of the viewport, so this fixed pill never sits on top of
 // — and intercepts taps meant for — another primary call-to-action.
 export function FloatingDealsButton() {
-  const [hidden, setHidden] = useState(false);
+  const [coversCta, setCoversCta] = useState(false);
+  // While someone is typing in a field (on a phone the on-screen keyboard raises
+  // this fixed pill to sit right over the field being edited) it steps aside too.
+  const [fieldFocused, setFieldFocused] = useState(false);
+  const hidden = coversCta || fieldFocused;
   // Tracks which observed elements are currently intersecting — a Set kept
   // across observer callbacks, since each callback only reports elements
   // whose state just changed, not the full current state of every target.
   const intersecting = useRef<Set<Element>>(new Set());
+
+  useEffect(() => {
+    const isField = (t: EventTarget | null) => t instanceof HTMLElement && t.matches("input:not([type=checkbox]):not([type=radio]):not([type=button]):not([type=submit]), textarea, select");
+    const onIn = (e: FocusEvent) => { if (isField(e.target)) setFieldFocused(true); };
+    const onOut = () => setFieldFocused(false);
+    document.addEventListener("focusin", onIn);
+    document.addEventListener("focusout", onOut);
+    return () => {
+      document.removeEventListener("focusin", onIn);
+      document.removeEventListener("focusout", onOut);
+    };
+  }, []);
 
   useEffect(() => {
     const targets = document.querySelectorAll<HTMLElement>("[data-hide-floating-cta]");
@@ -30,7 +46,7 @@ export function FloatingDealsButton() {
           if (entry.isIntersecting) intersecting.current.add(entry.target);
           else intersecting.current.delete(entry.target);
         }
-        setHidden(intersecting.current.size > 0);
+        setCoversCta(intersecting.current.size > 0);
       },
       // A little extra margin at the bottom so the pill steps aside slightly
       // before the button it would otherwise cover is even fully in view.

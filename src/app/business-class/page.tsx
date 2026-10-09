@@ -8,7 +8,7 @@ import { PRIMARY_CTA_LABEL } from "@/lib/constants";
 import { pageMetadata } from "@/lib/seo";
 
 export const metadata: Metadata = pageMetadata({
-  title: "Business-Class Flight Booking Assistance",
+  title: "Business-Class Flight Assistance",
   description:
     "Business-class flight booking assistance for international and long-haul travel — cabin comparisons, fare search, and a dedicated specialist for every request.",
   path: "/business-class",

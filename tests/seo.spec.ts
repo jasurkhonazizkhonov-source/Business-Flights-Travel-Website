@@ -119,6 +119,17 @@ test("favicon, app icon and manifest icons all resolve", async ({ request, page 
   await expect(page.locator('link[rel="manifest"]')).toHaveAttribute("href", "/manifest.webmanifest");
   const manifest = await (await request.get("/manifest.webmanifest")).json();
   expect(manifest.name).toBe("Business Flights Travel");
-  for (const icon of manifest.icons) expect((await request.get(icon.src)).status(), icon.src).toBe(200);
+  // Every referenced icon exists AND is really the size the manifest declares (PNG IHDR width/height).
+  const declared = new Set<string>();
+  for (const icon of manifest.icons) {
+    const res = await request.get(icon.src);
+    expect(res.status(), icon.src).toBe(200);
+    const body = await res.body();
+    expect(body.subarray(1, 4).toString("ascii"), `${icon.src} is a PNG`).toBe("PNG");
+    expect(`${body.readUInt32BE(16)}x${body.readUInt32BE(20)}`, `${icon.src} real size`).toBe(icon.sizes);
+    declared.add(icon.sizes);
+  }
+  // The pair Chrome/Android need for an installable site.
+  expect(declared.has("192x192") && declared.has("512x512")).toBe(true);
   expect(await page.locator('meta[name="theme-color"]').first().getAttribute("content")).toBe("#fbf9f5");
 });

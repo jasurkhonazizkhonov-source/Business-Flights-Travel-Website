@@ -227,14 +227,14 @@ export function FlightRequestForm({
       )}
     >
       {/* Trip type */}
-      <div className="mb-5 flex flex-wrap gap-1 rounded-full bg-[var(--color-cream-100)] p-1 sm:inline-flex sm:flex-nowrap">
+      <div className="mb-5 flex gap-1 rounded-full bg-[var(--color-cream-100)] p-1 sm:inline-flex">
         {TRIP_TYPES.map((t) => (
           <button
             key={t}
             type="button"
             onClick={() => changeTripType(t)}
             className={cn(
-              "min-h-9 flex-1 whitespace-nowrap rounded-full px-3 py-2 text-xs font-semibold tracking-wide transition-colors sm:flex-none sm:px-4 sm:text-sm",
+              "min-h-9 flex-1 whitespace-nowrap rounded-full px-2.5 py-2 text-xs font-semibold tracking-wide transition-colors sm:flex-none sm:px-4 sm:text-sm",
               tripType === t ? "bg-[var(--color-navy-950)] text-white shadow" : "text-[var(--color-navy-800)] hover:text-[var(--color-navy-950)]",
             )}
           >

@@ -23,7 +23,7 @@ export function DestinationCard({
   return (
     <Link
       href={destinationPath(destination)}
-      className="group relative block overflow-hidden rounded-2xl bg-[var(--color-navy-950)] shadow-[0_1px_2px_rgba(10,26,48,0.08)] transition-all duration-300 ease-out hover:-translate-y-1 hover:shadow-[0_16px_32px_-12px_rgba(10,26,48,0.35)]"
+      className="group relative block overflow-hidden rounded-2xl bg-[var(--color-navy-950)] shadow-[0_1px_2px_rgba(10,26,48,0.08)] transition-[translate,box-shadow] duration-300 ease-out hover:-translate-y-1 hover:shadow-[0_16px_32px_-12px_rgba(10,26,48,0.35)]"
     >
       <div className="relative aspect-[3/2] w-full overflow-hidden">
         <Image

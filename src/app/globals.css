@@ -98,17 +98,32 @@ a, button, summary, select, label, [role="button"], [role="tab"] {
   -webkit-tap-highlight-color: rgba(10, 26, 48, 0.08);
 }
 
+/* Press feedback for the site's pill buttons (primary CTAs, form submits, the
+   cookie sheet's buttons): a barely-there 3% scale-down while pressed, so a tap
+   registers physically. Skipped for reduced motion. Hover/focus are untouched. */
+@media (prefers-reduced-motion: no-preference) {
+  :where(a, button).rounded-full:not(:disabled):active {
+    scale: 0.97;
+  }
+}
+
 /* Anchored sections (e.g. /destinations#europe) land below the sticky header
    instead of underneath it. */
 [id] {
   scroll-margin-top: 5.5rem;
 }
 
-/* Balanced headings and no single-word last lines in running copy. */
-h1, h2, h3 {
+/* Balanced headings and no single-word last lines in running copy. The
+   `text-wrap` shorthand also resets text-wrap-mode, which would silently undo
+   `truncate` / `whitespace-nowrap` (a card's country name wrapped onto a second
+   line at 320px), so elements that opt out of wrapping are excluded. */
+h1:not(.truncate, .whitespace-nowrap),
+h2:not(.truncate, .whitespace-nowrap),
+h3:not(.truncate, .whitespace-nowrap) {
   text-wrap: balance;
 }
-p, li {
+p:not(.truncate, .whitespace-nowrap),
+li:not(.truncate, .whitespace-nowrap) {
   text-wrap: pretty;
 }
 

@@ -112,6 +112,50 @@ test.describe("Keyboard and focus", () => {
   });
 });
 
+test.describe("Floating call button", () => {
+  // An article page: no primary-CTA button in view at the top, so the pill is showing.
+  const ARTICLE = "/blog/business-class-vs-first-class";
+
+  // A visitor who has already answered the cookie notice (while the notice is up the
+  // pill deliberately hides itself, like it does for any other bottom call-to-action).
+  async function answeredCookieNotice(page: import("@playwright/test").Page) {
+    await page.addInitScript(() => {
+      window.localStorage.setItem("bft-cookie-consent", JSON.stringify({ version: 1, decidedAt: new Date().toISOString(), preferences: { necessary: true, analytics: false, marketing: false } }));
+    });
+  }
+
+  test("steps aside while a form field has focus, and returns when focus leaves", async ({ page }) => {
+    await answeredCookieNotice(page);
+    await page.goto(ARTICLE);
+    const fab = page.locator('a.fixed[href^="tel:"]');
+    await expect(fab).toHaveAttribute("aria-hidden", "false", { timeout: 15000 });
+    await page.locator("#newsletter-email").focus();
+    await expect(fab).toHaveAttribute("aria-hidden", "true");
+    expect(await fab.evaluate((el) => getComputedStyle(el).pointerEvents)).toBe("none");
+    await page.locator("#newsletter-email").blur();
+    await expect(fab).toHaveAttribute("aria-hidden", "false");
+  });
+
+  test("never covers anything at the end of the page", async ({ page }) => {
+    await answeredCookieNotice(page);
+    await page.goto(ARTICLE);
+    await page.waitForTimeout(1500);
+    await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+    await page.waitForTimeout(500);
+    const covered = await page.evaluate(() => {
+      const fab = document.querySelector('a.fixed[href^="tel:"]');
+      // Hidden (faded out) counts as not covering anything.
+      if (!fab || getComputedStyle(fab).opacity === "0") return [];
+      const f = fab.getBoundingClientRect();
+      return [...document.querySelectorAll("footer a, footer button, footer p")].filter((el) => {
+        const b = el.getBoundingClientRect();
+        return b.width > 0 && Math.min(b.right, f.right) > Math.max(b.left, f.left) && Math.min(b.bottom, f.bottom) > Math.max(b.top, f.top);
+      }).map((el) => (el.textContent || "").trim().slice(0, 30));
+    });
+    expect(covered).toEqual([]);
+  });
+});
+
 test.describe("Reduced motion", () => {
   test("respects prefers-reduced-motion: reveal content is immediately visible", async ({ page }) => {
     await page.emulateMedia({ reducedMotion: "reduce" });

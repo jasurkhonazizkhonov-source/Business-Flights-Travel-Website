@@ -19,6 +19,9 @@ export default function manifest(): MetadataRoute.Manifest {
     theme_color: "#0a1a30",
     icons: [
       { src: "/icon.png", sizes: "128x128", type: "image/png" },
+      // 192 + 512 are the pair Chrome/Android want for an installable site; this is the
+      // 512 brand mark (see /brand-mark.png) scaled down, not a different design.
+      { src: "/icon-192.png", sizes: "192x192", type: "image/png", purpose: "any" },
       { src: "/apple-icon.png", sizes: "180x180", type: "image/png" },
       { src: "/brand-mark.png", sizes: "512x512", type: "image/png", purpose: "any" },
     ],

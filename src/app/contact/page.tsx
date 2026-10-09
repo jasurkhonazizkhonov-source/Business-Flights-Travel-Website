@@ -7,7 +7,7 @@ import { CONTACT_EMAIL, CONTACT_PHONE_DISPLAY, PRIMARY_CTA_LABEL } from "@/lib/c
 import { pageMetadata } from "@/lib/seo";
 
 export const metadata: Metadata = pageMetadata({
-  title: "Contact a Business-Class Flight Specialist",
+  title: "Contact Our Flight Specialists",
   description:
     "Get in touch with Business Flights Travel for business-class flight assistance, or submit a flight request directly.",
   path: "/contact",

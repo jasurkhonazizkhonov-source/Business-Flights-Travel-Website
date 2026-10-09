@@ -106,12 +106,12 @@ export function CookieConsent() {
           data-hide-floating-cta
           role="region"
           aria-label="Cookie notice"
-          className="fixed inset-x-0 bottom-0 z-50 border-t border-[var(--color-navy-950)]/10 bg-white/97 px-4 py-4 shadow-[0_-12px_32px_-12px_rgba(10,26,48,0.25)] backdrop-blur sm:px-6"
+          className="fixed inset-x-0 bottom-0 z-50 border-t border-[var(--color-navy-950)]/10 bg-white/97 px-4 py-3 shadow-[0_-12px_32px_-12px_rgba(10,26,48,0.25)] backdrop-blur sm:px-6 sm:py-4"
         >
-          <div className="mx-auto flex max-w-7xl flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="mx-auto flex max-w-7xl flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex items-start gap-3 sm:max-w-2xl">
               <Cookie size={20} className="mt-0.5 shrink-0 text-[var(--color-gold-600)]" aria-hidden="true" />
-              <p className="text-sm leading-relaxed text-[var(--color-navy-950)]/80">
+              <p className="text-[0.8125rem] leading-snug text-[var(--color-navy-950)]/80 sm:text-sm sm:leading-relaxed">
                 We don&apos;t use advertising or tracking cookies — only what&apos;s required to run this site. If we ever add optional
                 analytics, your choice here will control it. See our{" "}
                 <Link href="/cookie-policy" className="underline decoration-dotted underline-offset-2 hover:text-[var(--color-gold-600)]">

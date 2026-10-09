@@ -45,7 +45,10 @@ export async function generateMetadata({ params }: PageProps<"/destinations/[reg
   const description = `Business-class flight guidance for ${destination.city}, ${destination.country} — starting fares, airport info, best times to travel, and how to request a quote.`;
   const fullTitle = `${title} | ${SITE_NAME}`;
   return {
-    title,
+    // A long city name (e.g. "Palma de Mallorca") pushes the branded title past ~62
+    // characters, where search results cut off the tail. The destination name stays
+    // whole; only the brand suffix is left to the site-name line (og:site_name, JSON-LD).
+    title: fullTitle.length > 62 ? { absolute: title } : title,
     description,
     alternates: { canonical: destinationPath(destination) },
     openGraph: {
