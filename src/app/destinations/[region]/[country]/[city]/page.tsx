@@ -33,6 +33,10 @@ const REGION_TRAVEL_GUIDE_SLUGS: Record<string, string> = {
   "middle-east": "business-class-flights-to-the-middle-east",
 };
 
+// Every real destination is pre-rendered; an unknown city must be a genuine 404, not a
+// streamed 200 not-found page (see the same note in src/app/blog/[slug]/page.tsx).
+export const dynamicParams = false;
+
 export function generateStaticParams() {
   return destinations.map((d) => ({ region: d.region, country: d.countrySlug, city: d.citySlug }));
 }

@@ -40,7 +40,10 @@ export default defineConfig({
   retries: 1,
   reporter: [["list"]],
   use: {
-    baseURL: "http://localhost:3100",
+    // TEST_BASE_URL lets the status-code/indexing specs (tests/seo.spec.ts) run against a production
+    // build (`next build && next start -p 3200`), where unknown-URL status codes are exactly what
+    // Google sees; the default is the dev server the rest of the suite uses.
+    baseURL: process.env.TEST_BASE_URL ?? "http://localhost:3100",
     trace: "retain-on-failure",
   },
   projects: [

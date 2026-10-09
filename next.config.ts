@@ -63,6 +63,19 @@ const nextConfig: NextConfig = {
   async headers() {
     return [{ source: "/:path*", headers: securityHeaders }];
   },
+  // Permanent redirects ONLY for retired/guessed article URLs that have an unambiguous
+  // topical equivalent. None of these slugs exists in this repository's history, so they
+  // come from outside links; where the topic matches an article we publish, a 308 keeps
+  // the visitor (and any link value) on the right page. Other unknown blog URLs are
+  // deliberately NOT redirected — they return a real 404 (see dynamicParams in
+  // src/app/blog/[slug]/page.tsx) rather than being sent to an unrelated page.
+  async redirects() {
+    return [
+      { source: "/blog/airport-lounge-guide-for-executives", destination: "/blog/business-class-airport-lounge-guide", permanent: true },
+      { source: "/blog/business-class-travel-tips", destination: "/blog/long-haul-business-class-travel-tips", permanent: true },
+      { source: "/blog/best-airlines-for-business-class-routes", destination: "/blog/best-business-class-airlines-long-haul", permanent: true },
+    ];
+  },
 };
 
 export default withBundleAnalyzer(nextConfig);

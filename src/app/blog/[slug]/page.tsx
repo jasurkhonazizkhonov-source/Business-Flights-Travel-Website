@@ -10,6 +10,12 @@ import { blogPosts, getBlogPostBySlug } from "@/data/blog-posts";
 import { SITE_NAME, SITE_URL } from "@/lib/constants";
 import { formatIsoDate } from "@/lib/format-date";
 
+// Only the slugs in blog-posts.ts exist. Unknown slugs must be a real HTTP 404: with the
+// root loading.tsx (a Suspense boundary) an on-demand render of an unknown slug streams
+// the not-found UI with status 200 + noindex + the homepage canonical — a soft 404 that
+// Search Console reports as "noindex" instead of "not found".
+export const dynamicParams = false;
+
 export function generateStaticParams() {
   return blogPosts.map((p) => ({ slug: p.slug }));
 }

@@ -2730,19 +2730,38 @@ export const destinations: Destination[] = [
     tagline: "A Black Sea resort city and a growing business and gaming hub.",
     heroImage: "https://images.unsplash.com/photo-1643792412669-f7900db4e0c1?q=80&w=1600&auto=format&fit=crop",
     overview:
-      "A Black Sea resort city and a growing business and gaming hub. A growing hub for gaming, tourism, and finance businesses, and a distinctive Black Sea coastal skyline.",
+      "Batumi is a port city on Georgia's Black Sea coast, in the Adjara region, known for its seafront boulevard, a skyline of modern high-rises and an economy built around tourism and gaming. Its airport, Batumi International (BUS), is a regional gateway, so business-class trips from the United States are built as a long-haul flight plus a connection.",
     whyVisit: [
-      "A growing hub for gaming, tourism, and finance businesses",
-      "A distinctive Black Sea coastal skyline",
-      "A popular setting for regional conferences and events",
+      "A Black Sea seafront city with a long boulevard and a modern high-rise skyline",
+      "A tourism- and gaming-led economy, with hotels and venues used for regional events",
+      "Often combined with Tbilisi, Georgia's capital — we can price both airports side by side",
     ],
-    businessTravel: "We track current business-class availability on the Batumi route, including service from Turkish Airlines and Qatar Airways.",
-    flyingFromUS: "Routing from the United States to Batumi (BUS) typically connects through a major hub depending on your departure city; we compare current nonstop and connecting options for your specific dates.",
-    whatToExpect: "Total travel time to BUS depends on your departure city and the routing available on your dates — your specialist lays out realistic options once we know where you're starting from.",
-    popularAirlines: ["Turkish Airlines", "Qatar Airways"],
-    bestTimeToVisit: "Late spring through early autumn offers the most reliable weather.",
-    airportInfo: "BUS is the primary airport serving Batumi.",
-    faqs: [],
+    businessTravel:
+      "A common way to reach Batumi from the United States is a connection through Istanbul, where Turkish Airlines operates onward service to BUS. We check current business-class availability on the long-haul segment and tell you which cabin is flown on the final regional leg.",
+    flyingFromUS:
+      "There is no nonstop service from the United States to Batumi, so every itinerary connects. We compare routings by total travel time, layover length and the cabin on each segment — including whether flying into Tbilisi (TBS) is the better fit for your dates.",
+    whatToExpect:
+      "Expect at least one connection, with a final regional flight that is typically shorter and flown on a smaller aircraft than your long-haul leg. Business class on that last segment can differ from the lie-flat seat you would have across the Atlantic, so we show you the cabin on every segment before you decide.",
+    popularAirlines: ["Turkish Airlines"],
+    bestTimeToVisit: "Late spring through early autumn is the warmest, most settled period on the Black Sea coast; winters are cooler and wetter.",
+    airportInfo: "Batumi International Airport (BUS) serves Batumi. Tbilisi International (TBS), the main airport for Georgia's capital, is the usual alternative gateway.",
+    faqs: [
+      {
+        question: "Are there nonstop business-class flights from the US to Batumi?",
+        answer:
+          "No. There is no nonstop service from the United States to Batumi, so itineraries connect — commonly through Istanbul. The useful comparison is total travel time and the cabin on each segment, which we lay out for your dates.",
+      },
+      {
+        question: "Should I fly into Batumi (BUS) or Tbilisi (TBS)?",
+        answer:
+          "It depends on where your meetings are. Tbilisi is Georgia's capital and its main gateway; Batumi is on the Black Sea coast. If your plans are flexible we price both airports so you can compare fare, routing and travel time.",
+      },
+      {
+        question: "Is business class lie-flat all the way to Batumi?",
+        answer:
+          "Not necessarily. The long-haul segment is often lie-flat, but the final regional flight to Batumi is usually on a smaller aircraft with a different business-class cabin. We confirm the seat type on each segment before you book.",
+      },
+    ],
   },
   {
     region: "middle-east",
