@@ -169,7 +169,7 @@ test.describe("Reduced motion", () => {
     expect(Number(opacity)).toBeGreaterThan(0.9);
   });
 
-  test("CSS animations and transitions collapse to ~instant, and the loading skeleton stops pulsing", async ({ page }) => {
+  test("CSS animations and transitions collapse to ~instant under reduced motion", async ({ page }) => {
     await page.emulateMedia({ reducedMotion: "reduce" });
     await page.goto("/flights");
     // The global rule in globals.css flattens every transition/animation, so a
@@ -180,18 +180,5 @@ test.describe("Reduced motion", () => {
       return els.map((el) => ms(getComputedStyle(el).transitionDuration));
     });
     for (const d of durations) expect(d).toBeLessThanOrEqual(1);
-    // The skeleton's pulse (src/app/loading.tsx) is an infinite animation; under
-    // reduced motion it must be limited to a single, ~instant iteration.
-    const skeleton = await page.evaluate(() => {
-      const el = document.createElement("div");
-      el.className = "bfw-skeleton";
-      document.body.appendChild(el);
-      const s = getComputedStyle(el);
-      const out = { count: s.animationIterationCount, duration: s.animationDuration };
-      el.remove();
-      return out;
-    });
-    expect(skeleton.count).toBe("1");
-    expect(parseFloat(skeleton.duration) * (skeleton.duration.endsWith("ms") ? 1 : 1000)).toBeLessThanOrEqual(1);
   });
 });

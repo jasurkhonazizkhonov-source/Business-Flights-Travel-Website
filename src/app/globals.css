@@ -132,18 +132,6 @@ li:not(.truncate, .whitespace-nowrap) {
   font-variant-numeric: tabular-nums;
 }
 
-/* Branded loading placeholder (src/app/loading.tsx). Opacity-only pulse so
-   it never animates layout; the reduced-motion rule above flattens it. */
-@keyframes bfw-skeleton {
-  0%, 100% { opacity: 0.55; }
-  50% { opacity: 1; }
-}
-.bfw-skeleton {
-  background: var(--color-cream-100);
-  border-radius: 0.75rem;
-  animation: bfw-skeleton 1.4s ease-in-out infinite;
-}
-
 /* react-phone-number-input: restyle to match the form's premium field
    chrome instead of the library's default plain-browser look. */
 .PhoneInput {

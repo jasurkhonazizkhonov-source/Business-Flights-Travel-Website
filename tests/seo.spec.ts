@@ -1,6 +1,7 @@
 import { test, expect } from "@playwright/test";
 import { blogPosts } from "../src/data/blog-posts";
 import { destinations, destinationPath } from "../src/data/destinations";
+import { isGenericFlyingFromUS, isGenericWhatToExpect, overviewIsRedundant } from "../src/lib/destination-content";
 
 // Search + sharing metadata, sitemap, robots, icons and structured data. Runs
 // against the same dev server as the other specs; every URL asserted on is a
@@ -271,5 +272,94 @@ test.describe("indexing policy", () => {
   test("robots.txt does not block any indexable section", async ({ request }) => {
     const txt = await (await request.get("/robots.txt")).text();
     expect(txt).not.toMatch(/Disallow:\s*\/(blog|destinations|flights|about|contact|business-class|how-it-works)?\s*$/m);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Crawlability + destination content quality (2026-10-16 audit).
+// ---------------------------------------------------------------------------
+test.describe("crawlable HTML and destination content", () => {
+  test("content is in the server-rendered <main>: no loading fallback and no content hidden behind a script swap", async ({ request }) => {
+    // A root loading.tsx used to wrap every page in a Suspense boundary, so the HTML a
+    // crawler fetched had "Loading…" inside <main> and the real page in a hidden
+    // out-of-order segment that only a script swapped in.
+    for (const path of ["/", "/about", "/blog/business-class-vs-first-class", "/destinations/europe/united-kingdom/london", "/destinations/middle-east/georgia/batumi"]) {
+      const html = await (await request.get(path, noRedirect)).text();
+      const main = (html.match(/<main[\s\S]*?<\/main>/i) || [""])[0];
+      expect(main.length, `${path}: <main> has the page`).toBeGreaterThan(5000);
+      expect(main, path).toMatch(/<h1[\s>]/);
+      expect(html, `${path}: no loading fallback`).not.toContain("Loading…");
+      expect(html, `${path}: no hidden streamed segments`).not.toMatch(/<div hidden id="S:\d+"/);
+    }
+  });
+
+  test("every destination page has one H1 and a first H2 that is not a copy of it", async ({ request }) => {
+    // A spread of templated and specific pages.
+    for (const city of ["london", "frankfurt", "berlin", "stuttgart", "luxembourg-city", "batumi", "mykonos", "zurich"]) {
+      const d = destinations.find((x) => x.citySlug === city)!;
+      const html = await (await request.get(destinationPath(d), noRedirect)).text();
+      const main = (html.match(/<main[\s\S]*?<\/main>/i) || [""])[0];
+      const h1s = [...main.matchAll(/<h1[^>]*>([\s\S]*?)<\/h1>/g)].map((m) => m[1].replace(/<[^>]+>/g, "").trim());
+      const h2s = [...main.matchAll(/<h2[^>]*>([\s\S]*?)<\/h2>/g)].map((m) => m[1].replace(/<[^>]+>/g, "").trim());
+      expect(h1s.length, city).toBe(1);
+      expect(h2s.length, city).toBeGreaterThan(2);
+      expect(h2s[0], `${city}: first H2 repeats the H1`).not.toBe(h1s[0]);
+      for (const h of [...h1s, ...h2s]) expect(h.length, `${city}: empty heading`).toBeGreaterThan(0);
+    }
+  });
+
+  test("a templated destination shows its tagline once and one short routing note — not the shared paragraphs", async ({ page }) => {
+    const d = destinations.find((x) => x.citySlug === "berlin")!;
+    await page.goto(destinationPath(d));
+    const text = (await page.locator("main").innerText()).replace(/\s+/g, " ");
+    // The hero tagline used to repeat in an "overview" paragraph and again as a bullet.
+    expect(text.split(d.tagline).length - 1, "tagline appears once").toBe(1);
+    expect(text).toContain("Routing and total travel time depend on your departure city and dates");
+    expect(text).not.toContain("What to Expect");
+    expect(text).not.toContain("typically connects through a major hub depending on your departure city");
+    // Still a complete, working page.
+    await expect(page.locator(`main a[href="/flights?to=${d.iata}"]`).first()).toBeVisible();
+  });
+
+  for (const city of ["frankfurt", "zurich", "luxembourg-city", "brussels"]) {
+    test(`${city}: verified airport-access information, with sources and the date checked`, async ({ page }) => {
+      const d = destinations.find((x) => x.citySlug === city)!;
+      expect(d.airportAccess && d.sources?.length && d.verifiedOn, "data is complete").toBeTruthy();
+      await page.goto(destinationPath(d));
+      const section = page.locator("main").locator(`h2:has-text("From ${d.iata} Into the City")`);
+      await expect(section).toHaveCount(1);
+      const main = (await page.locator("main").innerText()).replace(/\s+/g, " ");
+      expect(main).toContain(d.airportAccess!.slice(0, 60));
+      expect(main).toMatch(/checked October 16, 2026/);
+      for (const src of d.sources!) {
+        const link = page.locator(`main a[href="${src.url}"]`);
+        await expect(link, src.url).toHaveCount(1);
+        await expect(link).toHaveAttribute("rel", /noopener/);
+      }
+    });
+  }
+
+  test("data invariants: anything with sources/verifiedOn/airportAccess is complete, https and dated", () => {
+    for (const d of destinations) {
+      const any = d.airportAccess || d.sources?.length || d.verifiedOn;
+      if (!any) continue;
+      expect(d.airportAccess, `${d.city} airportAccess`).toBeTruthy();
+      expect(d.sources?.length, `${d.city} sources`).toBeGreaterThan(0);
+      expect(d.verifiedOn, `${d.city} verifiedOn`).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+      for (const s of d.sources!) expect(s.url, `${d.city} source`).toMatch(/^https:\/\//);
+    }
+  });
+
+  test("the template helpers only recognise the exact templated patterns", () => {
+    const berlin = destinations.find((x) => x.citySlug === "berlin")!;
+    const london = destinations.find((x) => x.citySlug === "london")!;
+    const batumi = destinations.find((x) => x.citySlug === "batumi")!;
+    expect(overviewIsRedundant(berlin)).toBe(true);
+    expect(overviewIsRedundant(london)).toBe(false);
+    expect(overviewIsRedundant(batumi)).toBe(false); // hand-written overview
+    expect(isGenericFlyingFromUS(berlin) && isGenericWhatToExpect(berlin)).toBe(true);
+    expect(isGenericFlyingFromUS(london) || isGenericWhatToExpect(london)).toBe(false);
+    // A made-up record that merely resembles the pattern is not treated as templated.
+    expect(overviewIsRedundant({ tagline: "A.", overview: "A. Something else entirely.", whyVisit: ["One", "Two"] })).toBe(false);
   });
 });

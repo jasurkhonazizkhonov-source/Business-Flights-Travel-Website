@@ -10,6 +10,8 @@ import { blogPosts } from "@/data/blog-posts";
 import { SITE_NAME, SITE_URL } from "@/lib/constants";
 import { pickRelatedDestinations } from "@/lib/related-destinations";
 import { FARE_DISCLAIMER, formatFareUSD } from "@/lib/fares";
+import { formatIsoDate } from "@/lib/format-date";
+import { SHARED_ROUTING_NOTE, isGenericFlyingFromUS, isGenericWhatToExpect, overviewIsRedundant } from "@/lib/destination-content";
 
 // A small, fixed set of guides genuinely relevant to planning ANY
 // international business-class trip — not destination-specific content,
@@ -81,6 +83,14 @@ export default async function DestinationPage({ params }: PageProps<"/destinatio
   const relatedFallback = pickRelatedDestinations(destination, destinations, 4);
 
   const quoteHref = `/flights?to=${destination.iata}`;
+
+  // Show each piece of information once: templated text that only repeats the tagline /
+  // bullets, or a paragraph shared verbatim by ~100 pages, is left out (see
+  // src/lib/destination-content.ts). Nothing here rewrites or invents content.
+  const showOverview = !overviewIsRedundant(destination);
+  const genericFlying = isGenericFlyingFromUS(destination);
+  const genericExpect = isGenericWhatToExpect(destination);
+  const sharedRoutingOnly = genericFlying && genericExpect;
 
   // City-specific guide first (if one exists for this exact destination),
   // then the regional cluster guide (if one exists for this region), then
@@ -164,13 +174,15 @@ export default async function DestinationPage({ params }: PageProps<"/destinatio
       <section className="mx-auto max-w-5xl px-4 py-16 sm:px-6 lg:px-8">
         <div className="grid grid-cols-1 gap-12 lg:grid-cols-[2fr_1fr]">
           <div>
-            <Reveal>
-              <h2 className="font-display text-2xl font-semibold text-[var(--color-navy-950)]">Business Class Flights to {destination.city}</h2>
-              <p className="mt-3 leading-relaxed text-[var(--color-navy-950)]/75">{destination.overview}</p>
-            </Reveal>
+            {showOverview && (
+              <Reveal>
+                <h2 className="font-display text-2xl font-semibold text-[var(--color-navy-950)]">{destination.city} at a Glance</h2>
+                <p className="mt-3 leading-relaxed text-[var(--color-navy-950)]/75">{destination.overview}</p>
+              </Reveal>
+            )}
 
             <Reveal delay={0.05}>
-              <h2 className="mt-10 font-display text-2xl font-semibold text-[var(--color-navy-950)]">Why Travel to {destination.city}?</h2>
+              <h2 className={`${showOverview ? "mt-10 " : ""}font-display text-2xl font-semibold text-[var(--color-navy-950)]`}>Why Travel to {destination.city}?</h2>
               <ul className="mt-3 space-y-2.5">
                 {destination.whyVisit.map((w) => (
                   <li key={w} className="flex items-start gap-2.5 text-[var(--color-navy-950)]/75">
@@ -186,15 +198,47 @@ export default async function DestinationPage({ params }: PageProps<"/destinatio
               <p className="mt-3 leading-relaxed text-[var(--color-navy-950)]/75">{destination.businessTravel}</p>
             </Reveal>
 
-            <Reveal delay={0.1}>
-              <h2 className="mt-10 font-display text-2xl font-semibold text-[var(--color-navy-950)]">Flying from the United States</h2>
-              <p className="mt-3 leading-relaxed text-[var(--color-navy-950)]/75">{destination.flyingFromUS}</p>
-            </Reveal>
+            {(sharedRoutingOnly || !genericFlying) && (
+              <Reveal delay={0.1}>
+                <h2 className="mt-10 font-display text-2xl font-semibold text-[var(--color-navy-950)]">Flying from the United States</h2>
+                <p className="mt-3 leading-relaxed text-[var(--color-navy-950)]/75">{sharedRoutingOnly ? SHARED_ROUTING_NOTE : destination.flyingFromUS}</p>
+                {sharedRoutingOnly && (
+                  <p className="mt-2 text-sm">
+                    <Link href="/how-it-works" className="font-medium text-[var(--color-navy-800)] underline decoration-dotted underline-offset-2 hover:text-[var(--color-gold-600)]">
+                      See how a flight request works
+                    </Link>
+                  </p>
+                )}
+              </Reveal>
+            )}
 
-            <Reveal delay={0.12}>
-              <h2 className="mt-10 font-display text-2xl font-semibold text-[var(--color-navy-950)]">What to Expect</h2>
-              <p className="mt-3 leading-relaxed text-[var(--color-navy-950)]/75">{destination.whatToExpect}</p>
-            </Reveal>
+            {!genericExpect && (
+              <Reveal delay={0.12}>
+                <h2 className="mt-10 font-display text-2xl font-semibold text-[var(--color-navy-950)]">What to Expect</h2>
+                <p className="mt-3 leading-relaxed text-[var(--color-navy-950)]/75">{destination.whatToExpect}</p>
+              </Reveal>
+            )}
+
+            {destination.airportAccess && (
+              <Reveal delay={0.13}>
+                <h2 className="mt-10 font-display text-2xl font-semibold text-[var(--color-navy-950)]">From {destination.iata} Into the City</h2>
+                <p className="mt-3 leading-relaxed text-[var(--color-navy-950)]/75">{destination.airportAccess}</p>
+                {destination.sources && destination.sources.length > 0 && (
+                  <p className="mt-2 text-xs leading-relaxed text-[var(--color-navy-950)]/70">
+                    Sources:{" "}
+                    {destination.sources.map((src, i) => (
+                      <span key={src.url}>
+                        {i > 0 && " · "}
+                        <a href={src.url} rel="noopener noreferrer" target="_blank" className="underline decoration-dotted underline-offset-2 hover:text-[var(--color-gold-600)]">
+                          {src.label}
+                        </a>
+                      </span>
+                    ))}
+                    {destination.verifiedOn && <> — checked {formatIsoDate(destination.verifiedOn)}.</>}
+                  </p>
+                )}
+              </Reveal>
+            )}
 
             {destination.popularAirlines.length > 0 && (
               <Reveal delay={0.14}>

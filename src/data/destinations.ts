@@ -35,6 +35,15 @@ export type Destination = {
   bestTimeToVisit: string;
   airportInfo: string;
   popularRoutes?: string;
+  /**
+   * Destination-specific practical information about getting from the airport into the
+   * city. Set ONLY from a primary source (airport, rail or transit operator) — those pages
+   * go in `sources` and the date they were last checked in `verifiedOn` (ISO date), which
+   * the page shows. Leave unset when it has not been verified; nothing is defaulted.
+   */
+  airportAccess?: string;
+  sources?: { label: string; url: string }[];
+  verifiedOn?: string;
   faqs: { question: string; answer: string }[];
   /**
    * Indicative round-trip business-class starting fare in USD, departing
@@ -268,6 +277,13 @@ export const destinations: Destination[] = [
     popularAirlines: ["Lufthansa", "United Airlines", "Delta Air Lines"],
     bestTimeToVisit: "Business travel to Frankfurt is consistent year-round, tracking the European corporate calendar.",
     airportInfo: "FRA (Frankfurt Airport) is the sole major gateway and one of the largest hubs in Europe by connections.",
+    airportAccess:
+      "Frankfurt Airport has a long-distance railway station next to Terminal 1, operated by Deutsche Bahn, with IC and ICE trains from across Germany and neighbouring countries — useful when your meetings are outside Frankfurt itself. The airport describes Terminal 1 as a walk of about 10 minutes from the station; Terminal 2 is reached by shuttle bus or the SkyLine, so check your terminal before you travel.",
+    sources: [
+      { label: "Frankfurt Airport — travel by train", url: "https://www.frankfurt-airport.com/en/transport-and-parking/to-from-the-airport/travel-by-train.html" },
+      { label: "Frankfurt Airport — long-distance train station", url: "https://www.frankfurt-airport.com/en/locations/o/oeffentliche-verkehrsmittel-rmv-etc.html" },
+    ],
+    verifiedOn: "2026-10-16",
     faqs: [
       {
         question: "Is First Class typically available on every Frankfurt route?",
@@ -298,6 +314,13 @@ export const destinations: Destination[] = [
     popularAirlines: ["SWISS", "United Airlines", "American Airlines"],
     bestTimeToVisit: "Business travel is steady year-round; winter also brings ski-related leisure demand that can affect fares and availability.",
     airportInfo: "ZRH (Zurich Airport) is Switzerland's primary international gateway.",
+    airportAccess:
+      "Zurich Airport has its own railway station. According to the airport, SBB trains leave for Zürich Hauptbahnhof (the main station) every 10 minutes and the journey takes about 15 minutes; several SBB long-distance lines also call at the airport on routes to other Swiss cities, which is why many travelers plan the onward leg by rail.",
+    sources: [
+      { label: "Zurich Airport — train, tram and bus", url: "https://www.flughafen-zuerich.ch/en/passengers/practical/parking-and-transport/train-tram-and-bus" },
+      { label: "SBB — direct long-distance connections from Zürich Flughafen", url: "https://network.sbb.ch/en/station/ZFH/target/ZUE" },
+    ],
+    verifiedOn: "2026-10-16",
     faqs: [
       {
         question: "Is Zurich a convenient base for meetings across Switzerland?",
@@ -632,6 +655,13 @@ export const destinations: Destination[] = [
     popularAirlines: ["United Airlines", "Delta Air Lines", "Brussels Airlines"],
     bestTimeToVisit: "Business travel is consistent year-round; late spring and early autumn offer the most comfortable weather.",
     airportInfo: "BRU (Brussels Airport) is Belgium's primary international gateway.",
+    airportAccess:
+      "Brussels Airport's railway station sits directly beneath the terminal, with frequent direct trains to Brussels-Central, Brussels-North and Brussels-South; the airport and the rail operator put the ride to Brussels-Central at roughly 16–18 minutes. Rail tickets to and from the airport include a surcharge, the Brussels Airport supplement.",
+    sources: [
+      { label: "Brussels Airport — train", url: "https://www.brusselsairport.be/en/passenger/mobility/public-transport/train" },
+      { label: "SNCB / Belgian Rail — Brussels Airport supplement", url: "https://www.belgiantrain.be/en/products/supplements/airports/brussels-airport" },
+    ],
+    verifiedOn: "2026-10-16",
     faqs: [
       {
         question: "Is Brussels a good base for EU institutional business travel?",
@@ -1493,6 +1523,13 @@ export const destinations: Destination[] = [
     popularAirlines: ["Luxair", "Lufthansa"],
     bestTimeToVisit: "Spring and early autumn offer comfortable weather for travel outside meetings.",
     airportInfo: "LUX is the primary airport serving Luxembourg City.",
+    airportAccess:
+      "Luxembourg Airport (Findel) is linked to the city tram: the Luxtram line was extended to the airport on 2 March 2025, running through the city with stops that include Hamilius and Gare centrale. The airport also lists bus lines 16 and 29 to the city centre.",
+    sources: [
+      { label: "Luxtram — the tram runs to Findel", url: "https://www.luxtram.lu/de/den-tram-fiert-vum-2-maeerz-un-bis-op-de-findel-2/" },
+      { label: "Luxembourg Airport — FAQ", url: "https://www.lux-airport.lu/faq/" },
+    ],
+    verifiedOn: "2026-10-16",
     faqs: [],
   },
   {
