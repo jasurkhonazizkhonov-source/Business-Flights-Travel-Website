@@ -1,0 +1,45 @@
+# Docker BUILD CONTEXT filter. Two jobs: keep secrets out of the image, and keep build output / tooling state out of the context.
+# (.gitignore does not apply to the Docker build context — this file does.)
+
+# ---- secrets and environment files: never send these to the build -----------------------------------------------------------
+**/.env
+**/.env.*
+!**/.env.example
+!**/.env.vps.example
+**/*.pem
+**/*.key
+**/*.crt
+**/*.p12
+**/*.pfx
+**/cloudflared*.json
+**/tunnel-token*
+**/credentials*.json
+**/service-account*.json
+
+# ---- version control, CI and local tooling state ----------------------------------------------------------------------------
+.git
+.gitattributes
+.github
+.agents
+.claude
+.codex
+.windsurf
+skills-lock.json
+
+# ---- dependencies and generated output (rebuilt inside the image from the lockfile) -----------------------------------------
+node_modules
+.next
+out
+build
+coverage
+test-results
+playwright-report
+src/generated
+*.tsbuildinfo
+
+# ---- not needed to build the site -------------------------------------------------------------------------------------------
+docs
+tests
+*.log
+.DS_Store
+Thumbs.db

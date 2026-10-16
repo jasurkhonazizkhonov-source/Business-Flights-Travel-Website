@@ -1,0 +1,108 @@
+// How this website connects to PostgreSQL over TLS — and whether it can prove it is talking to the real server.
+//
+// The same settings, with the same meaning and the same refusals, as the Compass Tools CRM's src/lib/db-tls.ts, because both
+// applications connect to the same database and an operator should configure them the same way.
+//
+//   DATABASE_SSL_MODE    "disable": do NOT use TLS for this connection. Only for a PostgreSQL container on a private Docker network
+//                        that does not offer TLS (docs/DEPLOYMENT_VPS.md). It is an explicit opt-in that must pass three checks, so it
+//                        can never weaken a connection to an unintended host by accident:
+//                          1. the value is exactly "disable" (anything else is refused, never guessed at);
+//                          2. DATABASE_SSL_CA and DATABASE_SSL_VERIFY are not also set (a contradictory configuration is refused,
+//                             not resolved silently);
+//                          3. the host in DATABASE_URL is on a short, EXACT allow-list (PLAINTEXT_ALLOWED_HOSTS) and the URL carries
+//                             no host= / hostaddr= query parameter that would make the driver connect somewhere else.
+//                        This is a typo/misconfiguration guard, NOT proof of a private network: a name matching the list could still
+//                        be made to resolve elsewhere by the container's DNS, hosts file or network. Keeping PostgreSQL on an internal
+//                        Docker network with no published port is a separate, required control (docs/DEPLOYMENT_VPS.md).
+//   DATABASE_SSL_CA      A PEM certificate (chain) for the database's certificate authority — for Aiven, the project CA certificate.
+//                        When set, the server certificate AND host name are verified against it.
+//   DATABASE_SSL_VERIFY  "system": verify against Node's built-in trust store (a provider whose CA is publicly trusted).
+//   (none of these)      Encrypted but NOT identity-verified — the historical behaviour of this site, kept as the default so a
+//                        deployment (Vercel today) does not break the moment this ships. A network attacker who can intercept the
+//                        connection could impersonate the database. Prefer DATABASE_SSL_CA for any database that is not on a private
+//                        network.
+//
+// Nothing here ever returns or logs the certificate, host name or connection string.
+/** What the resolver reads: process.env, or any plain object in a test. */
+export type EnvLike = Readonly<Record<string, string | undefined>>;
+export type DatabaseSsl = false | { rejectUnauthorized: boolean; ca?: string };
+export type DatabaseTlsMode = "disabled" | "verified_ca" | "verified_system" | "unverified";
+
+/** .env / dashboard values often carry the PEM with literal "\n" sequences. */
+function normalizePem(raw: string): string {
+  return raw.replace(/\\n/g, "\n").trim();
+}
+
+function sslModeSetting(env: EnvLike): string {
+  return env.DATABASE_SSL_MODE?.trim().toLowerCase() ?? "";
+}
+
+/**
+ * The ONLY hosts for which DATABASE_SSL_MODE=disable is accepted — an exact allow-list, deliberately not a pattern:
+ *  - `db`          the PostgreSQL service name used by the Compass Tools compose project (the CRM's database container);
+ *  - `localhost`, `127.0.0.1`, `::1`   loopback, for a developer running a non-TLS PostgreSQL on their own machine.
+ * Deliberately NOT accepted: other single-label names, `*.internal`, `host.docker.internal` (the Docker HOST — a wider trust boundary),
+ * private-range IP addresses (any machine on a shared LAN), and anything with a trailing dot, whitespace, port or brackets around a
+ * name. No DNS lookup is done. To use plaintext against another host, change this list in a reviewed commit.
+ */
+const PLAINTEXT_ALLOWED_HOSTS: ReadonlySet<string> = new Set(["db", "localhost", "127.0.0.1", "::1"]);
+
+/** Whether `rawHost` — as `new URL(...).hostname` reports it — is on PLAINTEXT_ALLOWED_HOSTS. */
+export function isAllowedPlaintextDatabaseHost(rawHost: string): boolean {
+  if (typeof rawHost !== "string") return false;
+  let host = rawHost.toLowerCase();
+  if (host.startsWith("[") && host.endsWith("]") && host.includes(":")) host = host.slice(1, -1);
+  return PLAINTEXT_ALLOWED_HOSTS.has(host);
+}
+
+/**
+ * The host the driver will actually connect to, or null when that cannot be determined with certainty. The `pg` driver lets a `host=`
+ * (or libpq's `hostaddr=`) query parameter OVERRIDE the host in the URL's authority, so a URL like
+ * `postgresql://u:p@db/x?host=attacker.example` names `db` here but connects to attacker.example. Such a URL is refused outright.
+ */
+function databaseHost(env: EnvLike): string | null {
+  const url = env.DATABASE_URL?.trim();
+  if (!url) return null;
+  try {
+    const parsed = new URL(url);
+    for (const key of parsed.searchParams.keys()) {
+      const name = key.toLowerCase();
+      if (name === "host" || name === "hostaddr") return null;
+    }
+    return parsed.hostname;
+  } catch {
+    return null; // never echo the value — it carries credentials
+  }
+}
+
+export function getDatabaseTlsMode(env: EnvLike = process.env): DatabaseTlsMode {
+  if (sslModeSetting(env) === "disable") return "disabled";
+  const ca = env.DATABASE_SSL_CA?.trim();
+  if (ca && /-----BEGIN CERTIFICATE-----/.test(normalizePem(ca))) return "verified_ca";
+  if (env.DATABASE_SSL_VERIFY?.trim().toLowerCase() === "system") return "verified_system";
+  return "unverified";
+}
+
+export function resolveDatabaseSsl(env: EnvLike = process.env): DatabaseSsl {
+  const requested = sslModeSetting(env);
+  if (requested) {
+    if (requested !== "disable") {
+      throw new Error('DATABASE_SSL_MODE must be "disable" (or unset); any other value is refused so TLS settings are never guessed.');
+    }
+    if (env.DATABASE_SSL_CA?.trim() || env.DATABASE_SSL_VERIFY?.trim()) {
+      throw new Error("DATABASE_SSL_MODE=disable conflicts with DATABASE_SSL_CA / DATABASE_SSL_VERIFY. Remove one: disable TLS only for the private Docker database, verify TLS for a remote one.");
+    }
+    const host = databaseHost(env);
+    if (host === null || !isAllowedPlaintextDatabaseHost(host)) {
+      throw new Error("DATABASE_SSL_MODE=disable is only allowed when DATABASE_URL is a valid URL whose host is exactly one of: db, localhost, 127.0.0.1, ::1 (and it sets no host= / hostaddr= parameter). Refusing to send an unencrypted connection to any other host.");
+    }
+    return false;
+  }
+
+  const mode = getDatabaseTlsMode(env);
+  if (mode === "verified_ca") return { rejectUnauthorized: true, ca: normalizePem(env.DATABASE_SSL_CA!) };
+  if (mode === "verified_system") return { rejectUnauthorized: true };
+  // A DATABASE_SSL_CA that is set but is not a PEM certificate must not be silently ignored.
+  if (env.DATABASE_SSL_CA?.trim()) throw new Error("DATABASE_SSL_CA is set but is not a PEM certificate (expected -----BEGIN CERTIFICATE-----)");
+  return { rejectUnauthorized: false };
+}

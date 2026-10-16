@@ -3,6 +3,7 @@ import { Client } from "pg";
 import { MIGRATION_BUNDLE } from "@/lib/migration-bundle.generated";
 import { ensureSchema, type SqlRunner } from "@/lib/schema-guard";
 import { describeDatabaseTarget } from "@/lib/db-error";
+import { resolveDatabaseSsl, type DatabaseSsl } from "@/lib/db-tls";
 import { createReadinessCache, isMissingSchemaObjectError } from "@/lib/readiness-cache";
 
 // Runtime wiring for src/lib/schema-guard.ts — see that file for the full
@@ -25,7 +26,7 @@ import { createReadinessCache, isMissingSchemaObjectError } from "@/lib/readines
 // fails with a missing-relation error (noteWriteFailure below).
 const REVALIDATE_MS = 5 * 60 * 1000;
 
-function connectionOptions(): { connectionString: string; ssl: { rejectUnauthorized: boolean }; connectionTimeoutMillis: number } {
+function connectionOptions(): { connectionString: string; ssl: DatabaseSsl; connectionTimeoutMillis: number } {
   const databaseUrl = process.env.DATABASE_URL;
   if (!databaseUrl) {
     // Same message/prefix src/lib/prisma.ts throws, so describeDbError
@@ -33,8 +34,8 @@ function connectionOptions(): { connectionString: string; ssl: { rejectUnauthori
     throw new Error("DATABASE_URL is not set. Add it to .env (server-side only, never NEXT_PUBLIC_*).");
   }
   const u = new URL(databaseUrl);
-  u.searchParams.delete("sslmode"); // same Aiven TLS handling as src/lib/prisma.ts
-  return { connectionString: u.toString(), ssl: { rejectUnauthorized: false }, connectionTimeoutMillis: 10_000 };
+  u.searchParams.delete("sslmode"); // TLS is decided by src/lib/db-tls.ts, exactly as in src/lib/prisma.ts
+  return { connectionString: u.toString(), ssl: resolveDatabaseSsl(), connectionTimeoutMillis: 10_000 };
 }
 
 async function verifyOnce(): Promise<void> {

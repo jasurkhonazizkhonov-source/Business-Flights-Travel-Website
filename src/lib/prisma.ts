@@ -1,6 +1,7 @@
 import "server-only";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "@/generated/prisma/client";
+import { resolveDatabaseSsl } from "@/lib/db-tls";
 
 // Server-only: importing this from a Client Component fails the build
 // (via the "server-only" package) rather than silently bundling DATABASE_URL
@@ -36,7 +37,9 @@ function createPrismaClient() {
   }
   const adapter = new PrismaPg({
     connectionString: connectionStringWithoutSslMode(databaseUrl),
-    ssl: { rejectUnauthorized: false },
+    // TLS policy lives in one place: src/lib/db-tls.ts (default unchanged: encrypted, not identity-verified;
+    // DATABASE_SSL_CA / DATABASE_SSL_VERIFY=system verify it; DATABASE_SSL_MODE=disable only for the private Docker database).
+    ssl: resolveDatabaseSsl(),
     max: POOL_MAX,
   });
   return new PrismaClient({ adapter });

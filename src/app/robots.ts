@@ -2,11 +2,11 @@ import type { MetadataRoute } from "next";
 import { SITE_URL } from "@/lib/constants";
 
 export default function robots(): MetadataRoute.Robots {
-  // No `disallow` needed: the site has no API routes to hide from crawlers
-  // (every form submission is a server action, not a route handler) and no
-  // other non-public paths.
+  // Every form submission is a server action, so the only route handler is the
+  // liveness probe (/api/health) — nothing a crawler needs; it also answers
+  // with X-Robots-Tag: noindex.
   return {
-    rules: [{ userAgent: "*", allow: "/" }],
+    rules: [{ userAgent: "*", allow: "/", disallow: ["/api/"] }],
     sitemap: `${SITE_URL}/sitemap.xml`,
   };
 }

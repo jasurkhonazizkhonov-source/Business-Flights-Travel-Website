@@ -1,5 +1,5 @@
 import { resolveClientIp, trustedProxyMode, type ClientIpResult, type IpVersion } from "@/lib/client-ip";
-import { GEO_SOURCE, readApproximateLocation, type ApproximateLocation } from "@/lib/ip-geo";
+import { CLOUDFLARE_GEO_SOURCE, GEO_SOURCE, readApproximateLocation, readCloudflareApproximateLocation, type ApproximateLocation } from "@/lib/ip-geo";
 
 // What the SERVER learned about a request from its own trusted request path —
 // never from a form field or anything the browser's JavaScript could supply.
@@ -26,14 +26,14 @@ export function captureSubmissionInfo(headerList: Headers, now: Date = new Date(
   const info: SubmissionInfo = { capturedAt: now };
   if (resolved.ok) info.ip = { address: resolved.address, version: resolved.version };
 
-  // The x-vercel-ip-* headers are only trustworthy where Vercel's edge itself
-  // sets them; anywhere else a client could send them, so they are not read.
-  if (trustedProxyMode() === "vercel") {
-    const location = readApproximateLocation(headerList);
-    if (location) {
-      info.location = location;
-      info.locationSource = GEO_SOURCE;
-    }
+  // Geolocation headers are only read for the proxy that is in front of the app and sets them itself: Vercel's x-vercel-ip-*, or
+  // (TRUSTED_PROXY=cloudflare — the origin is reachable only through Cloudflare / its Tunnel) Cloudflare's cf-ip* headers.
+  // Anywhere else a client could send them, so they are not read. A missing header just means no location: never an error.
+  const mode = trustedProxyMode();
+  const location = mode === "vercel" ? readApproximateLocation(headerList) : mode === "cloudflare" ? readCloudflareApproximateLocation(headerList) : undefined;
+  if (location) {
+    info.location = location;
+    info.locationSource = mode === "cloudflare" ? CLOUDFLARE_GEO_SOURCE : GEO_SOURCE;
   }
   return resolved.ok ? { info } : { info, ipUnavailable: resolved.reason };
 }

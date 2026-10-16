@@ -1,5 +1,7 @@
-// Approximate, IP-derived location — read from the geolocation headers
-// Vercel's edge network adds to every request it serves (x-vercel-ip-*).
+// Approximate, IP-derived location — read from the geolocation headers the platform's edge adds to a request:
+// Vercel's x-vercel-ip-* (readApproximateLocation) or, behind Cloudflare / a Cloudflare Tunnel, Cloudflare's cf-ip* headers
+// (readCloudflareApproximateLocation). The caller decides which one applies (src/lib/submission-info.ts) from the trusted
+// proxy mode; a header is never read unless the matching proxy is the one in front of the app.
 //
 // Why no external IP-intelligence provider: the platform already supplies the
 // useful part (city, region, country, time zone) with no credentials, no
@@ -30,6 +32,7 @@ export type ApproximateLocation = {
 };
 
 export const GEO_SOURCE = "Vercel edge geolocation (approximate)";
+export const CLOUDFLARE_GEO_SOURCE = "Cloudflare edge geolocation (approximate)";
 
 const US_STATES: Record<string, string> = {
   AL: "Alabama", AK: "Alaska", AZ: "Arizona", AR: "Arkansas", CA: "California", CO: "Colorado", CT: "Connecticut", DE: "Delaware",
@@ -58,14 +61,26 @@ function decode(value: string): string | undefined {
   }
 }
 
-function cleanText(value: string | null, max: number): string | undefined {
+function cleanText(value: string | null, max: number, decoder: (v: string) => string | undefined = decode): string | undefined {
   if (!value) return undefined;
-  const decoded = decode(value);
+  const decoded = decoder(value);
   if (!decoded) return undefined;
   // Printable text only — no control characters, bounded length: this ends up in
   // an email and in the CRM and must never carry markup-significant surprises.
   const trimmed = decoded.replace(/\p{Cc}+/gu, " ").trim();
   return trimmed && trimmed.length <= max ? trimmed : undefined;
+}
+
+/**
+ * Cloudflare sends non-ASCII header values as raw UTF-8 bytes. Node exposes header values as latin-1 strings, so "São Paulo" arrives as
+ * "SÃ£o Paulo"; re-reading the bytes as UTF-8 restores it. Pure ASCII is returned unchanged; bytes that are not valid UTF-8 are dropped.
+ */
+export function decodeUtf8Header(value: string): string | undefined {
+  // Pure ASCII needs no re-reading (every code unit is below U+0080).
+  if (![...value].some((ch) => ch.charCodeAt(0) > 0x7f)) return value;
+  const text = Buffer.from(value, "latin1").toString("utf8");
+  // U+FFFD is what the UTF-8 decoder substitutes for bytes that are not valid UTF-8.
+  return text.includes(String.fromCharCode(0xfffd)) ? undefined : text;
 }
 
 function countryName(code: string): string | undefined {
@@ -107,6 +122,29 @@ export function readApproximateLocation(headerList: Headers): ApproximateLocatio
   const anyValue = Object.values(location).some((v) => v !== undefined);
   if (!anyValue) return undefined;
   // Drop undefined keys so a stored/serialised object only holds what was obtained.
+  return Object.fromEntries(Object.entries(location).filter(([, v]) => v !== undefined)) as ApproximateLocation;
+}
+
+/**
+ * Reads Cloudflare's geolocation request headers. `cf-ipcountry` is present whenever IP Geolocation (or the "Add visitor location
+ * headers" Managed Transform) is on; city, region and time zone only with that Managed Transform (cloudflare docs, checked 2026-10-16).
+ * `XX` (no data) and `T1` (Tor) mean "unknown", never a country. Coordinates, postal and metro codes are deliberately not read.
+ */
+export function readCloudflareApproximateLocation(headerList: Headers): ApproximateLocation | undefined {
+  const countryRaw = headerList.get("cf-ipcountry")?.trim().toUpperCase();
+  const countryCode = countryRaw && /^[A-Z]{2}$/.test(countryRaw) && countryRaw !== "XX" && countryRaw !== "T1" ? countryRaw : undefined;
+  const regionRaw = headerList.get("cf-region-code")?.trim().toUpperCase();
+  const regionCode = regionRaw && /^[A-Z0-9]{1,4}$/.test(regionRaw) ? regionRaw : undefined;
+  const location: ApproximateLocation = {
+    city: cleanText(headerList.get("cf-ipcity"), 80, decodeUtf8Header),
+    regionCode,
+    region: cleanText(headerList.get("cf-region"), 80, decodeUtf8Header) ?? (countryCode && regionCode ? REGION_NAMES[countryCode]?.[regionCode] : undefined),
+    country: countryCode ? countryName(countryCode) : undefined,
+    countryCode,
+    timeZone: validTimeZone(cleanText(headerList.get("cf-timezone"), 64, decodeUtf8Header)),
+  };
+  const anyValue = Object.values(location).some((v) => v !== undefined);
+  if (!anyValue) return undefined;
   return Object.fromEntries(Object.entries(location).filter(([, v]) => v !== undefined)) as ApproximateLocation;
 }
 

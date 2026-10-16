@@ -5,7 +5,7 @@ import { prisma } from "@/lib/prisma";
 // in the "Compass Tools" app, specifically claimNextWorker/distributeNewWebsiteLead)
 // so a website-submitted lead is picked up by the SAME LeadQueueEntry queue,
 // with the same least-recently-served ordering and the same race-safety
-// (FOR UPDATE SKIP LOCKED + a conditional UPDATE ... WHERE assignedAgentId
+// (FOR UPDATE OF lqe SKIP LOCKED + a conditional UPDATE ... WHERE assignedAgentId
 // IS NULL). This website is a separate Next.js app/deployment from the CRM,
 // so the CRM's own server action can't be called directly — this reproduces
 // its logic against the shared database instead of inventing a new, parallel
@@ -27,13 +27,15 @@ function sleep(ms: number) {
 
 async function claimNextWorker(leadId: string): Promise<DistributionResult> {
   return prisma.$transaction(async (tx) => {
+    // `FOR UPDATE OF lqe`: lock only the queue entry being claimed. A bare FOR UPDATE would also lock the joined Account rows, which
+    // needs UPDATE on "Account" — a privilege the website's least-privilege database role deliberately does not have.
     const rows = await tx.$queryRaw<Array<{ id: string; accountId: string }>>`
       SELECT lqe."id", lqe."accountId" FROM "LeadQueueEntry" lqe
       JOIN "Account" a ON a."id" = lqe."accountId"
       WHERE lqe."isActive" = true AND a."role" NOT IN ('TICKETING_AGENT', 'FLIGHT_EXPERT')
       ORDER BY lqe."lastAssignedAt" ASC NULLS FIRST, lqe."joinedAt" ASC
       LIMIT 1
-      FOR UPDATE SKIP LOCKED
+      FOR UPDATE OF lqe SKIP LOCKED
     `;
     const worker = rows[0];
     if (!worker) return { assigned: false as const, reason: "no_active_workers" as const };

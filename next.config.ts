@@ -53,7 +53,14 @@ const securityHeaders = [
   { key: "Strict-Transport-Security", value: "max-age=63072000; includeSubDomains; preload" },
 ];
 
+// Self-hosted (Docker) build only: `NEXT_OUTPUT=standalone` makes `next build` emit a minimal, self-contained server
+// (.next/standalone) for the container image (see Dockerfile and docs/DEPLOYMENT_VPS.md). Unset everywhere else — Vercel and
+// local `next build` / `next start` are unchanged. The tracing root is pinned so the output layout does not depend on where a
+// stray lockfile happens to sit above the project.
+const standalone = process.env.NEXT_OUTPUT === "standalone";
+
 const nextConfig: NextConfig = {
+  ...(standalone ? { output: "standalone" as const, outputFileTracingRoot: process.cwd() } : {}),
   images: {
     // Editorial/destination imagery is sourced from Unsplash as placeholders
     // during development — swap for licensed/company-owned photography via
