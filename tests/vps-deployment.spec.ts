@@ -183,6 +183,20 @@ test.describe("container files (static checks; Docker itself was not available t
     expect(dockerfile).toContain("-name '.env'"); // the build fails if an env file slipped into the image
   });
 
+  test("Dockerfile: the runtime user can read the application but write ONLY the Next cache", () => {
+    const runner = dockerfile.slice(dockerfile.indexOf("FROM base AS runner"));
+    // No file copied into the runner is chowned to the runtime user: application code is root-owned and not writable by `node`.
+    expect(runner.split("\n").filter((l) => /^COPY /.test(l) && /--chown/.test(l))).toEqual([]);
+    expect(runner).toMatch(/chown -R node:node \/app\/\.next\/cache/);
+    expect([...runner.matchAll(/chown /g)]).toHaveLength(1);
+    expect(runner).not.toMatch(/chmod\s+(-R\s+)?[0-7]*7[0-7]{0,2}\s|chmod\s+(-R\s+)?\S*[+]w/);
+    expect(runner.indexOf("USER node")).toBeGreaterThan(runner.indexOf("chown -R node:node"));
+    // No build-time secrets and nothing read from the environment during the build: only these ENV/ARG names exist.
+    const joined = dockerfile.replace(/\\\r?\n/g, " ");
+    const envNames = joined.split("\n").filter((l) => /^(ENV|ARG)\s/.test(l)).flatMap((l) => [...l.matchAll(/(?:^ARG\s+|\s)([A-Z_]+)=/g)].map((m) => m[1]));
+    expect([...new Set(envNames)].sort()).toEqual(["HOSTNAME", "NEXT_OUTPUT", "NEXT_TELEMETRY_DISABLED", "NODE_ENV", "NODE_IMAGE", "NODE_OPTIONS", "PORT"]);
+  });
+
   test(".dockerignore keeps env files, keys and local tooling state out of the build context", () => {
     const ignore = read(".dockerignore");
     for (const entry of ["**/.env", "**/.env.*", "**/*.pem", "**/*.key", ".git", "node_modules", ".next"]) expect(ignore, entry).toContain(entry);
@@ -193,7 +207,9 @@ test.describe("container files (static checks; Docker itself was not available t
     expect(compose).toMatch(/^name: business-flights-travel$/m);
     const servicesBlock = compose.slice(compose.indexOf("\nservices:"), compose.indexOf("\nnetworks:"));
     const services = [...servicesBlock.matchAll(/^ {2}([a-z][\w-]*):\s*$/gm)].map((m) => m[1]);
-    expect(services).toEqual(["web"]); // no db, no cloudflared, no CRM service defined here
+    // One service, named uniquely: Docker adds the service name as a DNS alias on the CRM's shared network, so it must not be a generic
+    // name (web, app, db, cloudflared) that another container could also answer to. No db, no cloudflared, no CRM service defined here.
+    expect(services).toEqual(["bft-web"]);
     expect(compose).not.toMatch(/^\s+ports:/m);
     expect(compose).not.toMatch(/published:/);
     expect(compose).toMatch(/^\s+expose:\s*\n\s+- "3000"/m);
@@ -201,10 +217,16 @@ test.describe("container files (static checks; Docker itself was not available t
     expect(compose).toMatch(/cap_drop:\s*\n\s+- ALL/);
     expect(compose).toMatch(/no-new-privileges:true/);
     expect(compose).toMatch(/restart: unless-stopped/);
-    // Both shared networks are EXTERNAL: compose must refuse to start rather than create an empty one.
-    expect(compose).toMatch(/edge:\s*\n\s+external: true/);
-    expect(compose).toMatch(/crm_data:\s*\n\s+external: true/);
-    expect(compose).toMatch(/aliases: \[bft-web\]/);
+    // The one shared network (the CRM project's) is EXTERNAL: compose must refuse to start rather than create an empty one. Its default
+    // name is the one observed on the VPS; it is overridable, never created.
+    expect(compose).toMatch(/crm_internal:\s*\n\s+external: true\s*\n\s+name: \$\{CRM_NETWORK_NAME:-compass-tools_internal\}/);
+    expect([...compose.matchAll(/external: true/g)]).toHaveLength(1);
+    // The service joins it with exactly one alias, unique and project-prefixed (the tunnel's Service URL is http://bft-web:3000).
+    expect(compose).toMatch(/crm_internal:\s*\n\s+aliases: \[bft-web\]/);
+    expect([...compose.matchAll(/aliases:/g)]).toHaveLength(1);
+    // None of the CRM's service names may be used as a name or alias here.
+    expect(compose.split("\n").filter((l) => !l.trim().startsWith("#")).join("\n")).not.toMatch(/aliases:\s*\[[^\]]*(?<![\w-])(app|db|web|cloudflared)(?![\w-])|container_name:/);
+    expect(compose).not.toMatch(/bft-edge|EDGE_NETWORK_NAME|compass-tools_data|CRM_DATA_NETWORK/);
     expect(compose).not.toMatch(/\bvolumes:/); // no volumes at all: this site stores no files
     expect(compose).not.toMatch(/-v\b|down -v|prune/);
   });
@@ -229,7 +251,7 @@ test.describe("container files (static checks; Docker itself was not available t
       const src = read(f);
       // Strip comments so the explanation of what is NOT done does not trip the check.
       const code = src.split("\n").filter((l) => !l.trim().startsWith("#")).join("\n");
-      expect(code, f).not.toMatch(/compose\s+down|\bvolume\s+(rm|prune)|system prune|image prune|network (rm|prune)|rm -rf|docker (stop|kill|restart|rm)\b|compass-tools(?!_data)|cloudflared (tunnel|service)|psql|pg_dump|migrate/);
+      expect(code, f).not.toMatch(/compose\s+down|\bvolume\s+(rm|prune)|system prune|image prune|network (rm|prune)|rm -rf|docker (stop|kill|restart|rm)\b|compass-tools(?!_internal)|cloudflared (tunnel|service)|psql|pg_dump|migrate/);
     }
     expect(read("deploy/common.sh")).toContain('PROJECT="business-flights-travel"');
     expect(read("deploy/deploy.sh")).toContain("compose up -d --no-deps");
@@ -244,6 +266,11 @@ test.describe("container files (static checks; Docker itself was not available t
     const grants = read("deploy/sql/website-runtime-role-grants.sql").split("\n").filter((l) => !l.trim().startsWith("--")).join("\n");
     expect(grants).not.toMatch(/(UPDATE|INSERT|DELETE|ALL)[^;]*"Account"/);
     expect(grants).not.toMatch(/GRANT[^;]*\b(DELETE|TRUNCATE|ALL PRIVILEGES)\b/i);
+    // Account and Company are readable only by the columns the website uses; no default privileges, no sequence except Airport's.
+    expect(grants).toContain('GRANT SELECT ("id", "role") ON "Account"');
+    expect(grants).toContain('GRANT SELECT ("id") ON "Company"');
+    expect(grants).not.toMatch(/ALTER DEFAULT PRIVILEGES|GRANT[^;]*ALL SEQUENCES|GRANT[^;]*ALL TABLES|TO\s+PUBLIC|WITH GRANT OPTION|GRANT[^;]*\bCREATE\b/i);
+    expect(grants.match(/ON SEQUENCE\s+"[^"]+"/g)).toEqual(['ON SEQUENCE "Airport_id_seq"']);
   });
 });
 

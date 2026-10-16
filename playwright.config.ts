@@ -4,6 +4,22 @@ import { defineConfig, devices } from "@playwright/test";
 // dev server (see docs comment in tests/redesign.spec.ts for what this
 // covers). Not wired into CI/build — run with `npx playwright test`
 // against an already-running `npm run dev` on port 3100.
+// Specs that are NOT about a viewport: each in-memory PostgreSQL (PGlite) instance is 150-200 MB, the self-hosted spec starts a whole
+// server, and the deploy-script spec runs bash. Running them once per viewport project (4x) multiplied that memory use and, together with
+// browsers and a Next server on an 8 GB machine, produced "worker process exited unexpectedly" crashes. They live in their own
+// "Infrastructure" project, which runs ONCE and only after the viewport projects have finished. For the most predictable memory use run
+// it alone:  npm run test:infra   (one worker).
+const INFRASTRUCTURE_SPECS = [
+  /schema-guard.*.spec.ts$/,
+  /schema-init-e2e.spec.ts$/,
+  /runtime-role.*.spec.ts$/,
+  /self-hosted-e2e.spec.ts$/,
+  /deploy-scripts.spec.ts$/,
+  /db-tls-driver.spec.ts$/,
+  /vps-deployment.spec.ts$/,
+];
+const VIEWPORT_PROJECTS = ["Desktop Chrome", "Mobile 320", "Mobile 375", "Mobile 390"];
+
 export default defineConfig({
   testDir: "./tests",
   fullyParallel: false,
@@ -47,9 +63,11 @@ export default defineConfig({
     trace: "retain-on-failure",
   },
   projects: [
-    { name: "Desktop Chrome", use: { ...devices["Desktop Chrome"] } },
-    { name: "Mobile 320", use: { viewport: { width: 320, height: 700 } } },
-    { name: "Mobile 375", use: { viewport: { width: 375, height: 812 } } },
-    { name: "Mobile 390", use: { viewport: { width: 390, height: 844 } } },
+    { name: "Desktop Chrome", testIgnore: INFRASTRUCTURE_SPECS, use: { ...devices["Desktop Chrome"] } },
+    { name: "Mobile 320", testIgnore: INFRASTRUCTURE_SPECS, use: { viewport: { width: 320, height: 700 } } },
+    { name: "Mobile 375", testIgnore: INFRASTRUCTURE_SPECS, use: { viewport: { width: 375, height: 812 } } },
+    { name: "Mobile 390", testIgnore: INFRASTRUCTURE_SPECS, use: { viewport: { width: 390, height: 844 } } },
+    // Once, after the viewport projects (a full `playwright test` therefore never runs these alongside the browser projects).
+    { name: "Infrastructure", testMatch: INFRASTRUCTURE_SPECS, dependencies: VIEWPORT_PROJECTS, use: { ...devices["Desktop Chrome"] } },
   ],
 });

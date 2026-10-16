@@ -14,7 +14,9 @@
     "analyze": "ANALYZE=true next build",
     "validate:content": "node scripts/validate-content.mjs",
     "validate:seo": "node scripts/validate-seo.mjs",
-    "postinstall": "prisma generate"
+    "postinstall": "prisma generate",
+    "test:infra": "playwright test --project=Infrastructure --no-deps --workers=1",
+    "test:ui": "playwright test --project=\"Desktop Chrome\" --project=\"Mobile 320\" --project=\"Mobile 375\" --project=\"Mobile 390\" --workers=3"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.9.1",

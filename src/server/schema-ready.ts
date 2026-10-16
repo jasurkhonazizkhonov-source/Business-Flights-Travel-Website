@@ -3,7 +3,7 @@ import { Client } from "pg";
 import { MIGRATION_BUNDLE } from "@/lib/migration-bundle.generated";
 import { ensureSchema, type SqlRunner } from "@/lib/schema-guard";
 import { describeDatabaseTarget } from "@/lib/db-error";
-import { resolveDatabaseSsl, type DatabaseSsl } from "@/lib/db-tls";
+import { databaseConnectionString, resolveDatabaseSsl, type DatabaseSsl } from "@/lib/db-tls";
 import { createReadinessCache, isMissingSchemaObjectError } from "@/lib/readiness-cache";
 
 // Runtime wiring for src/lib/schema-guard.ts — see that file for the full
@@ -33,9 +33,8 @@ function connectionOptions(): { connectionString: string; ssl: DatabaseSsl; conn
     // categorizes both identically.
     throw new Error("DATABASE_URL is not set. Add it to .env (server-side only, never NEXT_PUBLIC_*).");
   }
-  const u = new URL(databaseUrl);
-  u.searchParams.delete("sslmode"); // TLS is decided by src/lib/db-tls.ts, exactly as in src/lib/prisma.ts
-  return { connectionString: u.toString(), ssl: resolveDatabaseSsl(), connectionTimeoutMillis: 10_000 };
+  // TLS is decided by src/lib/db-tls.ts alone, exactly as in src/lib/prisma.ts (the URL's own ssl* parameters are removed).
+  return { connectionString: databaseConnectionString(databaseUrl), ssl: resolveDatabaseSsl(), connectionTimeoutMillis: 10_000 };
 }
 
 async function verifyOnce(): Promise<void> {

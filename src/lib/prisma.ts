@@ -1,7 +1,7 @@
 import "server-only";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "@/generated/prisma/client";
-import { resolveDatabaseSsl } from "@/lib/db-tls";
+import { databaseConnectionString, resolveDatabaseSsl } from "@/lib/db-tls";
 
 // Server-only: importing this from a Client Component fails the build
 // (via the "server-only" package) rather than silently bundling DATABASE_URL
@@ -11,11 +11,7 @@ import { resolveDatabaseSsl } from "@/lib/db-tls";
 // TLS validation rejects; stripping sslmode from the URL and validating via
 // an explicit `ssl` option (rejectUnauthorized: false, still TLS-encrypted)
 // mirrors the CRM app's own prisma/bootstrap-company.ts connection setup.
-function connectionStringWithoutSslMode(url: string): string {
-  const u = new URL(url);
-  u.searchParams.delete("sslmode");
-  return u.toString();
-}
+// (The URL's own ssl* parameters are removed by databaseConnectionString(): `pg` would otherwise let them override the decision.)
 
 const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient };
 
@@ -36,7 +32,7 @@ function createPrismaClient() {
     throw new Error("DATABASE_URL is not set. Add it to .env (server-side only, never NEXT_PUBLIC_*).");
   }
   const adapter = new PrismaPg({
-    connectionString: connectionStringWithoutSslMode(databaseUrl),
+    connectionString: databaseConnectionString(databaseUrl),
     // TLS policy lives in one place: src/lib/db-tls.ts (default unchanged: encrypted, not identity-verified;
     // DATABASE_SSL_CA / DATABASE_SSL_VERIFY=system verify it; DATABASE_SSL_MODE=disable only for the private Docker database).
     ssl: resolveDatabaseSsl(),
@@ -48,11 +44,12 @@ function createPrismaClient() {
 function getPrismaClient(): PrismaClient {
   if (globalForPrisma.prisma) return globalForPrisma.prisma;
   const client = createPrismaClient();
-  // Reused across hot-reloads in dev so each edit doesn't open a fresh pool
-  // against the shared CRM database.
-  if (process.env.NODE_ENV !== "production") {
-    globalForPrisma.prisma = client;
-  }
+  // ONE client (one connection pool) per process, in every environment. This is read through the lazy Proxy below, which calls
+  // getPrismaClient() on EVERY property access: if the client were only remembered outside production (as the common hot-reload
+  // snippet does), each `prisma.<model>` access in a production server would build a brand-new client with its own pool of up to
+  // POOL_MAX connections. On the self-hosted server that exhausted the database role's connection limit within two form submissions
+  // and took connections away from the CRM that shares the database (found by tests/self-hosted-e2e.spec.ts).
+  globalForPrisma.prisma = client;
   return client;
 }
 

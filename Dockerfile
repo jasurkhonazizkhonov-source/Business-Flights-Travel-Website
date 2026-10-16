@@ -52,14 +52,16 @@ ENV NODE_ENV=production \
     HOSTNAME=0.0.0.0 \
     NODE_OPTIONS=--max-old-space-size=768
 # The traced standalone server (its own minimal node_modules), then the static assets it does not copy itself.
-COPY --from=builder --chown=node:node /app/.next/standalone ./
-COPY --from=builder --chown=node:node /app/.next/static ./.next/static
-COPY --from=builder --chown=node:node /app/public ./public
+# Application files stay owned by root: the unprivileged `node` user can READ and execute them but cannot modify its own code. The
+# only directory it may write is .next/cache (below).
+COPY --from=builder /app/.next/standalone ./
+COPY --from=builder /app/.next/static ./.next/static
+COPY --from=builder /app/public ./public
 # `sharp` powers next/image optimisation. Next's file tracer copies its .node file but not always the libvips libraries beside it,
 # so take the COMPLETE platform packages from the dependency install (same approach as the CRM image).
-COPY --from=deps --chown=node:node /app/node_modules/@img ./node_modules/@img
+COPY --from=deps /app/node_modules/@img ./node_modules/@img
 # Dependency-free container health probe (GET /api/health on loopback).
-COPY --from=builder --chown=node:node /app/scripts/healthcheck.mjs ./scripts/healthcheck.mjs
+COPY --from=builder /app/scripts/healthcheck.mjs ./scripts/healthcheck.mjs
 # Next writes its image-optimisation and fetch caches under .next/cache at run time; it must be writable by the unprivileged user.
 RUN mkdir -p /app/.next/cache && chown -R node:node /app/.next/cache
 # This website stores NO files of its own (no uploads): there is deliberately no data volume. Customer data lives in PostgreSQL.

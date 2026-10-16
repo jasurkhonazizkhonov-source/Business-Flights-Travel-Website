@@ -10,6 +10,10 @@ SHA="$(git -C "${ROOT}" rev-parse --short HEAD)"
 [ -z "$(git -C "${ROOT}" status --porcelain)" ] || die "the working tree has uncommitted changes; deploy a clean, reviewed commit"
 say "Deploying commit ${SHA}"
 
+# Baseline of everything else on the shared network (CRM app, PostgreSQL, tunnel connector), compared again at the end.
+BEFORE="$(others_fingerprint)"
+printf '%s\n' "${BEFORE}" | sed 's/^/  before: /' | cut -c1-110
+
 # Remember what is running now so rollback.sh can return to it.
 if docker inspect "${CONTAINER}" >/dev/null 2>&1; then
   prev="$(docker inspect -f '{{.Config.Image}}' "${CONTAINER}")"
@@ -37,4 +41,8 @@ fi
 ok "container healthy"
 
 "${DEPLOY_DIR}/verify.sh"
+
+say "Nothing else on the shared network was touched"
+[ "$(others_fingerprint)" = "${BEFORE}" ] || die "a container other than the website changed (id or start time) during the deploy - investigate before continuing"
+ok "the CRM, PostgreSQL and tunnel containers have the same ids and start times as before"
 say "Deployed ${SHA}. Public routing (DNS / tunnel routes) is the owner's step: see docs/DEPLOYMENT_VPS.md"

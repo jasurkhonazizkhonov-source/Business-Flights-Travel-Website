@@ -39,6 +39,14 @@ export async function saveLeadSubmissionInfo(
     budgetCurrency,
     capturedAt: info?.capturedAt,
   };
-  await client.leadSubmissionInfo.upsert({ where: { leadId }, create: { leadId, ...data }, update: {} });
+  try {
+    await client.leadSubmissionInfo.upsert({ where: { leadId }, create: { leadId, ...data }, update: {} });
+  } catch (err) {
+    // Two concurrent calls for the same Lead (the original request's after() task and a retried POST of the same submission) can both
+    // miss the row and both try to insert it; PostgreSQL lets exactly one win and rejects the other with a unique violation on leadId.
+    // The row IS stored, so that is success, not a failure to log. Proven against a real server in scripts/verify-runtime-role-pg.ts.
+    if ((err as { code?: string } | null)?.code === "P2002") return true;
+    throw err;
+  }
   return true;
 }

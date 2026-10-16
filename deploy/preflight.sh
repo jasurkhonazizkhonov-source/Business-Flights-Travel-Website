@@ -25,29 +25,34 @@ compose config --services | grep -qx "${SERVICE}" || die "service '${SERVICE}' n
 [ "$(compose config --services | wc -l)" = "1" ] || die "this project must define exactly one service"
 ok "exactly one service: ${SERVICE}"
 
-say "External networks (compose never creates these)"
-EDGE="$(env_or_default EDGE_NETWORK_NAME bft-edge)"
-DATA="$(env_or_default CRM_DATA_NETWORK_NAME compass-tools_data)"
-docker network inspect "${EDGE}" >/dev/null 2>&1 || die "network '${EDGE}' does not exist. Create it once: docker network create ${EDGE}   (see docs/DEPLOYMENT_VPS.md, 'Networking')"
-ok "edge network '${EDGE}' exists"
-docker network inspect "${DATA}" >/dev/null 2>&1 || die "network '${DATA}' does not exist. Read the CRM's real network names with: docker network ls"
-ok "CRM data network '${DATA}' exists"
+say "External network (compose never creates it)"
+NET="$(env_or_default CRM_NETWORK_NAME compass-tools_internal)"
+docker network inspect "${NET}" >/dev/null 2>&1 || die "network '${NET}' does not exist. Read the CRM's real network name with: docker network ls   (then set CRM_NETWORK_NAME in .env)"
+ok "CRM network '${NET}' exists"
 
-say "The CRM database is reachable by the name 'db' on '${DATA}'"
-found=""
-for c in $(docker network inspect "${DATA}" -f '{{range .Containers}}{{.Name}} {{end}}'); do
-  aliases="$(docker inspect -f "{{range \$k,\$v := .NetworkSettings.Networks}}{{if eq \$k \"${DATA}\"}}{{range \$v.Aliases}}{{.}} {{end}}{{end}}{{end}}" "${c}")"
-  case " ${aliases} " in *" db "*) found="${c}";; esac
+# Aliases a container answers to on ${NET} (docker inspect, read-only).
+aliases_of() { docker inspect -f "{{range \$k,\$v := .NetworkSettings.Networks}}{{if eq \$k \"${NET}\"}}{{range \$v.Aliases}}{{.}} {{end}}{{end}}{{end}}" "$1"; }
+
+say "The CRM database is reachable by the name 'db' on '${NET}', and no name collides"
+found=""; clash=""
+for c in $(docker network inspect "${NET}" -f '{{range .Containers}}{{.Name}} {{end}}'); do
+  a=" $(aliases_of "${c}") "
+  case "${a}" in *" db "*) found="${c}";; esac
+  # Docker DNS answers a name from every container that carries it. Another container (not ours) already called bft-web would
+  # make the tunnel and the website's own health traffic land on the wrong place.
+  if [ "${c}" != "${CONTAINER}" ]; then case "${a}" in *" bft-web "*) clash="${clash} ${c}";; esac; fi
 done
-[ -n "${found}" ] || die "no container on '${DATA}' has the network alias 'db'. The website's DATABASE_URL host must be exactly 'db'."
+[ -n "${found}" ] || die "no container on '${NET}' has the network alias 'db'. The website's DATABASE_URL host must be exactly 'db'."
 ok "container '${found}' answers to 'db'"
+[ -z "${clash}" ] || die "another container on '${NET}' already answers to 'bft-web':${clash}. Resolve this before deploying."
+ok "no other container answers to 'bft-web'"
 if docker port "${found}" 2>/dev/null | grep -q .; then warn "'${found}' publishes a host port - PostgreSQL must never be published"; else ok "PostgreSQL publishes no host port"; fi
 
-say "Tunnel connector (informational - the owner wires this up; see the guide)"
-if docker network inspect "${EDGE}" -f '{{range .Containers}}{{.Name}} {{end}}' | grep -qi cloudflared; then
-  ok "a cloudflared container is attached to '${EDGE}'"
+say "Tunnel connector (informational - the owner adds the routes in the Cloudflare dashboard; see the guide)"
+if docker network inspect "${NET}" -f '{{range .Containers}}{{.Name}} {{end}}' | grep -qi cloudflared; then
+  ok "a cloudflared container is attached to '${NET}'"
 else
-  warn "no cloudflared container is attached to '${EDGE}' yet - the site will not be reachable until the owner attaches it and adds the tunnel routes"
+  warn "no cloudflared container is attached to '${NET}' - the tunnel could not reach http://bft-web:3000 from there"
 fi
 
 say "Host resources"

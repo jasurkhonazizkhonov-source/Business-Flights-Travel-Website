@@ -75,6 +75,36 @@ function databaseHost(env: EnvLike): string | null {
   }
 }
 
+/** Query parameters that `pg` turns into TLS settings. Matched case-insensitively and by prefix, a superset of what pg reads today. */
+function isTlsQueryParameter(name: string): boolean {
+  const n = name.toLowerCase();
+  return n.startsWith("ssl") || n === "uselibpqcompat";
+}
+
+/**
+ * The connection string to hand to the driver: DATABASE_URL with every TLS-affecting query parameter removed.
+ *
+ * `pg` copies EVERY query parameter into its config and lets connection-string values override explicitly passed options, so a
+ * stray `?ssl=0`, `?sslmode=...`, `?sslrootcert=...` or `?sslnegotiation=...` would silently replace the decision made in
+ * resolveDatabaseSsl(). Removing them makes that function the single source of truth for TLS, in every mode.
+ */
+export function databaseConnectionString(url: string): string {
+  const u = new URL(url);
+  for (const key of [...u.searchParams.keys()]) if (isTlsQueryParameter(key)) u.searchParams.delete(key);
+  return u.toString();
+}
+
+function urlCarriesTlsParameters(env: EnvLike): boolean {
+  const url = env.DATABASE_URL?.trim();
+  if (!url) return false;
+  try {
+    for (const key of new URL(url).searchParams.keys()) if (isTlsQueryParameter(key)) return true;
+  } catch {
+    /* an unparsable URL is refused elsewhere */
+  }
+  return false;
+}
+
 export function getDatabaseTlsMode(env: EnvLike = process.env): DatabaseTlsMode {
   if (sslModeSetting(env) === "disable") return "disabled";
   const ca = env.DATABASE_SSL_CA?.trim();
@@ -91,6 +121,9 @@ export function resolveDatabaseSsl(env: EnvLike = process.env): DatabaseSsl {
     }
     if (env.DATABASE_SSL_CA?.trim() || env.DATABASE_SSL_VERIFY?.trim()) {
       throw new Error("DATABASE_SSL_MODE=disable conflicts with DATABASE_SSL_CA / DATABASE_SSL_VERIFY. Remove one: disable TLS only for the private Docker database, verify TLS for a remote one.");
+    }
+    if (urlCarriesTlsParameters(env)) {
+      throw new Error("DATABASE_SSL_MODE=disable conflicts with an ssl* / sslmode parameter inside DATABASE_URL. Remove the URL parameter so the TLS decision is made in one place.");
     }
     const host = databaseHost(env);
     if (host === null || !isAllowedPlaintextDatabaseHost(host)) {

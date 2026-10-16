@@ -1,16 +1,19 @@
 # Business Flights Travel website — self-hosted production deployment: OVHcloud VPS + Docker Compose + Cloudflare Tunnel.
 # Full guide (read it before the first deploy): docs/DEPLOYMENT_VPS.md.   Deploy: deploy/deploy.sh (see the guide).
 #
-# THIS IS A SEPARATE COMPOSE PROJECT. It defines exactly ONE service, `web`. It does not define, start, stop or recreate PostgreSQL,
-# the Compass Tools CRM or the Cloudflare Tunnel connector — those belong to the CRM's own compose project and are never touched by
-# any command in this file's directory (every command in the guide uses `-p business-flights-travel` and names only `web`).
+# THIS IS A SEPARATE COMPOSE PROJECT. It defines exactly ONE service, `bft-web`. It does not define, start, stop or recreate PostgreSQL,
+# the Compass Tools CRM or the Cloudflare Tunnel connector — those belong to the CRM's own compose project (`compass-tools`) and are
+# never touched by any command in this file's directory (every command in the guide uses `-p business-flights-travel` and names only
+# `bft-web`).
 #
-# What it needs from the host (the owner prepares these once; the guide has the exact, read-only-first commands):
-#   * an EXTERNAL network shared with the tunnel connector, default name `bft-edge`, so the tunnel can reach http://bft-web:3000
-#   * an EXTERNAL network that carries the CRM's PostgreSQL service `db`, default `compass-tools_data` (the CRM compose project's
-#     private `data` network), so the website can reach the database it already writes to
-# Compose does NOT create either of them and separate projects do NOT share networks automatically: if one is missing, `up` fails
-# with "network ... declared as external, but could not be found" instead of creating an empty one that silently connects to nothing.
+# What it needs from the host: ONE external network, the CRM project's `compass-tools_internal`, which already carries the CRM app, its
+# PostgreSQL (`db`) and the Cloudflare connector (`cloudflared`). Joining it is what lets (a) the website reach `db` and (b) the tunnel reach
+# `http://bft-web:3000`. Compose never creates it and separate projects do NOT share networks automatically: if the name is wrong,
+# `up` fails with "network ... declared as external, but could not be found" instead of silently creating an empty network.
+#
+# Because that network is shared and flat, the service name and alias are deliberately unique and project-prefixed. Docker DNS answers a
+# name from EVERY container that carries it, so this service must never be called `app`, `db`, `web` or `cloudflared`, and it must not
+# add aliases other than `bft-web`. deploy/preflight.sh checks for a collision before every deploy.
 #
 # Nothing is published on the host. There is no `ports:` here and there must never be: the only way to reach the site is through the
 # tunnel, which is also what makes TRUSTED_PROXY=cloudflare safe (a reachable port would let a client forge CF-Connecting-IP).
@@ -27,7 +30,7 @@ x-logging: &default-logging
     max-file: "5"
 
 services:
-  web:
+  bft-web:
     image: business-flights-web:${APP_VERSION:-local}
     build:
       context: .
@@ -51,17 +54,16 @@ services:
       # --- notification email (Gmail SMTP, one sender address, app password) ---
       GMAIL_SENDER_EMAIL: ${GMAIL_SENDER_EMAIL:?Set GMAIL_SENDER_EMAIL in .env}
       GMAIL_APP_PASSWORD: ${GMAIL_APP_PASSWORD:?Set GMAIL_APP_PASSWORD in .env}
-    # No `ports:` — see the header. `expose` only documents the port for other containers on the shared networks.
+    # No `ports:` — see the header. `expose` only documents the port for other containers on the shared network.
     expose:
       - "3000"
     networks:
-      # This project's own network: gives the container outbound internet (Gmail SMTP, images.unsplash.com for next/image).
+      # This project's own network: gives the container outbound internet (Gmail SMTP, images.unsplash.com for next/image), which the
+      # CRM's network may not have.
       default: {}
-      # Shared with cloudflared. The alias is unique on purpose: the tunnel's Service URL is http://bft-web:3000.
-      edge:
+      # The CRM project's network. The alias is unique on purpose: the tunnel's Service URL is http://bft-web:3000 and the database is `db`.
+      crm_internal:
         aliases: [bft-web]
-      # The CRM database network. Used only to reach `db`.
-      crm_data: {}
     security_opt:
       - no-new-privileges:true
     cap_drop:
@@ -77,9 +79,6 @@ services:
 
 networks:
   default: {}
-  edge:
+  crm_internal:
     external: true
-    name: ${EDGE_NETWORK_NAME:-bft-edge}
-  crm_data:
-    external: true
-    name: ${CRM_DATA_NETWORK_NAME:-compass-tools_data}
+    name: ${CRM_NETWORK_NAME:-compass-tools_internal}

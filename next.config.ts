@@ -78,6 +78,10 @@ const nextConfig: NextConfig = {
   // src/app/blog/[slug]/page.tsx) rather than being sent to an unrelated page.
   async redirects() {
     return [
+      // Canonical host. Behind Cloudflare Tunnel the apex arrives with its original Host header; send it to www, keeping path and
+      // query string (Next passes the query through). Only the exact apex matches (escaped dot, anchored): www, localhost and the
+      // internal name the tunnel health probes use are never redirected, so there is no loop and the container health check is unaffected.
+      { source: "/:path*", has: [{ type: "host" as const, value: "^businessflights\\.travel$" }], destination: "https://www.businessflights.travel/:path*", permanent: true },
       { source: "/blog/airport-lounge-guide-for-executives", destination: "/blog/business-class-airport-lounge-guide", permanent: true },
       { source: "/blog/business-class-travel-tips", destination: "/blog/long-haul-business-class-travel-tips", permanent: true },
       { source: "/blog/best-airlines-for-business-class-routes", destination: "/blog/best-business-class-airlines-long-haul", permanent: true },
