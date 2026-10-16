@@ -301,7 +301,8 @@ This is consistent with memory exhaustion, not a logic defect, but it is **not p
 
 - `npx tsc --noEmit`, `npx eslint .`, `npx prisma validate` (schema unchanged): clean. Plain `npm run build` and `NEXT_OUTPUT=standalone npm run build`: succeed.
 - `npm run test:infra` (Infrastructure project, 1 worker, real PostgreSQL 17.10 available): **93 passed, 0 failed**, 178 s. Free memory dipped to 461 MB of 7.7 GB even serially (sampled every 2 s), which supports the memory-pressure explanation in 12.3.
-- Browser projects (`--workers=2`, production build): **STARTED BUT NOT COMPLETED when this was written; no result is claimed.** Re-run: `TEST_BASE_URL=http://127.0.0.1:3200 npm run test:ui` against `next start -p 3200`.
+- Browser projects (4 viewport projects, `--workers=2`, plain production build under `next start -p 3200`, 208 s): **1080 passed, 4 skipped, 0 failed, 0 flaky, no worker crashes.** Sampled free memory reached 0 MB at some sample (possibly a sampling artifact, not investigated) — memory is tight on this machine, so 2 workers is the recommended setting here.
+- Not re-run in this final form: the earlier 3-worker, 4-project single run (1335 passed / 4 crashes); the current split (93 + 1080 + 4 skipped) replaces it.
 - Docker, Compose CLI and the VPS: not available, not tested (12.2).
 
 ## 13. Outstanding owner decisions and blockers
