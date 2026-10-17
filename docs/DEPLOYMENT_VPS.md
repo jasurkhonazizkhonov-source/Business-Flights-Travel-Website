@@ -97,6 +97,28 @@ not an outage; (c) `docker compose down` is never used by any website script.
 Verification that Docker DNS does what this document claims (service DNS names, aliases, `bft-web` reachable from `cloudflared`) **could not be run here**; it is
 step 8.6 below, run by the owner after deploying and before adding any tunnel route.
 
+### 4.1 What can reach what (Docker reachability is not authentication, and neither is authorization)
+
+Declarations (as written in this branch's `compose.yaml` and as reported from the VPS): the website service is attached to **two** networks — its own project `default` network (outbound internet for Gmail SMTP and `images.unsplash.com`; nothing else joins it) and the CRM's existing `compass-tools_internal`, where it carries the single alias `bft-web`. It publishes no host port. On `compass-tools_internal` the reported members are `app`, `db` and `cloudflared`. (In the CRM's git source the layout is different — `db` on an `internal: true` network named `data`, `cloudflared` on `web`; the live VPS file is not in git, so the reported single network is what this branch follows.)
+
+| Direction | Docker reachability | What actually protects it |
+|---|---|---|
+| website → `db:5432` | yes, required | PostgreSQL password authentication as `bft_web` (its own credential, in `.env` only) and then the role's privileges (7.2). TLS per D9. The website does not hold the CRM's database owner/superuser password. |
+| website → `app:3000` (CRM web app) | **yes — not needed by the website** | The CRM's own authentication (its coverage was not audited here) and the shared-secret guard on `/api/cron/*` (`CRON_SECRET`, per the CRM's Compose file). A compromised website could probe these but holds no CRM credential. |
+| website → `cloudflared` | yes, but the connector exposes no listener to peers (its metrics bind to its own loopback, `127.0.0.1:2000`) | nothing to reach |
+| website → internet | yes (own `default` network) | needed for Gmail SMTP and image optimisation; also what a compromised process could use to exfiltrate — the reason the role is least-privilege |
+| `app` → `bft-web:3000` | yes | the website has **no login and no admin surface**: everything it serves is public by design, so reachability gives the CRM app nothing new. The one real effect: a peer on this network can set `CF-Connecting-IP` itself, so the IP/location recorded for a lead (and an IP-keyed rate limit) can be falsified **from inside the network** — it cannot make the website do anything the public internet cannot. |
+| `cloudflared` → `bft-web:3000` | yes — this is the intended public path | Cloudflare; hostname routing (section 5) |
+| `db` → `bft-web` | yes in principle | PostgreSQL does not initiate connections; only a superuser can (`COPY … PROGRAM`) |
+
+So the network adds one capability to a peer (forging the visitor IP) and exposes the CRM app to a compromised website only as far as the CRM's own authentication holds. The **database role** — not the network — is the control that matters, which is why 7.2 is narrowed as far as it is.
+
+Smallest practical risk reductions consistent with the current architecture, in order (none is implemented here, none touches the CRM stack):
+1. *Already in the branch, no action:* least-privilege role + `CONNECTION LIMIT 8`, no published port, `cap_drop: ALL`, `no-new-privileges`, root-owned application files, unique alias with a preflight collision check, CRM-container fingerprint check around every deploy.
+2. *Owner-run SQL, optional (P2 in 7.2):* per-role `statement_timeout`, `idle_in_transaction_session_timeout`, `lock_timeout`, so a stuck website session cannot hold locks the CRM needs.
+3. *Code-shape change, optional, needs approval (P1 in 7.2):* the role stops being able to read stored IPs, inquiry messages and tokens.
+4. *Needs your approval and a CRM-stack change (D2):* the structural fix is a dedicated network that only `db` (and `cloudflared`) and the website share, so the website cannot reach `app` and `app` cannot reach the website. The CRM's own `feature/website-lead-api` branch already follows this pattern (a fixed-name `internal: true` network for the website API). Recommended **after** the first successful deployment rather than as a blocker; it would be a change to the CRM project, so it is not made here.
+
 ## 5. Cloudflare Tunnel: owner-controlled routes
 
 The tunnel receives its ingress remotely; editing the CRM's Compose file changes nothing about routes. This branch does not edit tunnel configuration, never
@@ -185,16 +207,49 @@ Effective privileges that must result (the table is the expected output of the v
 | database | `CONNECT, TEMPORARY` (inherited from `PUBLIC`; session-local temp tables only) | |
 
 No table-wide `UPDATE`, no `DELETE`, no `TRUNCATE`, no DDL, no grants, no payment/booking/audit/Gmail/quote/task/attachment tables (42 refusals tested on a real server, including rewriting a lead's status/notes/contact, a queue entry's owner, a subscriber's e-mail, an airport code or a lead's stored IP).
-**Residual exposure needing owner approval (D3):** (a) the website can **read** whole `Contact`, `Lead` and related rows (de-duplication needs it); (b) it can insert rows and re-subscribe an existing subscriber; (c) `Airport` name/city/country are overwritten on each submission by the site's data — a design choice inherited from the Vercel deployment that the CRM owner may prefer to drop;
-(d) the default `TEMPORARY` privilege. Narrowing (a) needs code changes (`select` lists) and, long term, the CRM-API integration.
+**Residual exposure — exactly what the website role can still READ (needs owner approval, D3).** Writes are fully narrowed (no table-wide `UPDATE`, no `DELETE`, nothing outside the lists above). Reads are not, because the code reads rows back and Prisma returns every column of a created row unless a `select` is given:
+
+| Readable in full today | Sensitive content | Needed by the existing behaviour? |
+|---|---|---|
+| `LeadSubmissionInfo` | **every lead's raw IP address and approximate location** (the CRM gates and masks these; the database role bypasses that gate) | **No** — written only; `save-submission-info.ts` ignores the returned row |
+| `ContactInquiry` | all customer messages, names, e-mails, phones | **No** — `inquiry.id` only |
+| `Subscriber` | the whole mailing list incl. `unsubscribeToken` | Only `id, companyId, email, status` (lookup + re-signup) |
+| `Activity`, `Notification`, `LeadStatusHistory` | CRM activity descriptions/metadata, agent notifications naming customers | **No** — created, results unused |
+| `Lead` | notes, budget, preferences, offers, status of every lead | Only `id, assignedAgentId, contactId` (dedupe check, queue claim, notification title) |
+| `Contact`, `ContactEmail`, `ContactPhone` | the customer directory | Only to **find** an existing contact by e-mail/phone (`WHERE` needs `primaryEmail, primaryPhone, email, number, companyId`), plus `id, firstName, lastName` for the notification title — this lookup can never be fully hidden |
+| `LeadQueueEntry` | staff queue state (account ids, counts) | Yes (queue claim) |
+
+**Proposed — NOT implemented, awaiting approval (P1): make the read side match the need.** The change is purely the *shape* of the queries, not behaviour: add `select: { id: true }` to the seven `create`/`upsert` calls whose result is unused or only `.id` is used (`submit-contact-message.ts:78,93`, `lead-distribution.ts:79,88`, `contact.ts:45`, `subscribe-newsletter.ts:57`, `save-submission-info.ts:43`), narrow the two reads (`lead-distribution.ts:76`: `select` the contact's id/first/last name; `contact.ts:41`: `select: { id: true }`), and replace the table-level `SELECT` grants on the rows above with `INSERT` plus column-level `SELECT` on the columns in the right-hand column. Dedupe, airport updates, queue assignment, notifications and e-mails behave identically (same statements, fewer returned columns). After it the role could no longer read stored IPs, inquiry messages, activity/notification text, lead notes/budgets or unsubscribe tokens; it could still enumerate customer e-mails/phones/names and subscriber e-mails (inherent to dedupe).
+Test plan: the existing real-PostgreSQL proof (`scripts/verify-runtime-role-pg.ts`) already runs every one of these paths as the restricted role and would fail on any missing privilege; its expected-privilege table and refusal list would be extended (e.g. `SELECT ip FROM "LeadSubmissionInfo"` → denied). Estimated size: ~10 changed lines of code, ~15 grant lines. **Not required** by the "no modification beyond intended operations" requirement (that is met); it is a confidentiality improvement. Recommended before go-live if the owner wants the database role not to bypass the CRM's IP-reveal control.
+**Proposed — owner-run SQL only (P2):** `ALTER ROLE bft_web SET statement_timeout = '15s'; ALTER ROLE bft_web SET idle_in_transaction_session_timeout = '15s'; ALTER ROLE bft_web SET lock_timeout = '5s';` — bounds how long a stuck website session can hold locks the CRM needs. No code change.
+Also noted, not changed: `Airport` name/city/country are overwritten from the site's canonical data on each submission (inherited behaviour; now column-limited) and the default `TEMPORARY` privilege.
 
 ### 7.3 TLS: verified is the target; plaintext is a recorded exception
 
 - **Preferred and recommended: verified TLS** — `DATABASE_SSL_CA` (the CA that signed the PostgreSQL server certificate) or `DATABASE_SSL_VERIFY=system`. The certificate chain **and name** are checked, and the name check is bound to the host in `DATABASE_URL`, including IP-literal hosts
   (without that binding the `pg` driver checks an IP-literal connection against the name "localhost": reproduced against a real server and fixed). Tested end to end on PostgreSQL 17 with TLS: right CA connects (server confirms an encrypted session); wrong CA, a name the certificate is not valid for, and every URL-parameter downgrade attempt are refused.
 - **The default is not acceptable for this deployment.** With nothing set the code keeps the historical behaviour (encrypted, server **not** verified; Vercel/Aiven setups depend on it). On the VPS the compose file therefore has **no default** and `deploy/preflight.sh` refuses to continue unless `.env` makes one explicit choice.
-- **What the CRM actually does on the VPS (evidence).** Your note says the CRM uses verified PostgreSQL TLS. The CRM's own Compose file (branches `feature/website-lead-api` and `feature/local-upload-storage`) connects to `db` with `DATABASE_SSL_MODE: disable` and its documentation says "the server in the container does not offer TLS" (reproduced there). If the live deployment differs, check on the VPS:
-  `docker exec compass-tools-db-1 sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "show ssl; select ssl from pg_stat_ssl where pid = pg_backend_pid();"'` — `off` means the server cannot offer TLS and verified TLS needs a server certificate first.
+- **TLS reconciliation — what the sources say, and what is still unknown about production.** Two statements were in circulation; only one is supported by source:
+  1. *"The CRM Compose file uses `DATABASE_SSL_MODE=disable`."* **Matches the source.** In the CRM clone, `compose.yaml` on every branch that has one (`feature/website-lead-api`, `feature/local-upload-storage`) sets `DATABASE_SSL_MODE: disable` and `?sslmode=disable` for `app` and `tools` (lines 90–91 and 203–215 depending on branch); the `db` service is the stock `postgres:17.11-bookworm` image with no `ssl=on` and no certificate; the CRM's deployment document says "the server in the container does not offer TLS" and records that this was reproduced.
+  2. *"The CRM uses verified PostgreSQL TLS."* **Not supported by any tracked CRM file.** Verified TLS exists in the CRM's code (`DATABASE_SSL_CA` / `DATABASE_SSL_VERIFY=system`) but no tracked compose or env file sets either, and the CRM's own security document says verification is "available but **off by default**" even for the managed database. It may be true of a different (managed-database) deployment.
+  
+  **Unknown — source cannot answer these:** the live `/home/ubuntu/apps/Compass-Tools/compose.yaml` (it demonstrably differs from git: the VPS network is `compass-tools_internal`, git has `data` + `web`, and the CRM's document says the VPS-only TLS change was never committed); whether the live PostgreSQL has `ssl=on` and a certificate; and what the live CRM sessions actually negotiate. **Do not infer any of this from source.**
+  
+  **Smallest safe next step — read-only, no restart, no configuration change, no secrets printed.** In increasing detail; the first one usually settles it:
+  1. Ask the running CRM what it believes. Its health endpoint reports `databaseTls` as `verified`, `unverified` or `disabled` (CRM document, "Card vault & readiness"): `curl -s http://127.0.0.1:3000/api/health` on the VPS (the app is bound to loopback only; the endpoint may redact fields without a session).
+  2. Ask the server what it can do: `show ssl;` tells whether the live PostgreSQL has TLS switched on (`off` = it cannot offer TLS today; turning it on needs a certificate and a restart, i.e. a CRM-project change).
+     ```bash
+     docker exec -i compass-tools-db-1 sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atc "show ssl; show ssl_cert_file;"'     # paths only, never key material
+     ```
+  3. See what the connected clients really negotiate (this works only through `pg_stat_ssl` for the *client sessions*; a `psql` run inside the container uses the local socket and never shows TLS, so it proves nothing):
+     ```bash
+     printf '%s\n' "select coalesce(a.usename,'?') as role, a.client_addr is not null as tcp, coalesce(s.ssl,false) as tls from pg_stat_activity a left join pg_stat_ssl s using (pid) where a.backend_type = 'client backend' and a.pid <> pg_backend_pid() order by 1;" \
+       | docker exec -i compass-tools-db-1 sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -At'     # prints role / over-TCP / TLS; no addresses or credentials
+     ```
+  4. Only if needed: the CRM app's TLS-related settings without credentials: `docker exec compass-tools-app-1 sh -c 'echo "mode=${DATABASE_SSL_MODE:-unset} verify=${DATABASE_SSL_VERIFY:-unset} ca=$([ -n "$DATABASE_SSL_CA" ] && echo set || echo unset)"'`.
+  
+  Interpretation: `show ssl = on` and the CRM clients show `tls = t` → verified (or at least encrypted) TLS to `db` is possible and the website should use `DATABASE_SSL_CA`. `show ssl = off` → verified TLS to `db` is impossible until the CRM owner enables it; the website's choices are exactly D9. The branch changes none of this: it keeps the TLS decision **mandatory and explicit** (no default; preflight refuses to continue) and URL parameters cannot downgrade verification.
+
 - **Decision D9 (owner):** (1) enable TLS on the CRM's PostgreSQL (server certificate whose name includes `db`, `ssl=on`; a change in the CRM project) and give the website `DATABASE_SSL_CA` — recommended; or (2) record an explicit exception to run plaintext over the private Docker network with `DATABASE_SSL_MODE=disable`, as the CRM itself does today. Disabling TLS is never "to simplify deployment": it is acceptable only for that approved, private, no-published-port connection, and `preflight.sh` prints a warning every time.
 - `DATABASE_SSL_MODE=disable` is accepted only if the value is exactly `disable`; the host is exactly `db`, `localhost`, `127.0.0.1` or `::1`; the URL carries no `host=`/`hostaddr=` and no `ssl*`/`sslmode` parameter; and `DATABASE_SSL_CA`/`VERIFY` are unset (conflicts are refused at start-up and in preflight). Host spellings tested as refused: trailing dot, percent-encoded names, multi-host lists, `user@host` confusion, IPv4-mapped IPv6, short/decimal IPv4, socket paths, key/value strings, look-alike names; the tests compare the decision with what the real `pg` parser connects to.
 - `pg` lets connection-string parameters override explicit options (`?ssl=0` would silently replace a verified setup), so both connection paths strip every `ssl*` URL parameter and `src/lib/db-tls.ts` is the single source of truth. **Behaviour change:** a `DATABASE_URL` that carried e.g. `sslrootcert=` or `ssl=true` no longer has them honoured — use `DATABASE_SSL_CA`/`DATABASE_SSL_VERIFY`.
@@ -414,7 +469,7 @@ On the VPS, additionally (read-only, section 4 and 8.6): confirm the real networ
 
 - **D1** Database location: is the live CRM database now the `db` container (PostgreSQL 17), with all data moved? Not assumed. A remote database needs `DATABASE_SSL_CA`, no `compass-tools_internal` dependency, and a small compose edit.
 - **D2** Accept joining the CRM's shared, flat network (this branch's design, per the reported topology), or have the CRM project add a dedicated network for the website (a change in the CRM repository).
-- **D3** Create `bft_web` and approve the privileges in 7.2 (whole-table `SELECT` on the contact/lead tables, the four column-level `UPDATE` lists, whether the site should keep overwriting `Airport` names, default `TEMPORARY`); choose the password; confirm which role owns CRM migrations.
+- **D3** Create `bft_web` and approve the privileges in 7.2 (the four column-level `UPDATE` lists; the residual READ exposure and whether to adopt **P1** — the role stops reading stored IPs, inquiry messages, notes and unsubscribe tokens — and **P2** — role-level timeouts; whether the site should keep overwriting `Airport` names; default `TEMPORARY`); choose the password; confirm which role owns CRM migrations.
 - **D9** Database TLS (7.3): enable TLS on the CRM's PostgreSQL and use `DATABASE_SSL_CA` (recommended), or record an explicit plaintext exception for the private Docker network (what the CRM's own Compose file does today). The deployment cannot start without one of the two being written into `.env`.
 - **D4** Who coordinates CRM migrations with website releases (7.6), and who re-runs the verification report afterwards.
 - **D5** Canonical host `www` (as declared) and routes for both hostnames (section 5).
@@ -422,6 +477,43 @@ On the VPS, additionally (read-only, section 4 and 8.6): confirm the real networ
 - **D7** Enable Cloudflare "Add visitor location headers"; privacy-policy wording and retention for IP/location; whether the CRM shows the IP unmasked.
 - **D8** The CRM's authenticated lead API (separate task, awaiting the contract): this branch writes leads directly to the database, exactly as the Vercel deployment did.
 - **Blockers for a safe first deployment:** Docker image/Compose/network behaviour unverified (12.2); a verified database backup and restore test (8.3); D1 and D3; the owner-run Docker-network checks (8.6); DNS/mail evidence (11).
+
+## 13a. Readiness checklist, by who can perform each step
+
+Nothing in column A proves Docker, Compose, the Docker network, the live PostgreSQL, Cloudflare or e-mail behaviour: a stub `docker`, a local build or a PostgreSQL test cannot. Items are in the order they must happen.
+
+**A. Completed by Claude on a Windows development machine (evidence, not production proof)**
+1. Git: local = remote = the reviewed HEAD, clean tree, `main` untouched and an ancestor.
+2. `tsc`, `eslint`, `prisma validate`, `prisma generate` with no URL/`.env`, plain and standalone `next build`: pass.
+3. Real PostgreSQL 17.10 (disposable, no Docker): grants applied twice; effective-privilege report equals 7.2; 42 refusals; concurrent submissions, queue claims and locking; one connection pool per process.
+4. Real TLS-enabled PostgreSQL 17.10: right CA/name connects; wrong CA, wrong name and every URL downgrade attempt refused; plaintext only when explicit.
+5. Standalone server in a container-like layout (no `.env`, no source) against PostgreSQL 17: health probe, apex redirect, three real form submissions with Cloudflare headers, forged headers ignored.
+6. Deploy scripts under bash against a **stub** `docker`: preflight refusals, TLS-decision gate, collision check, CRM-fingerprint check, rollback-target rule, allow-list of every docker command. Proves script logic only.
+7. Infrastructure project 97/97, browser projects 1080 passed / 4 skipped, both on the current checkout.
+
+**B. Requires an isolated Docker host (a separate Linux machine; commands in 12.5) — NOT DONE**
+1. `docker compose config` renders; exactly one service `bft-web`; no published ports; the external network is declared.
+2. `docker build` succeeds (this also proves `npm ci` on Debian bookworm, `sharp`, `prisma generate`).
+3. The container starts, becomes `healthy`, runs as a non-zero uid; application files are not writable by it, `.next/cache` is; no `.env` inside; no mounts.
+4. Alias and DNS: `bft-web` resolves on the throw-away network; a throw-away `postgres:17` container with alias `db` is reachable; the real role/grants SQL (7.2) applied to it; one real form submission end to end.
+5. The restore drill (8.3 step 2) once against a throw-away database, to prove the commands themselves work.
+
+**C. Must be performed on the VPS (read-only first; nothing here changes production) — NOT DONE**
+1. Topology: `docker compose ls`, `docker network ls`, `docker network inspect compass-tools_internal`, `docker inspect` of the three containers' aliases (section 4); confirm `db` alias, no `bft-web` alias, `db` publishes no port.
+2. TLS reconciliation (7.3): the CRM `/api/health` `databaseTls`, `show ssl;`, `pg_stat_ssl` for client sessions, the CRM app's TLS variables.
+3. `docker exec compass-tools-app-1 node --version` against the image pin; free disk/memory; the Compose v2 plugin is installed.
+4. Verified backup + restore drill (8.3) — database and uploads, with timestamps.
+5. Owner creates the role and applies the grants (7.2), runs the verification report.
+6. `deploy/preflight.sh`, then `deploy/deploy.sh`; owner-run network checks in 8.6 (the connector reaches `bft-web:3000`).
+7. Capture the current tunnel configuration; add the two published routes; check both hostnames, a 404 URL, the apex redirect, and that `compass-tools.com` is unchanged.
+8. One real test lead and one contact message through the public site; confirm lead, IP/location, queue assignment and the notification e-mail in the CRM.
+
+**D. Decisions that need your explicit approval before the corresponding step**
+- D9 (before C.6): database TLS — enable TLS on the CRM PostgreSQL and use `DATABASE_SSL_CA`, **or** a recorded plaintext exception. Decided after C.2.
+- D1 (before C.5): is the live CRM data in the `db` container now?
+- D3 (before C.5): the role's privileges in 7.2, including whether to adopt **P1** (stop the role reading stored IPs/messages/tokens; ~10 lines of code) and **P2** (role-level timeouts; SQL only).
+- D2: accept the shared flat network for the first deployment (recommended), with the dedicated-network change scheduled afterwards as a CRM-project change.
+- D4–D8: migration coordination owner; canonical host; mail provider/DNS evidence; Cloudflare location headers and IP-privacy wording; the CRM lead-API integration (separate task).
 
 ## 14. Updating the base image
 
