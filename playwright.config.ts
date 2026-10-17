@@ -17,6 +17,7 @@ const INFRASTRUCTURE_SPECS = [
   /deploy-scripts\.spec\.ts$/,
   /db-tls-driver\.spec\.ts$/,
   /db-tls-real-pg\.spec\.ts$/,
+  /rate-limit-actions-e2e\.spec\.ts$/,
   /vps-deployment\.spec\.ts$/,
 ];
 const VIEWPORT_PROJECTS = ["Desktop Chrome", "Mobile 320", "Mobile 375", "Mobile 390"];

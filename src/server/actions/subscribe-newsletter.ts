@@ -4,6 +4,7 @@ import { randomUUID } from "crypto";
 import { headers } from "next/headers";
 import { prisma } from "@/lib/prisma";
 import { checkRateLimit } from "@/lib/rate-limit";
+import { rateLimitClientKey } from "@/lib/rate-limit-client";
 import { describeDbError, describeDatabaseTarget } from "@/lib/db-error";
 import { newsletterSchema, type NewsletterInput } from "@/lib/validations/newsletter";
 import { getCrmCompanyId } from "@/server/crm-company";
@@ -18,7 +19,7 @@ export type SubscribeNewsletterResult = { ok: true; alreadySubscribed: boolean }
 // campaign tooling with no separate import/sync step.
 export async function subscribeToNewsletter(input: NewsletterInput): Promise<SubscribeNewsletterResult> {
   const headerList = await headers();
-  const ip = headerList.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
+  const ip = rateLimitClientKey(headerList);
 
   const { allowed } = checkRateLimit(`newsletter:${ip}`, 6);
   if (!allowed) {

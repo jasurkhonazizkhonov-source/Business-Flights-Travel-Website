@@ -4,6 +4,7 @@ import { headers } from "next/headers";
 import { after } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { checkRateLimit } from "@/lib/rate-limit";
+import { rateLimitClientKey } from "@/lib/rate-limit-client";
 import { isSpamSubmission } from "@/lib/anti-spam";
 import { describeDbError, describeDatabaseTarget } from "@/lib/db-error";
 import { normalizePhoneNumber } from "@/lib/phone";
@@ -71,7 +72,7 @@ async function afterResponse(task: () => Promise<unknown>, label: string): Promi
 
 export async function submitFlightRequest(input: FlightRequestInput): Promise<SubmitFlightRequestResult> {
   const headerList = await headers();
-  const ip = headerList.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
+  const ip = rateLimitClientKey(headerList);
 
   const { allowed } = checkRateLimit(`flight-request:${ip}`, 8);
   if (!allowed) {
