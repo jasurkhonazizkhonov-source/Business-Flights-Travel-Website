@@ -122,7 +122,7 @@ function sandbox(state: State, opts: { dirty?: boolean } = {}) {
   cpSync(path.join(repo, "deploy"), path.join(root, "deploy"), { recursive: true });
   cpSync(path.join(repo, "compose.yaml"), path.join(root, "compose.yaml"));
   writeFileSync(path.join(root, ".gitignore"), ".env\n");
-  writeFileSync(path.join(root, ".env"), "DATABASE_URL=postgresql://x:y@db:5432/z\nGMAIL_SENDER_EMAIL=a@example.com\nGMAIL_APP_PASSWORD=not-a-real-password\n");
+  writeFileSync(path.join(root, ".env"), "DATABASE_URL=postgresql://x:y@db:5432/z\nGMAIL_SENDER_EMAIL=a@example.com\nGMAIL_APP_PASSWORD=not-a-real-password\nDATABASE_SSL_MODE=disable\n");
   chmodSync(path.join(root, ".env"), 0o600);
   const git = (...a: string[]) => spawnSync("git", ["-c", "user.name=t", "-c", "user.email=t@example.com", ...a], { cwd: root, encoding: "utf8" });
   git("init", "-q");
@@ -242,6 +242,37 @@ test.describe("deploy scripts, dry-run against a stub docker", () => {
     allCalls.push(...s.calls());
   });
 
+  test("preflight requires an EXPLICIT database TLS decision: none, conflicting or invalid values are refused; verified TLS passes quietly; plaintext warns", () => {
+    const base = "DATABASE_URL=postgresql://x:y@db:5432/z\nGMAIL_SENDER_EMAIL=a@example.com\nGMAIL_APP_PASSWORD=not-a-real-password\n";
+    const run = (tls: string) => {
+      const s = sandbox(baseState());
+      writeFileSync(path.join(s.root, ".env"), base + tls);
+      chmodSync(path.join(s.root, ".env"), 0o600);
+      const r = s.run("preflight.sh");
+      allCalls.push(...s.calls());
+      return r;
+    };
+    let r = run("");
+    expect(r.code).not.toBe(0);
+    expect(r.out).toMatch(/makes no database TLS decision/);
+    r = run("DATABASE_SSL_CA=-----BEGIN CERTIFICATE-----\\nAAA\\n-----END CERTIFICATE-----\n");
+    expect(r.code, r.out).toBe(0);
+    expect(r.out).toContain("verified TLS is configured");
+    expect(r.out).not.toContain("PLAINTEXT");
+    expect(r.out).not.toContain("BEGIN CERTIFICATE"); // the certificate text is never echoed
+    r = run("DATABASE_SSL_VERIFY=system\n");
+    expect(r.code, r.out).toBe(0);
+    r = run("DATABASE_SSL_MODE=disable\n");
+    expect(r.code, r.out).toBe(0);
+    expect(r.out).toMatch(/WARN: DATABASE_SSL_MODE=disable: PLAINTEXT/);
+    r = run("DATABASE_SSL_MODE=disable\nDATABASE_SSL_VERIFY=system\n");
+    expect(r.code).not.toBe(0);
+    expect(r.out).toMatch(/conflicts with DATABASE_SSL_CA/);
+    r = run("DATABASE_SSL_MODE=require\n");
+    expect(r.code).not.toBe(0);
+    expect(r.out).toMatch(/must be exactly 'disable' or unset/);
+  });
+
   test("deploy.sh: preflight, build and start ONLY bft-web, wait healthy, verify, and prove no other container changed", () => {
     const s = sandbox(baseState());
     const r = s.run("deploy.sh");
@@ -272,6 +303,17 @@ test.describe("deploy scripts, dry-run against a stub docker", () => {
     expect(r.code, r.out).toBe(0);
     expect(r.out).toContain("previous image kept as business-flights-web:previous (business-flights-web:abc1234)");
     expect(s.calls().some((c) => c[0] === "tag" && c[1] === "business-flights-web:abc1234" && c[2] === "business-flights-web:previous")).toBe(true);
+    allCalls.push(...s.calls());
+  });
+
+  test("deploy.sh does NOT retag :previous from an unhealthy running container (a second attempt after a failed deploy must not poison the rollback target)", () => {
+    const st = baseState();
+    st.containers[SITE] = { id: "broken", startedAt: "2026-10-11T00:00:00Z", aliases: ["bft-web"], image: "business-flights-web:badbad1", health: "unhealthy" };
+    st.images = ["business-flights-web:badbad1", "business-flights-web:previous"];
+    const s = sandbox(st);
+    const r = s.run("deploy.sh");
+    expect(r.out).toMatch(/not healthy: business-flights-web:previous was NOT updated/);
+    expect(s.calls().some((c) => c[0] === "tag")).toBe(false);
     allCalls.push(...s.calls());
   });
 

@@ -10,13 +10,14 @@ import { defineConfig, devices } from "@playwright/test";
 // "Infrastructure" project, which runs ONCE and only after the viewport projects have finished. For the most predictable memory use run
 // it alone:  npm run test:infra   (one worker).
 const INFRASTRUCTURE_SPECS = [
-  /schema-guard.*.spec.ts$/,
-  /schema-init-e2e.spec.ts$/,
-  /runtime-role.*.spec.ts$/,
-  /self-hosted-e2e.spec.ts$/,
-  /deploy-scripts.spec.ts$/,
-  /db-tls-driver.spec.ts$/,
-  /vps-deployment.spec.ts$/,
+  /schema-guard.*\.spec\.ts$/,
+  /schema-init-e2e\.spec\.ts$/,
+  /runtime-role.*\.spec\.ts$/,
+  /self-hosted-e2e\.spec\.ts$/,
+  /deploy-scripts\.spec\.ts$/,
+  /db-tls-driver\.spec\.ts$/,
+  /db-tls-real-pg\.spec\.ts$/,
+  /vps-deployment\.spec\.ts$/,
 ];
 const VIEWPORT_PROJECTS = ["Desktop Chrome", "Mobile 320", "Mobile 375", "Mobile 390"];
 

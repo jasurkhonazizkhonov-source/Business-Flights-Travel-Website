@@ -17,6 +17,20 @@ for key in DATABASE_URL GMAIL_SENDER_EMAIL GMAIL_APP_PASSWORD; do
 done
 ok "required variables are present (values not shown)"
 
+say "Database TLS is an explicit decision (preferred: verified)"
+tls_ca="$(env_value DATABASE_SSL_CA)"; tls_verify="$(env_value DATABASE_SSL_VERIFY)"; tls_mode="$(env_value DATABASE_SSL_MODE)"
+if [ -n "${tls_mode}" ] && { [ -n "${tls_ca}" ] || [ -n "${tls_verify}" ]; }; then
+  die "DATABASE_SSL_MODE conflicts with DATABASE_SSL_CA / DATABASE_SSL_VERIFY in .env (the application would refuse to start). Keep one."
+elif [ -n "${tls_ca}" ] || [ -n "${tls_verify}" ]; then
+  ok "verified TLS is configured (certificate and host name are checked)"
+elif [ "${tls_mode}" = "disable" ]; then
+  warn "DATABASE_SSL_MODE=disable: PLAINTEXT to the database. Acceptable only as a recorded owner exception for the private Docker network (docs/DEPLOYMENT_VPS.md, 7.3)."
+elif [ -n "${tls_mode}" ]; then
+  die "DATABASE_SSL_MODE must be exactly 'disable' or unset (got a different value)."
+else
+  die ".env makes no database TLS decision. Set DATABASE_SSL_CA (preferred) or DATABASE_SSL_VERIFY=system, or - as a recorded exception - DATABASE_SSL_MODE=disable. An unset value would mean 'encrypted but the server is not verified'."
+fi
+
 say "Rendered compose configuration"
 compose config -q || die "compose configuration is invalid"
 if compose config | grep -qE '^\s+(ports|published):'; then die "the rendered configuration publishes a host port - it must not"; fi

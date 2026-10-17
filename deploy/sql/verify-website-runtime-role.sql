@@ -33,6 +33,15 @@ SELECT object, kind, privileges FROM (
       OR has_column_privilege(:'role', c.oid, a.attnum, 'UPDATE'))
   GROUP BY c.relname
   UNION ALL
+  -- column-level UPDATE / INSERT on tables where the role has no such privilege on the table as a whole
+  SELECT c.relname::text, 'column-update', string_agg(a.attname::text, ',' ORDER BY a.attnum)
+  FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+  JOIN pg_attribute a ON a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped
+  WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p')
+    AND NOT has_table_privilege(:'role', c.oid, 'UPDATE')
+    AND has_column_privilege(:'role', c.oid, a.attnum, 'UPDATE')
+  GROUP BY c.relname
+  UNION ALL
   SELECT c.relname::text, 'sequence',
          concat_ws(',',
            CASE WHEN has_sequence_privilege(:'role', c.oid, 'USAGE')  THEN 'USAGE' END,

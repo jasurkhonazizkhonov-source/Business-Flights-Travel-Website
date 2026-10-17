@@ -234,6 +234,9 @@ test.describe("container files (static checks; Docker itself was not available t
   test("compose: trust and schema settings are fixed, and every secret is a ${VAR} reference (no literal credential)", () => {
     expect(compose).toMatch(/TRUSTED_PROXY: cloudflare/);
     expect(compose).toMatch(/DATABASE_AUTO_INIT: "false"/); // the website never creates or alters schema
+    // TLS has NO default in compose: plaintext can never be selected by omission (deploy/preflight.sh demands an explicit choice).
+    expect(compose).toContain("DATABASE_SSL_MODE: ${DATABASE_SSL_MODE:-}");
+    expect(compose.split("\n").filter((l) => !l.trim().startsWith("#")).join("\n")).not.toMatch(/DATABASE_SSL_MODE:[^\n]*disable/);
     expect(compose).toMatch(/DATABASE_URL: \$\{DATABASE_URL:\?/);
     expect(compose).toMatch(/GMAIL_APP_PASSWORD: \$\{GMAIL_APP_PASSWORD:\?/);
     expect(compose).not.toMatch(/postgresql:\/\/[^\s$]*:[^\s$@]+@/); // no literal user:password@ URL
@@ -267,6 +270,11 @@ test.describe("container files (static checks; Docker itself was not available t
     expect(grants).not.toMatch(/(UPDATE|INSERT|DELETE|ALL)[^;]*"Account"/);
     expect(grants).not.toMatch(/GRANT[^;]*\b(DELETE|TRUNCATE|ALL PRIVILEGES)\b/i);
     // Account and Company are readable only by the columns the website uses; no default privileges, no sequence except Airport's.
+    // UPDATE is column-level only (no table-wide UPDATE anywhere), and Airport / LeadSubmissionInfo are never updated.
+    expect(grants).not.toMatch(/GRANT[^;(]*\bUPDATE\b[^;(]*\bON\b/i);
+    expect(grants).toMatch(/GRANT UPDATE \("assignedAgentId", "queueDistributedAt", "updatedAt"\) ON "Lead"/);
+    expect(grants).not.toMatch(/UPDATE[^;]*ON "LeadSubmissionInfo"/);
+    expect(grants).toContain('GRANT UPDATE ("name", "city", "country") ON "Airport"'); // exactly the three columns submit-flight-request.ts syncs
     expect(grants).toContain('GRANT SELECT ("id", "role") ON "Account"');
     expect(grants).toContain('GRANT SELECT ("id") ON "Company"');
     expect(grants).not.toMatch(/ALTER DEFAULT PRIVILEGES|GRANT[^;]*ALL SEQUENCES|GRANT[^;]*ALL TABLES|TO\s+PUBLIC|WITH GRANT OPTION|GRANT[^;]*\bCREATE\b/i);

@@ -91,8 +91,9 @@ test.describe("database TLS: agreement with the real pg driver and URL-override 
   test("a remote database keeps TLS: default unchanged, verified when a CA or the system store is configured", () => {
     const remote = "postgresql://u:p@db-1234.example.aivencloud.com:12345/x";
     expect(resolveDatabaseSsl({ DATABASE_URL: remote })).toEqual({ rejectUnauthorized: false }); // historical default, deliberately unchanged
-    expect(resolveDatabaseSsl({ DATABASE_URL: remote, DATABASE_SSL_VERIFY: "system" })).toEqual({ rejectUnauthorized: true });
-    expect(resolveDatabaseSsl({ DATABASE_URL: remote, DATABASE_SSL_CA: CA })).toEqual({ rejectUnauthorized: true, ca: CA });
+    // Verified modes also carry a certificate-name check bound to the real host (see the next test).
+    expect(resolveDatabaseSsl({ DATABASE_URL: remote, DATABASE_SSL_VERIFY: "system" })).toMatchObject({ rejectUnauthorized: true, checkServerIdentity: expect.any(Function) });
+    expect(resolveDatabaseSsl({ DATABASE_URL: remote, DATABASE_SSL_CA: CA })).toMatchObject({ rejectUnauthorized: true, ca: CA, checkServerIdentity: expect.any(Function) });
   });
 
   test("the URL cannot override the decision: its ssl* parameters are removed before the driver sees them", () => {
@@ -102,12 +103,36 @@ test.describe("database TLS: agreement with the real pg driver and URL-override 
       const stripped = databaseConnectionString(url);
       expect(stripped, param).not.toMatch(/ssl|uselibpqcompat/i);
       const cp = new ConnectionParameters({ connectionString: stripped, ssl: resolveDatabaseSsl({ DATABASE_URL: url, DATABASE_SSL_CA: CA }) });
-      expect(cp.ssl, param).toEqual({ rejectUnauthorized: true, ca: CA });
+      expect(cp.ssl, param).toMatchObject({ rejectUnauthorized: true, ca: CA });
     }
     // Why the strip exists: left in the URL, `?ssl=0` really does replace a verified configuration with plaintext inside pg.
     expect(new ConnectionParameters({ connectionString: `${remote}?ssl=0`, ssl: { rejectUnauthorized: true, ca: CA } }).ssl).toBe(false);
     // Other parameters and the credentials are untouched.
     expect(databaseConnectionString("postgresql://u:p%40q@db:5432/x?application_name=bft&sslmode=require")).toBe("postgresql://u:p%40q@db:5432/x?application_name=bft");
+  });
+
+  test("verified TLS binds the certificate NAME check to the real host - including IP-literal hosts, where pg alone would check \"localhost\"", () => {
+    type Check = (servername: string, cert: Record<string, unknown>) => Error | undefined;
+    const identity = (url: string) => (resolveDatabaseSsl({ DATABASE_URL: url, DATABASE_SSL_CA: CA }) as unknown as { checkServerIdentity: Check }).checkServerIdentity;
+    const cert = (san: string) => ({ subject: { CN: "ignored-when-san-present" }, subjectaltname: san });
+    // A DNS name: the certificate must list it, whatever server name the driver passes (the argument is ignored on purpose).
+    expect(identity("postgresql://u:p@db:5432/x")("anything", cert("DNS:db"))).toBeUndefined();
+    expect(identity("postgresql://u:p@db:5432/x")("db", cert("DNS:localhost"))).toBeInstanceOf(Error);
+    expect(identity("postgresql://u:p@DB:5432/x")("db", cert("DNS:db"))).toBeUndefined(); // host names are case-insensitive
+    // An IP literal (IPv4 and bracketed IPv6): matched against IP SANs, never against "localhost".
+    expect(identity("postgresql://u:p@127.0.0.1:5432/x")("localhost", cert("DNS:localhost"))).toBeInstanceOf(Error);
+    expect(identity("postgresql://u:p@127.0.0.1:5432/x")("localhost", cert("DNS:localhost, IP Address:127.0.0.1"))).toBeUndefined();
+    expect(identity("postgresql://u:p@[::1]:5432/x")("localhost", cert("DNS:localhost"))).toBeInstanceOf(Error);
+    // A percent-encoded host is decoded exactly as the driver decodes it.
+    expect(identity("postgresql://u:p@d%62:5432/x")("x", cert("DNS:db"))).toBeUndefined();
+    expect(identity("postgresql://u:p@d%62:5432/x")("x", cert("DNS:other"))).toBeInstanceOf(Error);
+    // A host= / hostaddr= parameter would make the connection target differ from the verified name: refused in verified modes.
+    for (const q of ["?host=evil.example", "?hostaddr=203.0.113.9", "?HOST=evil.example"]) {
+      expect(() => resolveDatabaseSsl({ DATABASE_URL: `postgresql://u:p@db:5432/x${q}`, DATABASE_SSL_CA: CA }), q).toThrow(/Verified TLS cannot be combined with a host=/);
+    }
+    // No parsable URL: nothing to bind to (the server-name check of the driver applies); the unverified default carries no check at all.
+    expect(resolveDatabaseSsl({ DATABASE_SSL_CA: CA })).toEqual({ rejectUnauthorized: true, ca: CA });
+    expect(resolveDatabaseSsl({ DATABASE_URL: "postgresql://u:p@db/x" })).toEqual({ rejectUnauthorized: false });
   });
 
   test("both connection paths use the single TLS source, and nothing in src weakens TLS globally", () => {

@@ -36,12 +36,22 @@ GRANT SELECT ("id", "role") ON "Account" TO :"role";
 GRANT SELECT ON "_prisma_migrations" TO :"role";
 
 -- Rows the website creates (INSERT) and reads back (SELECT; Prisma returns the created row; contact de-duplication reads Contact*).
-GRANT SELECT, INSERT ON "Lead", "LeadStatusHistory", "Activity", "Contact", "ContactEmail", "ContactPhone", "ContactInquiry", "Notification", "LeadSubmissionInfo" TO :"role";
+GRANT SELECT, INSERT ON "Lead", "LeadStatusHistory", "Activity", "Contact", "ContactEmail", "ContactPhone", "ContactInquiry", "Notification" TO :"role";
 
--- Rows it also changes: queue assignment, newsletter re-subscribe, the airports it upserts, the lead's own submission details.
-GRANT UPDATE ON "Lead", "LeadSubmissionInfo" TO :"role";
-GRANT SELECT, INSERT, UPDATE ON "Subscriber", "Airport" TO :"role";
-GRANT SELECT, UPDATE ON "LeadQueueEntry" TO :"role";
+-- Rows it also changes - COLUMN-level UPDATE only, the exact columns the code writes, so a compromised website cannot rewrite
+-- a lead's status/contact/notes, change who owns a queue entry, or touch another subscriber field:
+--   Lead            queue claim:          assignedAgentId, queueDistributedAt (+ updatedAt, which Prisma sets on every update)
+--   LeadQueueEntry  queue claim:          lastAssignedAt, leadsAssignedCount (+ updatedAt)
+--   Subscriber      newsletter re-signup: status, subscribedAt, unsubscribedAt (+ updatedAt)
+--   Airport         airport sync:         name, city, country (submit-flight-request.ts keeps existing rows in step with the site's canonical airport data)
+-- LeadSubmissionInfo is only ever INSERTed (its upsert has an empty update), so it gets NO UPDATE at all.
+GRANT UPDATE ("assignedAgentId", "queueDistributedAt", "updatedAt") ON "Lead" TO :"role";
+GRANT SELECT ON "LeadQueueEntry" TO :"role";
+GRANT UPDATE ("lastAssignedAt", "leadsAssignedCount", "updatedAt") ON "LeadQueueEntry" TO :"role";
+GRANT SELECT, INSERT ON "Airport", "LeadSubmissionInfo" TO :"role";
+GRANT UPDATE ("name", "city", "country") ON "Airport" TO :"role";
+GRANT SELECT, INSERT ON "Subscriber" TO :"role";
+GRANT UPDATE ("status", "subscribedAt", "unsubscribedAt", "updatedAt") ON "Subscriber" TO :"role";
 
 -- Airport.id is a serial column: inserting an airport the CRM does not have yet needs its sequence. No other sequence is used.
 GRANT USAGE ON SEQUENCE "Airport_id_seq" TO :"role";

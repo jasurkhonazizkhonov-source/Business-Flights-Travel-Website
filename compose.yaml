@@ -36,14 +36,17 @@ services:
       context: .
       target: runner
     restart: unless-stopped
+    # PID 1 is a tiny init (tini): correct SIGTERM handling for `docker stop` (graceful 20 s window) and zombie reaping.
+    init: true
     environment:
       HOSTNAME: 0.0.0.0
       PORT: "3000"
       # --- database: the CRM's PostgreSQL, over the private Docker network (see docs/DEPLOYMENT_VPS.md, "Database") ---
       DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL in .env (postgresql://<runtime role>:<password>@db:5432/<database>)}
-      # Plain TCP is correct ONLY on the private network and ONLY for the host `db`: src/lib/db-tls.ts refuses "disable" for any other
-      # host. For a remote/managed database unset this and set DATABASE_SSL_CA (verified TLS) instead.
-      DATABASE_SSL_MODE: ${DATABASE_SSL_MODE:-disable}
+      # TLS is an EXPLICIT owner decision with NO default here (docs/DEPLOYMENT_VPS.md, 7.3). Preferred: DATABASE_SSL_CA (server certificate AND
+      # host name verified). The exception DATABASE_SSL_MODE=disable (plaintext) is accepted by src/lib/db-tls.ts only for the host `db` and
+      # must be written into .env deliberately; deploy/preflight.sh refuses to continue if .env makes no TLS decision at all.
+      DATABASE_SSL_MODE: ${DATABASE_SSL_MODE:-}
       DATABASE_SSL_CA: ${DATABASE_SSL_CA:-}
       DATABASE_SSL_VERIFY: ${DATABASE_SSL_VERIFY:-}
       # The website must NEVER create or alter schema. The CRM owns the schema and its migrations. A value other than the exact string
@@ -70,7 +73,9 @@ services:
       - ALL
     tmpfs:
       - /tmp
-    mem_limit: 768m
+    # The V8 heap is capped at 768 MB (NODE_OPTIONS in the Dockerfile); the container limit leaves room for buffers, sharp/libvips and the
+    # runtime itself, so the cap triggers garbage collection before the kernel OOM-kills the container.
+    mem_limit: 1g
     cpus: 1.0
     pids_limit: 256
     stop_grace_period: 20s

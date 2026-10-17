@@ -109,11 +109,19 @@ async function main() {
   const report = (await owner.query(sub("verify-website-runtime-role.sql"))).rows as Array<{ object: string; kind: string; privileges: string }>;
   const actual = report.map((r) => `${r.kind}|${r.object}|${r.privileges}`).sort();
   const RW = "SELECT,INSERT";
+  // The report lists columns in table order; derive that order from the catalog so the expectation is the SET of columns, not a typo-prone string.
+  const inTableOrder = async (table: string, cols: string[]) =>
+    ((await owner.query(`SELECT attname FROM pg_attribute WHERE attrelid = $1::regclass AND attname = ANY($2) ORDER BY attnum`, [`"${table}"`, cols])).rows as Array<{ attname: string }>).map((r) => r.attname).join(",");
+  const AIRPORT_COLS = await inTableOrder("Airport", ["name", "city", "country"]);
+  const LEAD_COLS = await inTableOrder("Lead", ["assignedAgentId", "queueDistributedAt", "updatedAt"]);
+  const QUEUE_COLS = await inTableOrder("LeadQueueEntry", ["lastAssignedAt", "leadsAssignedCount", "updatedAt"]);
+  const SUB_COLS = await inTableOrder("Subscriber", ["status", "subscribedAt", "unsubscribedAt", "updatedAt"]);
   const expected = [
-    `table|Activity|${RW}`, `table|Airport|SELECT,INSERT,UPDATE`, `table|Contact|${RW}`, `table|ContactEmail|${RW}`, `table|ContactInquiry|${RW}`,
-    `table|ContactPhone|${RW}`, `table|Lead|SELECT,INSERT,UPDATE`, `table|LeadQueueEntry|SELECT,UPDATE`, `table|LeadStatusHistory|${RW}`,
-    `table|LeadSubmissionInfo|SELECT,INSERT,UPDATE`, `table|Notification|${RW}`, `table|Subscriber|SELECT,INSERT,UPDATE`, `table|_prisma_migrations|SELECT`,
-    `columns|Account|id,role`, `columns|Company|id`, `sequence|Airport_id_seq|USAGE`,
+    `table|Activity|${RW}`, `table|Airport|${RW}`, `table|Contact|${RW}`, `table|ContactEmail|${RW}`, `table|ContactInquiry|${RW}`,
+    `table|ContactPhone|${RW}`, `table|Lead|${RW}`, `table|LeadQueueEntry|SELECT`, `table|LeadStatusHistory|${RW}`,
+    `table|LeadSubmissionInfo|${RW}`, `table|Notification|${RW}`, `table|Subscriber|${RW}`, `table|_prisma_migrations|SELECT`,
+    `columns|Account|id,role`, `columns|Company|id`,
+    `column-update|Airport|${AIRPORT_COLS}`, `column-update|Lead|${LEAD_COLS}`, `column-update|LeadQueueEntry|${QUEUE_COLS}`, `column-update|Subscriber|${SUB_COLS}`, `sequence|Airport_id_seq|USAGE`,
     `schema|public|USAGE`, `database|${DB}|CONNECT,TEMPORARY`, `role-attributes|${ROLE}|LOGIN`,
   ].sort();
   results.effectivePrivileges = actual;
@@ -169,8 +177,8 @@ async function main() {
   // airports (insert path, then the existing-row path) — sequence access
   const mk = () =>
     Promise.all([
-      prisma.airport.upsert({ where: { iata: "SYD" }, create: { iata: "SYD", name: "Sydney Kingsford Smith", city: "Sydney", country: "Australia" }, update: {} }),
-      prisma.airport.upsert({ where: { iata: "LHR" }, create: { iata: "LHR", name: "Heathrow Airport", city: "London", country: "United Kingdom" }, update: {} }),
+      prisma.airport.upsert({ where: { iata: "SYD" }, create: { iata: "SYD", name: "Sydney Kingsford Smith", city: "Sydney", country: "Australia" }, update: { name: "Sydney Kingsford Smith", city: "Sydney", country: "Australia" } }),
+      prisma.airport.upsert({ where: { iata: "LHR" }, create: { iata: "LHR", name: "Heathrow Airport", city: "London", country: "United Kingdom" }, update: { name: "Heathrow Airport", city: "London", country: "United Kingdom" } }),
     ]);
   const [from, to] = await mk();
   await mk();
@@ -314,7 +322,14 @@ async function main() {
   await mustFail("delete lead", `DELETE FROM "Lead"`, /permission denied/);
   await mustFail("delete subscriber", `DELETE FROM "Subscriber"`, /permission denied/);
   await mustFail("delete contact", `DELETE FROM "Contact"`, /permission denied/);
-  await mustFail("update account", `UPDATE "Account" SET "role" = 'ADMIN'`, /permission denied/);
+  await mustFail("update lead status", `UPDATE "Lead" SET "status" = "status"`, /permission denied for table Lead/);
+  await mustFail("update lead contact", `UPDATE "Lead" SET "contactId" = "contactId"`, /permission denied for table Lead/);
+  await mustFail("update lead notes", `UPDATE "Lead" SET "notes" = 'x'`, /permission denied for table Lead/);
+  await mustFail("update queue owner", `UPDATE "LeadQueueEntry" SET "isActive" = false`, /permission denied for table LeadQueueEntry/);
+  await mustFail("update subscriber email", `UPDATE "Subscriber" SET "email" = 'x@example.com'`, /permission denied for table Subscriber/);
+  await mustFail("update airport code", `UPDATE "Airport" SET "iata" = 'ZZZ'`, /permission denied for table Airport/);
+  await mustFail("update submission info", `UPDATE "LeadSubmissionInfo" SET "ipAddress" = '1.1.1.1'`, /permission denied for table LeadSubmissionInfo/);
+  await mustFail("update account",  `UPDATE "Account" SET "role" = 'ADMIN'`, /permission denied/);
   await mustFail("insert account", `INSERT INTO "Account" ("id","fullName","email","updatedAt","companyId") VALUES ('x','x','y@example.com',now(),'c')`, /permission denied/);
   await mustFail("read account email", `SELECT "email" FROM "Account"`, /permission denied for table Account/);
   await mustFail("read account sessions", `SELECT "activeSessionId" FROM "Account"`, /permission denied for table Account/);

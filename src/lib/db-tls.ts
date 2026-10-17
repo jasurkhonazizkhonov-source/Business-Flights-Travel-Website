@@ -23,9 +23,11 @@
 //                        network.
 //
 // Nothing here ever returns or logs the certificate, host name or connection string.
+import { checkServerIdentity, type PeerCertificate } from "node:tls";
+
 /** What the resolver reads: process.env, or any plain object in a test. */
 export type EnvLike = Readonly<Record<string, string | undefined>>;
-export type DatabaseSsl = false | { rejectUnauthorized: boolean; ca?: string };
+export type DatabaseSsl = false | { rejectUnauthorized: boolean; ca?: string; checkServerIdentity?: (servername: string, cert: PeerCertificate) => Error | undefined };
 export type DatabaseTlsMode = "disabled" | "verified_ca" | "verified_system" | "unverified";
 
 /** .env / dashboard values often carry the PEM with literal "\n" sequences. */
@@ -105,6 +107,46 @@ function urlCarriesTlsParameters(env: EnvLike): boolean {
   return false;
 }
 
+/** The host name from DATABASE_URL exactly as the driver will use it (percent-decoded, IPv6 brackets removed), or undefined if there is no parsable URL. */
+function connectionTargetHost(env: EnvLike): string | undefined {
+  const url = env.DATABASE_URL?.trim();
+  if (!url) return undefined;
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return undefined; // never echo the value - it carries credentials
+  }
+  for (const key of parsed.searchParams.keys()) {
+    const name = key.toLowerCase();
+    if (name === "host" || name === "hostaddr") {
+      throw new Error("Verified TLS cannot be combined with a host= / hostaddr= parameter in DATABASE_URL: the certificate could not be tied to the host actually connected to. Remove the parameter.");
+    }
+  }
+  let host = parsed.hostname;
+  try {
+    host = decodeURIComponent(host);
+  } catch {
+    /* keep the raw value; the certificate check will simply fail */
+  }
+  return host.startsWith("[") && host.endsWith("]") ? host.slice(1, -1) : host;
+}
+
+/**
+ * Bind certificate NAME verification to the host actually connected to.
+ *
+ * The `pg` driver pre-connects a plain socket and hands it to TLS. For a DNS name it sets the TLS server name, so the name in the
+ * certificate is checked; for an IP-LITERAL host it sets none, and Node then falls back to checking the certificate against
+ * "localhost" - so a certificate that is valid for the CA but NOT for the address connected to was accepted (reproduced against a real
+ * server: CA-verified connection to 127.0.0.1 succeeded with a certificate valid only for the name "localhost"). Calling Node's own
+ * checkServerIdentity with the real host closes that gap for names (SAN DNS) and for IP addresses (SAN IP) alike.
+ */
+function withBoundIdentity(base: { rejectUnauthorized: boolean; ca?: string }, env: EnvLike): DatabaseSsl {
+  const host = connectionTargetHost(env);
+  if (!host) return base;
+  return { ...base, checkServerIdentity: (_servername: string, cert: PeerCertificate) => checkServerIdentity(host, cert) };
+}
+
 export function getDatabaseTlsMode(env: EnvLike = process.env): DatabaseTlsMode {
   if (sslModeSetting(env) === "disable") return "disabled";
   const ca = env.DATABASE_SSL_CA?.trim();
@@ -133,8 +175,8 @@ export function resolveDatabaseSsl(env: EnvLike = process.env): DatabaseSsl {
   }
 
   const mode = getDatabaseTlsMode(env);
-  if (mode === "verified_ca") return { rejectUnauthorized: true, ca: normalizePem(env.DATABASE_SSL_CA!) };
-  if (mode === "verified_system") return { rejectUnauthorized: true };
+  if (mode === "verified_ca") return withBoundIdentity({ rejectUnauthorized: true, ca: normalizePem(env.DATABASE_SSL_CA!) }, env);
+  if (mode === "verified_system") return withBoundIdentity({ rejectUnauthorized: true }, env);
   // A DATABASE_SSL_CA that is set but is not a PEM certificate must not be silently ignored.
   if (env.DATABASE_SSL_CA?.trim()) throw new Error("DATABASE_SSL_CA is set but is not a PEM certificate (expected -----BEGIN CERTIFICATE-----)");
   return { rejectUnauthorized: false };

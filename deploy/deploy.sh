@@ -15,9 +15,16 @@ BEFORE="$(others_fingerprint)"
 printf '%s\n' "${BEFORE}" | sed 's/^/  before: /' | cut -c1-110
 
 # Remember what is running now so rollback.sh can return to it.
+# Only a HEALTHY running container becomes the rollback target. Otherwise a second attempt after a failed deploy would overwrite
+# :previous with the broken image and "rollback.sh previous" would return to it.
 if docker inspect "${CONTAINER}" >/dev/null 2>&1; then
   prev="$(docker inspect -f '{{.Config.Image}}' "${CONTAINER}")"
-  docker tag "${prev}" business-flights-web:previous 2>/dev/null && ok "previous image kept as business-flights-web:previous (${prev})"
+  running_health="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "${CONTAINER}" 2>/dev/null || echo unknown)"
+  if [ "${running_health}" = "healthy" ]; then
+    docker tag "${prev}" business-flights-web:previous 2>/dev/null && ok "previous image kept as business-flights-web:previous (${prev})"
+  else
+    warn "the running website container is '${running_health}', not healthy: business-flights-web:previous was NOT updated (it still points at the last known-good image, if any)"
+  fi
 fi
 
 say "Building image (no secrets are used or baked in)"
