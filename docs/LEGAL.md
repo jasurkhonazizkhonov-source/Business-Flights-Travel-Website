@@ -4,7 +4,7 @@ The three legal pages (`/privacy-policy`, `/cookie-policy`, `/terms-of-service`)
 are drafted content, not finished legal documents. They were written to be
 structurally complete and consistent with what the site actually does today
 (the flight request form, the CRM integration described in
-`prisma/schema.prisma`, the cookies the site actually sets), but **no
+`docs/CRM_API_INTEGRATION.md`, the cookies the site actually sets), but **no
 attorney has reviewed them**, and they must not be published to real
 customers until one has.
 

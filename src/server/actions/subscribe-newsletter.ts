@@ -1,22 +1,20 @@
 "use server";
 
-import { randomUUID } from "crypto";
 import { headers } from "next/headers";
-import { prisma } from "@/lib/prisma";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { rateLimitClientKey } from "@/lib/rate-limit-client";
-import { describeDbError, describeDatabaseTarget } from "@/lib/db-error";
 import { newsletterSchema, type NewsletterInput } from "@/lib/validations/newsletter";
-import { getCrmCompanyId } from "@/server/crm-company";
-import { noteWriteFailure } from "@/server/schema-ready";
+import { postNewsletterSubscription } from "@/lib/crm-api/client";
+import { crmApiConfig } from "@/server/crm-api";
 
 export type SubscribeNewsletterResult = { ok: true; alreadySubscribed: boolean } | { ok: false; error: string };
 
-// Writes into the CRM's own Subscriber model (prisma/schema.prisma) — the
-// same table the CRM's marketing-campaign sender (MarketingCampaignSend)
-// already reads from — rather than a bespoke website-only table, so a
-// subscription captured here is immediately usable by the CRM's existing
-// campaign tooling with no separate import/sync step.
+// A newsletter sign-up becomes a Subscriber in the Compass Tools CRM - the table its marketing-campaign sender reads - through
+// POST /api/public/subscribe, the CRM's ONLY endpoint for this form today (UNauthenticated; see docs/CRM_API_INTEGRATION.md). The CRM owns the
+// duplicate handling: an address that unsubscribed earlier is re-subscribed, and a new address notifies the staff. The CRM's reply is just
+// { ok: true }, so unlike the old direct-database version this cannot tell the visitor "you're already on the list": a repeat sign-up is
+// simply confirmed as subscribed (`alreadySubscribed` stays in the type for the existing form and is always false).
+// There is NO database fallback.
 export async function subscribeToNewsletter(input: NewsletterInput): Promise<SubscribeNewsletterResult> {
   const headerList = await headers();
   const ip = rateLimitClientKey(headerList);
@@ -31,45 +29,26 @@ export async function subscribeToNewsletter(input: NewsletterInput): Promise<Sub
     return { ok: false, error: "Please enter a valid email address." };
   }
   if (parsed.data.website) {
-    // Honeypot tripped — behave as if it worked, don't tip off the bot.
+    // Honeypot tripped - behave as if it worked, don't tip off the bot.
     return { ok: true, alreadySubscribed: false };
   }
 
-  try {
-    const companyId = await getCrmCompanyId();
+  const api = crmApiConfig("public-inquiry", "newsletter");
+  if (!api.ok) return { ok: false, error: "We're sorry, something went wrong. Please try again." };
 
-    const existing = await prisma.subscriber.findUnique({
-      where: { companyId_email: { companyId, email: parsed.data.email } },
-    });
+  const outcome = await postNewsletterSubscription({ config: api.config, email: parsed.data.email, source: "website" });
+  if (outcome.status === "ok") return { ok: true, alreadySubscribed: false };
 
-    if (existing) {
-      if (existing.status === "SUBSCRIBED") {
-        return { ok: true, alreadySubscribed: true };
-      }
-      // Previously unsubscribed — a fresh signup re-activates the same
-      // record rather than erroring on the unique (companyId, email) key.
-      await prisma.subscriber.update({
-        where: { id: existing.id },
-        data: { status: "SUBSCRIBED", subscribedAt: new Date(), unsubscribedAt: null, updatedAt: new Date() },
-      });
-      return { ok: true, alreadySubscribed: false };
-    }
-
-    await prisma.subscriber.create({
-      data: {
-        companyId,
-        email: parsed.data.email,
-        status: "SUBSCRIBED",
-        source: "website",
-        unsubscribeToken: randomUUID(),
-        updatedAt: new Date(),
-      },
-    });
-
-    return { ok: true, alreadySubscribed: false };
-  } catch (err) {
-    noteWriteFailure(err);
-    console.error(`[subscribeToNewsletter] failed: ${describeDbError(err)} | db target: ${describeDatabaseTarget()}`, err);
-    return { ok: false, error: "We're sorry, something went wrong. Please try again." };
+  switch (outcome.status) {
+    case "rejected":
+      console.error(`[subscribeToNewsletter] the CRM rejected the sign-up (HTTP ${outcome.httpStatus})`);
+      break;
+    case "rate_limited":
+      console.error("[subscribeToNewsletter] the CRM rate-limited the website's call");
+      break;
+    case "unavailable":
+      console.error(`[subscribeToNewsletter] the CRM could not be reached (${outcome.reason}${outcome.httpStatus ? `, HTTP ${outcome.httpStatus}` : ""})`);
+      break;
   }
+  return { ok: false, error: "We're sorry, something went wrong. Please try again." };
 }

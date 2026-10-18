@@ -34,7 +34,7 @@ export interface FlightRequestSegment {
 }
 
 // Exactly the fields submit-flight-request.ts already has in hand after
-// persisting the Lead — nothing here is re-fetched from the database, and
+// the CRM accepted the Lead — nothing here is re-fetched from the CRM, and
 // nothing is invented: every field is either directly submitted by the
 // customer or a value the action itself just computed (phone, airports).
 export interface FlightRequestNotificationInput {

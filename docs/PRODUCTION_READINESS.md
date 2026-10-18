@@ -1,5 +1,11 @@
 # Production Readiness Report — Business Flights Travel
 
+> **Historical document (superseded in part).** This report was written in August 2026, when the website wrote to PostgreSQL directly through
+> Prisma. That is no longer true: since the API-only integration the website has **no database access** and sends every form to the Compass Tools CRM
+> over an authenticated HTTP API. Everything below about `DATABASE_URL`, Prisma, schema guards, migrations, database TLS or roles, and writing
+> `Lead` / `ContactInquiry` / `Subscriber` rows from the website describes the earlier design and is kept only as a record. For the current
+> design see `docs/CRM_API_INTEGRATION.md`, `docs/ENVIRONMENT.md` and `docs/DEPLOYMENT_VPS.md`.
+
 Five passes, 2026-08-28 through 2026-08-31. This report is honest about what
 was verified and how, and calls out what still needs a human decision or a
 production-only step. It does not claim "everything is complete" — see

@@ -11,7 +11,6 @@ import {
 } from "../src/lib/email/flight-request-notification";
 import type { Mailer, MailMessage } from "../src/lib/email/mailer";
 import { airportSchema, flightRequestSchema } from "../src/lib/validations/flight-request";
-import { deriveLeadId } from "../src/lib/submission-id";
 
 // Everything here exercises src/lib/email/flight-request-notification.ts
 // directly — it is deliberately dependency-free (pure template building) or
@@ -528,16 +527,17 @@ test.describe("submit-flight-request.ts call-site ordering (structural regressio
     expect(notifyIdx).toBeGreaterThan(antiSpamIdx);
   });
 
-  test("the notification call appears after the Lead (with its LEAD_CREATED activity, written in the same transaction) is created, and before the success return", () => {
-    const leadCreateIdx = source.indexOf("await createWebsiteLead(");
-    const activityInLeadIdx = source.indexOf('type: "LEAD_CREATED"');
+  test("the notification call appears after the CRM accepted the request, and before the success return", () => {
+    const crmCallIdx = source.indexOf("await postFlightInquiry(");
+    const acceptedIdx = source.indexOf('outcome.status !== "created" && outcome.status !== "duplicate"');
     const notifyIdx = source.indexOf("sendFlightRequestNotification(", source.lastIndexOf("afterResponse("));
     const successReturnIdx = source.lastIndexOf("return { ok: true, summary };");
-    expect(leadCreateIdx).toBeGreaterThan(-1);
-    expect(activityInLeadIdx).toBeGreaterThan(leadCreateIdx); // nested inside the Lead's create, not a separate later statement
-    expect(source).not.toContain("prisma.activity.create");
-    expect(notifyIdx).toBeGreaterThan(leadCreateIdx);
+    expect(crmCallIdx).toBeGreaterThan(-1);
+    expect(acceptedIdx).toBeGreaterThan(crmCallIdx);
+    expect(notifyIdx).toBeGreaterThan(acceptedIdx); // never for a request the CRM did not accept
     expect(successReturnIdx).toBeGreaterThan(notifyIdx);
+    // The website no longer writes the Lead itself.
+    expect(source).not.toMatch(/prisma|createWebsiteLead|\.activity\.create/);
   });
 
   test("the notification call has its own .catch() — a rejection can never propagate to the action's try/catch (which would otherwise turn a successful submission into the generic failure response)", () => {
@@ -560,17 +560,14 @@ test.describe("submit-flight-request.ts call-site ordering (structural regressio
     expect(notifyIdx - afterIdx).toBeLessThan(50); // the notification call is the thing after() wraps, not something unrelated
   });
 
-  test("the notification call does NOT appear inside the action's own catch block (never sent for a failed/rejected submission)", () => {
-    const catchBlockIdx = source.lastIndexOf("} catch (err) {");
+  test("a duplicate (a repeat of an already-received submission) returns success BEFORE the notification, and a failure never reaches it", () => {
+    const dupIdx = source.indexOf('if (outcome.status === "duplicate") return { ok: true, summary };');
     const notifyIdx = source.indexOf("sendFlightRequestNotification(");
-    expect(notifyIdx).toBeLessThan(catchBlockIdx); // notification call is in the try block, well before the catch
-  });
-
-  test("ensureSchemaReady() (schema/database readiness) runs before the notification call", () => {
-    const readyIdx = source.indexOf("ensureSchemaReady()");
-    const notifyIdx = source.indexOf("sendFlightRequestNotification(");
-    expect(readyIdx).toBeGreaterThan(-1);
-    expect(notifyIdx).toBeGreaterThan(readyIdx);
+    const failIdx = source.indexOf('if (outcome.status !== "created" && outcome.status !== "duplicate") {');
+    expect(dupIdx).toBeGreaterThan(-1);
+    expect(notifyIdx).toBeGreaterThan(dupIdx);
+    expect(failIdx).toBeGreaterThan(-1);
+    expect(notifyIdx).toBeGreaterThan(failIdx);
   });
 });
 
@@ -885,19 +882,11 @@ test.describe("input bounds on client-supplied airport text", () => {
   });
 });
 
-test.describe("server-side idempotency and request latency (structural + pure parts; the database behaviour is proven in tests/schema-init-e2e.spec.ts)", () => {
+test.describe("flight request idempotency (structural + pure parts; the HTTP behaviour is proven in tests/crm-api-client.spec.ts)", () => {
   const actionSource = fs.readFileSync(path.resolve(__dirname, "../src/server/actions/submit-flight-request.ts"), "utf8");
   const formSource = fs.readFileSync(path.resolve(__dirname, "../src/components/flight-form/FlightRequestForm.tsx"), "utf8");
 
-  test("deriveLeadId is deterministic, cuid-shaped, and different for every key", () => {
-    const a = deriveLeadId("7b1d2f64-0c9e-4a3b-8d55-1f0a9c3e2b10");
-    expect(a).toBe(deriveLeadId("7b1d2f64-0c9e-4a3b-8d55-1f0a9c3e2b10"));
-    expect(a).toMatch(/^c[0-9a-f]{24}$/);
-    expect(deriveLeadId("0d8c4a77-5e21-47aa-9b0c-6a1e3f9d8c21")).not.toBe(a);
-    expect(new Set(Array.from({ length: 500 }, () => deriveLeadId(crypto.randomUUID()))).size).toBe(500);
-  });
-
-  test("submissionId must be a UUID (it is hashed into a primary key) but stays optional", () => {
+  test("submissionId must be a UUID (it becomes the CRM's Idempotency-Key) but stays optional", () => {
     expect(flightRequestSchema.safeParse(validRequest()).success).toBe(true);
     expect(flightRequestSchema.safeParse({ ...validRequest(), submissionId: "7b1d2f64-0c9e-4a3b-8d55-1f0a9c3e2b10" }).success).toBe(true);
     for (const bad of ["x", "", "7b1d2f64-0c9e-4a3b-8d55", "'; DROP TABLE \"Lead\"; --", "7b1d2f64-0c9e-4a3b-8d55-1f0a9c3e2b10\n"]) {
@@ -910,38 +899,17 @@ test.describe("server-side idempotency and request latency (structural + pure pa
     expect(formSource).toMatch(/renderedAt,\s*submissionId,\s*\};/);
   });
 
-  test("the Lead is created through the idempotent helper with a derived id, and a duplicate returns success BEFORE queueing or notifying", () => {
-    const createIdx = actionSource.indexOf("await createWebsiteLead(");
-    const deriveIdx = actionSource.indexOf("deriveLeadId(data.submissionId)");
-    const dupIdx = actionSource.indexOf("if (created.duplicate) {");
-    const dupReturnIdx = actionSource.indexOf("return { ok: true, summary };", dupIdx);
-    const dupBlock = actionSource.slice(dupIdx, dupReturnIdx);
-    expect(createIdx).toBeGreaterThan(-1);
-    expect(deriveIdx).toBeGreaterThan(createIdx);
-    expect(dupIdx).toBeGreaterThan(deriveIdx);
-    // The duplicate path may only re-run the idempotent submission-info upsert —
-    // never the queue distribution or the notification email.
-    expect(dupBlock).toContain("saveSubmissionInfo()");
-    expect(dupBlock).not.toMatch(/distributeNewWebsiteLead|sendFlightRequestNotification/);
-    expect(actionSource.indexOf("distributeNewWebsiteLead(created.id)")).toBeGreaterThan(dupReturnIdx);
-    expect(actionSource.indexOf("sendFlightRequestNotification(")).toBeGreaterThan(dupReturnIdx);
+  test("the submission key is the CRM's Idempotency-Key (a fresh one only when the caller sent none), and the same key serves every retry inside the call", () => {
+    expect(actionSource).toContain("const idempotencyKey = data.submissionId ?? randomUUID();");
+    expect(actionSource).toMatch(/postFlightInquiry\(\{[\s\S]*?idempotencyKey,/);
+    // exactly one place mints a key, and it is outside any retry loop (the retries are inside postFlightInquiry, which is given the key)
+    expect(actionSource.match(/randomUUID\(\)/g)).toHaveLength(1);
   });
 
-  test("queue distribution runs in after() (not awaited inline), after the Lead exists, and its failure is caught and logged", () => {
-    const distIdx = actionSource.indexOf("distributeNewWebsiteLead(created.id)");
-    const afterIdx = actionSource.lastIndexOf("afterResponse(", distIdx);
-    const returnIdx = actionSource.lastIndexOf("return { ok: true, summary };");
-    expect(distIdx).toBeGreaterThan(-1);
-    expect(distIdx - afterIdx).toBeLessThan(60);
-    expect(actionSource).not.toMatch(/await distributeNewWebsiteLead\(/);
-    expect(actionSource.slice(distIdx, distIdx + 400)).toContain("distribution failed");
-    expect(returnIdx).toBeGreaterThan(distIdx);
-  });
-
-  test("the step-timing log line carries only numbers and fixed labels — no customer field is interpolated into it", () => {
-    const line = actionSource.split("\n").find((l) => l.includes("[submitFlightRequest] persisted in"))!;
+  test("the step log line carries only numbers and fixed labels - no customer field is interpolated into it", () => {
+    const line = actionSource.split("\n").find((l) => l.includes("[submitFlightRequest] accepted by the CRM in"))!;
     expect(line).toBeTruthy();
-    for (const field of ["data.", "email", "phone", "firstName", "lastName", "notes"]) expect(line).not.toContain(field);
+    for (const field of ["data.", "email", "phone", "firstName", "lastName", "notes", "idempotencyKey"]) expect(line).not.toContain(field);
   });
 });
 
@@ -997,13 +965,15 @@ test.describe("after() can never turn a saved request into a customer-facing err
     const helper = source.slice(source.indexOf("async function afterResponse("), source.indexOf("export async function submitFlightRequest("));
     expect(helper).toMatch(/try \{\s*after\(task\);\s*\} catch \(err\) \{[\s\S]*await task\(\);/);
   });
-  test("both best-effort tasks (queue distribution, internal notification) go through that helper and catch their own failures", () => {
-    // Three call sites — submission info (via saveSubmissionInfo), queue distribution, internal notification — plus the helper's own definition.
-    expect(source.match(/\bafterResponse\(/g)).toHaveLength(4);
-    expect(source.match(/await afterResponse\(/g)).toHaveLength(2);
-    expect(source.match(/await saveSubmissionInfo\(\)/g)).toHaveLength(2); // duplicate path + normal path
-    expect(source).toMatch(/distribution failed/);
-    expect(source).toMatch(/submission info not saved/);
+  test("the one best-effort task (the internal notification) goes through that helper, catches its own failure, and never runs for a duplicate", () => {
+    // The CRM now owns lead creation, queue distribution and the visitor record, so the website has ONE after-response task: the email. One call
+    // site plus the helper's own definition.
+    expect(source.match(/\bafterResponse\(/g)).toHaveLength(2);
+    expect(source.match(/await afterResponse\(/g)).toHaveLength(1);
     expect(source).toMatch(/internal notification email failed/);
+    expect(source).not.toMatch(/distribution failed|saveSubmissionInfo|distributeLead/);
+    // The duplicate branch returns before the email is queued.
+    expect(source.indexOf('outcome.status === "duplicate") return')).toBeGreaterThan(-1);
+    expect(source.indexOf('outcome.status === "duplicate") return')).toBeLessThan(source.indexOf("await afterResponse("));
   });
 });

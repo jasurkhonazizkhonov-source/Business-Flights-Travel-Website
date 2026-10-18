@@ -22,13 +22,19 @@ die()  { printf '  FAIL: %s\n' "$*" >&2; exit 1; }
 env_value() { grep -E "^$1=" "${ROOT}/.env" 2>/dev/null | head -n1 | cut -d= -f2- || true; }
 env_or_default() { local v; v="$(env_value "$1")"; printf '%s' "${v:-$2}"; }
 
-# "Name Id StartedAt" of every container on the shared CRM network EXCEPT this website's (read-only). deploy.sh records it before and
-# after a deploy and refuses to report success if it changed: that is the proof the CRM, PostgreSQL and the tunnel were not restarted.
+# The two external networks the website joins (names overridable in .env, defaults = the CRM's own).
+crm_api_network() { env_or_default CRM_API_NETWORK_NAME compass-tools-website-api; }
+tunnel_network()  { env_or_default TUNNEL_NETWORK_NAME compass-tools_web; }
+
+# "Name Id StartedAt" of every container on the networks the website shares with the CRM project EXCEPT this website's (read-only).
+# deploy.sh records it before and after a deploy and refuses to report success if it changed: that is the proof the CRM, PostgreSQL and the
+# tunnel were not restarted.
 others_fingerprint() {
   local net c
-  net="$(env_or_default CRM_NETWORK_NAME compass-tools_internal)"
-  for c in $(docker network inspect "${net}" -f '{{range .Containers}}{{.Name}} {{end}}'); do
-    [ "${c}" = "${CONTAINER}" ] && continue
-    docker inspect -f '{{.Name}} {{.Id}} {{.State.StartedAt}}' "${c}"
-  done | sort
+  for net in "$(crm_api_network)" "$(tunnel_network)"; do
+    for c in $(docker network inspect "${net}" -f '{{range .Containers}}{{.Name}} {{end}}'); do
+      [ "${c}" = "${CONTAINER}" ] && continue
+      docker inspect -f '{{.Name}} {{.Id}} {{.State.StartedAt}}' "${c}"
+    done
+  done | sort -u
 }

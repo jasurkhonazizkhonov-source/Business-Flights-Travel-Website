@@ -1,17 +1,18 @@
 # syntax=docker/dockerfile:1.7
 #
 # Business Flights Travel website — production image for the self-hosted deployment (OVHcloud VPS + Docker Compose + Cloudflare
-# Tunnel). See docs/DEPLOYMENT_VPS.md. Not used by the Vercel deployment.
+# Tunnel). See docs/DEPLOYMENT_VPS.md. The website has NO database: it talks to the Compass Tools CRM over HTTP
+# (docs/CRM_API_INTEGRATION.md).
 #
 # Stages
-#   deps     reproducible dependency install from package-lock.json (+ `prisma generate` via the project's postinstall)
+#   deps     reproducible dependency install from package-lock.json
 #   builder  `next build` with NEXT_OUTPUT=standalone
 #   runner   the production server: only the traced standalone output, non-root. THIS is the default (last) target.
 #
-# Build:   docker compose build web        (or: docker build -t business-flights-web .)
+# Build:   docker compose build bft-web        (or: docker build -t business-flights-web .)
 #
 # SECRETS: none are needed, accepted or baked in. The site's public origin (https://www.businessflights.travel) is a constant in
-# src/lib/constants.ts, so there is not even a build argument. Every secret (DATABASE_URL, GMAIL_APP_PASSWORD, ...) reaches the
+# src/lib/constants.ts, so there is not even a build argument. Every secret (CRM_API_KEY, GMAIL_APP_PASSWORD, ...) reaches the
 # container at RUN time from the protected .env file via compose.yaml. The build context must not contain .env or key files: see
 # .dockerignore (and the final check in the runner stage, which fails the build if one slipped in).
 
@@ -23,16 +24,15 @@ ARG NODE_IMAGE=node:24.21.0-bookworm-slim@sha256:d6aa754f16b3197301076f047b5def2
 FROM ${NODE_IMAGE} AS base
 WORKDIR /app
 ENV NEXT_TELEMETRY_DISABLED=1
-# ca-certificates: TLS to Gmail SMTP and to images.unsplash.com (next/image optimisation). openssl: used by the Prisma tooling during install.
+# ca-certificates: TLS to Gmail SMTP and to images.unsplash.com (next/image optimisation).
 RUN apt-get update \
- && apt-get install -y --no-install-recommends openssl ca-certificates \
+ && apt-get install -y --no-install-recommends ca-certificates \
  && rm -rf /var/lib/apt/lists/*
 
 # ---- deps -------------------------------------------------------------------------------------------------------------------
 FROM base AS deps
-# Only what `npm ci` and the postinstall `prisma generate` need, so this layer is cached until the lockfile or schema changes.
-COPY package.json package-lock.json prisma.config.ts ./
-COPY prisma ./prisma
+# Only what `npm ci` needs, so this layer is cached until the lockfile changes.
+COPY package.json package-lock.json ./
 RUN npm ci
 
 # ---- builder ----------------------------------------------------------------------------------------------------------------
@@ -40,9 +40,8 @@ FROM deps AS builder
 COPY . .
 ENV NEXT_OUTPUT=standalone \
     NODE_OPTIONS=--max-old-space-size=3072
-# No DATABASE_URL here, on purpose: the build never touches a database (pages are static; the Prisma client connects lazily).
-RUN npx prisma generate \
- && npm run build \
+# No CRM_API_* here, on purpose: the build never contacts the CRM (pages are static; the CRM is only called by the form server actions at run time).
+RUN npm run build \
  && test -f .next/standalone/server.js
 
 # ---- runner -----------------------------------------------------------------------------------------------------------------
@@ -64,7 +63,7 @@ COPY --from=deps /app/node_modules/@img ./node_modules/@img
 COPY --from=builder /app/scripts/healthcheck.mjs ./scripts/healthcheck.mjs
 # Next writes its image-optimisation and fetch caches under .next/cache at run time; it must be writable by the unprivileged user.
 RUN mkdir -p /app/.next/cache && chown -R node:node /app/.next/cache
-# This website stores NO files of its own (no uploads): there is deliberately no data volume. Customer data lives in PostgreSQL.
+# This website stores NO files and NO customer data of its own: there is deliberately no data volume and no database. Submissions go to the CRM.
 # Defence in depth: a local .env must never be present in the image (the build context excludes it; this fails the build if one slipped in).
 RUN ! find /app -maxdepth 2 \( -name '.env' -o -name '.env.*' \) ! -name '.env.example' | grep -q .
 USER node

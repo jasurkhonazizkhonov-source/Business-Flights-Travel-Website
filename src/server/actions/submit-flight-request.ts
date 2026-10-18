@@ -1,24 +1,21 @@
 "use server";
 
+import { randomUUID } from "node:crypto";
 import { headers } from "next/headers";
 import { after } from "next/server";
-import { prisma } from "@/lib/prisma";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { rateLimitClientKey } from "@/lib/rate-limit-client";
 import { isSpamSubmission } from "@/lib/anti-spam";
-import { describeDbError, describeDatabaseTarget } from "@/lib/db-error";
 import { normalizePhoneNumber } from "@/lib/phone";
 import { findAirportByIata } from "@/data/airports";
 import { flightRequestSchema, type FlightRequestInput } from "@/lib/validations/flight-request";
-import { distributeNewWebsiteLead } from "@/server/lead-distribution";
-import { resolveContact } from "@/server/contact";
-import { ensureSchemaReady, noteWriteFailure } from "@/server/schema-ready";
-import { sendFlightRequestNotification, formatBudget, type FlightRequestSegment } from "@/lib/email/flight-request-notification";
+import { sendFlightRequestNotification, type FlightRequestSegment } from "@/lib/email/flight-request-notification";
 import { captureSubmissionInfo } from "@/lib/submission-info";
-import { saveLeadSubmissionInfo } from "@/server/save-submission-info";
 import { gmailMailer } from "@/lib/email/mailer";
-import { deriveLeadId } from "@/lib/submission-id";
-import { createWebsiteLead } from "@/server/create-website-lead";
+import { postFlightInquiry } from "@/lib/crm-api/client";
+import { buildFlightInquiryBody } from "@/lib/crm-api/flight-inquiry";
+import { buildVisitorContextHeaders } from "@/lib/crm-api/visitor-context";
+import { crmApiConfig } from "@/server/crm-api";
 
 export type SubmitFlightRequestResult =
   | {
@@ -40,27 +37,9 @@ function friendlyError(message = "We're sorry, something went wrong while submit
   return { ok: false, error: message };
 }
 
-function formatSegmentsForNotes(input: FlightRequestInput): string {
-  // The CRM's Lead model (see prisma/schema.prisma) carries a single
-  // origin/destination + departure/return date — full multi-segment
-  // itineraries only get first-class storage once an agent builds a Quote
-  // (Itinerary/FlightSegment). Until then, the complete multi-city request
-  // is preserved here in structured, human-readable form so no detail the
-  // customer entered is lost before an agent turns it into a quote.
-  if (input.tripType !== "MULTI_CITY") return "";
-  const lines = input.segments.map(
-    (s, i) => `  ${i + 1}. ${s.from.iata} (${s.from.city}) -> ${s.to.iata} (${s.to.city}) on ${s.departureDate}`,
-  );
-  return `Multi-city itinerary requested:\n${lines.join("\n")}`;
-}
-
-// Runs best-effort work after the response. next/server's after() hands it to
-// the platform's waitUntil (Vercel keeps the function alive for it, up to the
-// page's maxDuration) and reports errors thrown inside the task — but it
-// throws SYNCHRONOUSLY at the call site where the platform provides no
-// waitUntil. That must never turn an already-saved request into an error for
-// the customer, so in that case the work runs before responding instead.
-// Every task passed in catches its own failures.
+// Runs best-effort work after the response. next/server's after() runs it once the response is sent and reports errors thrown inside the
+// task - but it throws SYNCHRONOUSLY at the call site where the platform provides no waitUntil. That must never turn an already-saved request
+// into an error for the customer, so in that case the work runs before responding instead. Every task passed in catches its own failures.
 async function afterResponse(task: () => Promise<unknown>, label: string): Promise<void> {
   try {
     after(task);
@@ -70,6 +49,13 @@ async function afterResponse(task: () => Promise<unknown>, label: string): Promi
   }
 }
 
+// The flight request is created by the Compass Tools CRM, through its authenticated website API (POST /api/v1/website/flight-inquiries; contract:
+// docs/CRM_API_INTEGRATION.md). The CRM owns everything about the Lead: contact matching, status and history, the creation activity, company
+// attribution, the itinerary legs, the visitor-details record and queue distribution. This website keeps only what is the website's own: the
+// public form's validation, rate limit and spam checks, the customer-facing result, and the internal notification email.
+//
+// There is NO database fallback. If the CRM cannot be reached the customer is told so and nothing is stored here; the same form keeps the
+// same submission key, so pressing "submit" again after the CRM is back is safe.
 export async function submitFlightRequest(input: FlightRequestInput): Promise<SubmitFlightRequestResult> {
   const headerList = await headers();
   const ip = rateLimitClientKey(headerList);
@@ -90,9 +76,7 @@ export async function submitFlightRequest(input: FlightRequestInput): Promise<Su
   }
   const data = parsed.data;
 
-  // Honeypot + timing check — see src/lib/anti-spam.ts for what this
-  // rejects and why (including the missing-renderedAt bug this guards
-  // against a regression of).
+  // Honeypot + timing check - see src/lib/anti-spam.ts for what this rejects and why.
   if (isSpamSubmission({ website: data.website, renderedAt: data.renderedAt, minFillMs: MIN_FORM_FILL_MS })) {
     return friendlyError();
   }
@@ -103,207 +87,82 @@ export async function submitFlightRequest(input: FlightRequestInput): Promise<Su
     return { ok: false, error: message, fieldErrors: { phone: message } };
   }
 
-  // What the server itself can tell about this request: the full IP address
-  // (only from the headers the platform in front of the app sets — never a
-  // form field) and the platform's approximate location. Unknown stays unknown.
+  // What this server itself can tell about the request: the full IP (only from the headers the platform in front of the app sets - never a
+  // form field) and the platform's approximate location. It goes to the CRM only inside the signed visitor context, and into the internal email.
   const { info: submissionInfo, ipUnavailable } = captureSubmissionInfo(headerList);
 
-  // Step timings (milliseconds only — never any customer data) go to the
-  // server log so a slow request can be attributed to a step instead of
-  // guessed at; the database is far from the function (see docs/ENVIRONMENT.md),
-  // so every sequential round trip counts.
   const startedAt = performance.now();
-  const timings: Record<string, number> = {};
-  let lapAt = startedAt;
-  const lap = (label: string) => {
-    const now = performance.now();
-    timings[label] = Math.round(now - lapAt);
-    lapAt = now;
+
+  // The airports are checked against the application-owned dataset (src/data/airports.ts) - the one the autocomplete offered them from - not
+  // against client-supplied name/city/country text. The CRM resolves the IATA codes itself.
+  const firstSegment = data.segments[0];
+  const [canonicalFrom, canonicalTo] = await Promise.all([findAirportByIata(firstSegment.from.iata), findAirportByIata(firstSegment.to.iata)]);
+  if (!canonicalFrom || !canonicalTo) {
+    return friendlyError("One of the selected airports could not be found. Please reselect your origin and destination.");
+  }
+
+  const api = crmApiConfig("flight-inquiry", "flight request");
+  if (!api.ok) return friendlyError();
+
+  // The submission key the form minted is the Idempotency-Key: every attempt of this submission - the automatic retry Next.js makes of a failed
+  // Server Action POST, a retry inside postFlightInquiry, the visitor pressing submit again - carries the same key, and the CRM turns them into
+  // ONE lead. A caller without a key (an older cached client bundle) gets a fresh one for this call only, which still makes the retries inside
+  // this call safe.
+  const idempotencyKey = data.submissionId ?? randomUUID();
+
+  const outcome = await postFlightInquiry({
+    config: api.config,
+    body: buildFlightInquiryBody(data, phone.e164),
+    idempotencyKey,
+    visitorHeaders: buildVisitorContextHeaders(submissionInfo, api.config.ingestSecret),
+  });
+  const ms = Math.round(performance.now() - startedAt);
+
+  if (outcome.status !== "created" && outcome.status !== "duplicate") {
+    // Fixed tags and codes only - never the request, the customer's details, the key, or the CRM's message text.
+    switch (outcome.status) {
+      case "misconfigured":
+        console.error(`[submitFlightRequest] the CRM refused the website's credential or route (HTTP ${outcome.httpStatus}); check CRM_API_URL / CRM_API_KEY and that the CRM is reached over its private network`);
+        break;
+      case "rejected":
+        console.error(`[submitFlightRequest] the CRM rejected the request (HTTP ${outcome.httpStatus}, ${outcome.code}${outcome.fieldPaths.length ? `, fields: ${outcome.fieldPaths.join(", ")}` : ""})`);
+        break;
+      case "unavailable":
+        console.error(`[submitFlightRequest] the CRM could not be reached after ${outcome.attempts} attempt(s) (${outcome.reason}${outcome.httpStatus ? `, HTTP ${outcome.httpStatus}` : ""}) in ${ms}ms`);
+        break;
+    }
+    if (outcome.status === "rejected" && outcome.httpStatus === 409) {
+      // The same submission key was already used for a DIFFERENT request (the visitor changed the form after an attempt whose answer was lost).
+      return friendlyError("We've already received a request from this page. Please reload the page to send a new one, or contact our travel specialists directly.");
+    }
+    return friendlyError();
+  }
+
+  const route = `${canonicalFrom.city} (${canonicalFrom.iata}) → ${canonicalTo.city} (${canonicalTo.iata})`;
+  const summary = {
+    tripType: data.tripType,
+    route,
+    departureDate: firstSegment.departureDate,
+    returnDate: data.returnDate,
+    passengers: data.adults + data.children + data.infants,
+    cabinClass: data.cabinClass,
   };
+  // Never the address itself - only whether one was captured and, if not, the value-free reason (see src/lib/client-ip.ts).
+  const ipStatus = submissionInfo.ip ? "captured" : `unavailable (${ipUnavailable ?? "unknown"})`;
+  console.info(
+    `[submitFlightRequest] accepted by the CRM in ${ms}ms (attempts: ${outcome.attempts}; visitor context ${api.config.ingestSecret ? "signed" : "not configured"}; ip ${ipStatus}; location ${submissionInfo.location ? "captured" : "unavailable"})${outcome.status === "duplicate" ? " - duplicate of an already-received submission" : ""}`,
+  );
 
-  try {
-    // This action writes Airport rows before it ever reaches getCrmCompanyId(),
-    // so the schema is verified here first (memoized per instance; see
-    // src/lib/schema-guard.ts). On an intentionally-new database with
-    // DATABASE_AUTO_INIT=true this initializes it and the request continues.
-    await ensureSchemaReady();
-    lap("schema");
+  // The CRM already has the request (a repeat of the same submission was answered as such): the customer gets the same success, but the team
+  // was already notified the first time, so no second email.
+  if (outcome.status === "duplicate") return { ok: true, summary };
 
-    const firstSegment = data.segments[0];
-
-    // Validate the submitted IATA codes against our own application-owned
-    // airport data (src/data/airports.ts) — the same dataset the
-    // autocomplete offered them from — rather than trusting client-supplied
-    // name/city/country text, or requiring the CRM's Postgres `Airport`
-    // table to already happen to contain these rows. `Lead` has a real
-    // foreign key to `Airport`, so a row still has to exist there; `upsert`
-    // creates it on demand (using our canonical data, not the client's) if
-    // this Postgres database hasn't seen this airport before, and keeps an
-    // existing row's name/city/country in sync with that same canonical
-    // data otherwise. This is what makes flight-request submission work
-    // against any compatible Postgres database — including a brand-new one
-    // with an empty `Airport` table — not just the specific instance that
-    // originally had it pre-seeded.
-    const [canonicalFrom, canonicalTo] = await Promise.all([
-      findAirportByIata(firstSegment.from.iata),
-      findAirportByIata(firstSegment.to.iata),
-    ]);
-    if (!canonicalFrom || !canonicalTo) {
-      return friendlyError("One of the selected airports could not be found. Please reselect your origin and destination.");
-    }
-
-    const [fromAirport, toAirport] = await Promise.all([
-      prisma.airport.upsert({
-        where: { iata: canonicalFrom.iata },
-        create: canonicalFrom,
-        update: { name: canonicalFrom.name, city: canonicalFrom.city, country: canonicalFrom.country },
-      }),
-      prisma.airport.upsert({
-        where: { iata: canonicalTo.iata },
-        create: canonicalTo,
-        update: { name: canonicalTo.name, city: canonicalTo.city, country: canonicalTo.country },
-      }),
-    ]);
-
-    lap("airports");
-
-    const contactId = await resolveContact({
-      firstName: data.firstName,
-      lastName: data.lastName,
-      e164Phone: phone.e164,
-      rawPhone: data.phone,
-      email: data.email,
-    });
-
-    // The Lead's `budget` column holds the NUMBER only. When the customer
-    // chose a currency other than USD, say so in the notes so the amount is
-    // never read as dollars by whoever opens the Lead.
-    const budgetNote =
-      data.budget !== undefined && data.budgetCurrency && data.budgetCurrency !== "USD"
-        ? `Budget entered by the customer: ${formatBudget(data.budget, data.budgetCurrency)} (the Budget field holds the number only; it is in ${data.budgetCurrency}, not USD).`
-        : "";
-    const notesParts = [data.notes?.trim(), formatSegmentsForNotes(data), budgetNote].filter(Boolean);
-
-    lap("contact");
-
-    // The Lead, its status history and its LEAD_CREATED activity are written
-    // in ONE transaction. When the form sent a submission key, the Lead's
-    // primary key is derived from it, so a retried/duplicated POST of the
-    // same submission lands on the same row instead of creating a second
-    // Lead (see src/lib/submission-id.ts and src/server/create-website-lead.ts).
-    const created = await createWebsiteLead(
-      prisma,
-      {
-        contactId,
-        departureAirportId: fromAirport.id,
-        arrivalAirportId: toAirport.id,
-        departureDate: new Date(firstSegment.departureDate),
-        returnDate: data.returnDate ? new Date(data.returnDate) : undefined,
-        tripType: data.tripType,
-        cabinClass: data.cabinClass,
-        adults: data.adults,
-        children: data.children,
-        infants: data.infants,
-        flexibleDates: data.flexibleDates,
-        preferredAirline: data.preferredAirline || undefined,
-        budget: data.budget,
-        notes: notesParts.length ? notesParts.join("\n\n") : undefined,
-        source: "WEBSITE",
-        priority: "MEDIUM",
-        status: "ATTEMPTING_TO_CONTACT",
-        LeadStatusHistory: {
-          create: [{ toStatus: "ATTEMPTING_TO_CONTACT" }],
-        },
-        Activity: {
-          create: [{ contactId, actorId: null, type: "LEAD_CREATED", description: "Lead created from the website flight request form" }],
-        },
-      },
-      data.submissionId ? deriveLeadId(data.submissionId) : undefined,
-    );
-    lap("lead");
-
-    const summary = {
-      tripType: data.tripType,
-      route: `${fromAirport.city} (${fromAirport.iata}) → ${toAirport.city} (${toAirport.iata})`,
-      departureDate: firstSegment.departureDate,
-      returnDate: data.returnDate,
-      passengers: data.adults + data.children + data.infants,
-      cabinClass: data.cabinClass,
-    };
-    // Never the address itself — only whether one was captured and, if not, the
-    // value-free reason (see src/lib/client-ip.ts).
-    const ipStatus = submissionInfo.ip ? "captured" : `unavailable (${ipUnavailable ?? "unknown"})`;
-    console.info(
-      `[submitFlightRequest] persisted in ${Math.round(performance.now() - startedAt)}ms (steps, ms: ${JSON.stringify(timings)}; ip ${ipStatus}; location ${submissionInfo.location ? "captured" : "unavailable"})${created.duplicate ? " — duplicate of an already-saved submission" : ""}`,
-    );
-
-    // What the server itself learned about the request (full IP + approximate
-    // location) is stored against the Lead for the CRM's permission-gated
-    // section. Best-effort and after the response: it is a separate table, so
-    // it can never block, fail or roll back the submission — if it cannot be
-    // saved (e.g. the CRM's migration has not reached this database yet) the
-    // category and the Lead id (an internal id, not customer data) are logged
-    // and the notification email still carries the values.
-    //
-    // It is an upsert with an empty update, so it is safe to run again for the
-    // same Lead: a retried POST of the same submission (the `duplicate` case
-    // below) therefore also attempts it, which heals a first attempt that
-    // failed, and can never create a second row or overwrite the first.
-    const saveSubmissionInfo = () =>
-      afterResponse(
-        () =>
-          saveLeadSubmissionInfo(prisma, created.id, submissionInfo, data.budget !== undefined ? data.budgetCurrency : undefined).then(
-            () => undefined,
-            (err) => console.error(`[submitFlightRequest] submission info not saved for lead ${created.id}: ${describeDbError(err)}`),
-          ),
-        "submission info",
-      );
-
-    // The same submission already saved this Lead (a retried or repeated
-    // POST): the customer's request IS saved, so they get the same success —
-    // but the Lead was already queued and announced the first time, so
-    // neither happens again (only the idempotent submission-info write may).
-    if (created.duplicate) {
-      await saveSubmissionInfo();
-      return { ok: true, summary };
-    }
-
-    await saveSubmissionInfo();
-
-    // Best-effort queue assignment. It is not needed for the customer's
-    // response (an unassigned Lead is simply picked up later by the CRM's own
-    // distributor), and it is the single largest block of sequential
-    // database round trips in this request — 9 to 15 of them, measured by
-    // replaying this exact code against a real engine — so it runs after the
-    // response instead of before it. A queue with nobody active in it, or a
-    // failure here, must never touch the customer's submission.
-    await afterResponse(
-      () =>
-      distributeNewWebsiteLead(created.id).then(
-        (r) => console.info(`[submitFlightRequest] lead distribution: ${r.assigned ? "assigned" : r.reason}`),
-        (err) => console.error("[submitFlightRequest] distribution failed", err),
-      ),
-      "lead distribution",
-    );
-
-    // Internal-only notification to the Business Flights Travel team — NOT
-    // the customer-facing response below, which is unchanged either way.
-    // Queued AFTER the Lead is already persisted, so an email failure can
-    // never roll back (or appear to roll back) a successful submission;
-    // sendFlightRequestNotification() itself never throws (see that file),
-    // and this still never fails the customer's response even if it did.
-    // Deferred via next/server's after() rather than awaited inline: the
-    // SMTP path has a real worst-case latency (connect timeout + one
-    // bounded retry, ~20s — see src/lib/email/mailer.ts) that must never
-    // make the customer's own request hang just because Gmail is slow or
-    // unreachable. after() still runs this to completion on the server
-    // (e.g. Vercel keeps the function alive for it) — it just never
-    // delays the response below.
-    const emailSegments: FlightRequestSegment[] = data.segments.map((seg, i) =>
-      i === 0 ? { from: fromAirport, to: toAirport, departureDate: seg.departureDate } : seg,
-    );
-    await afterResponse(
-      () =>
+  // Internal-only notification to the Business Flights Travel team - NOT the customer-facing response, which is unchanged either way. Queued
+  // AFTER the CRM has the lead, so an email failure can never roll back (or appear to roll back) a successful submission; it runs after the
+  // response because the SMTP path has a real worst-case latency (~20s, src/lib/email/mailer.ts) that must never make the customer wait.
+  const emailSegments: FlightRequestSegment[] = data.segments.map((seg, i) => (i === 0 ? { from: canonicalFrom, to: canonicalTo, departureDate: seg.departureDate } : seg));
+  await afterResponse(
+    () =>
       sendFlightRequestNotification(
         {
           firstName: data.firstName,
@@ -329,18 +188,8 @@ export async function submitFlightRequest(input: FlightRequestInput): Promise<Su
       ).catch((err) => {
         console.error("[submitFlightRequest] internal notification email failed", err);
       }),
-      "internal notification",
-    );
+    "internal notification",
+  );
 
-    return { ok: true, summary };
-  } catch (err) {
-    // Never leak DB/driver errors to the client — log full detail
-    // server-side only. The categorized line first makes the failure mode
-    // (connectivity vs. constraint vs. config vs. app bug — see
-    // src/lib/db-error.ts) scannable in Vercel's runtime logs without
-    // having to parse the full stack trace on the line after it.
-    noteWriteFailure(err);
-    console.error(`[submitFlightRequest] failed: ${describeDbError(err)} | db target: ${describeDatabaseTarget()}`, err);
-    return friendlyError();
-  }
+  return { ok: true, summary };
 }

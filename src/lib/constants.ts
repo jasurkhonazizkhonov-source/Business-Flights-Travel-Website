@@ -12,11 +12,11 @@ export const SITE_URL = "https://www.businessflights.travel";
 export const SITE_DESCRIPTION =
   "Business Flights Travel is a premium travel agency specializing in business-class, first-class, and international flights, with dedicated travel specialists handling every request personally.";
 
-// The CRM's Company row this website's leads/inquiries/subscribers are
-// written against is resolved dynamically at runtime, NOT hard-coded here —
-// see src/server/crm-company.ts for why (the CRM auto-generates a random
-// cuid per database, so any literal id here would only work against one
-// specific database and break database portability).
+// The CRM Company this website's inquiries and sign-ups are filed under is
+// configuration, NOT hard-coded here: CRM_COMPANY_ID (the CRM auto-generates
+// a random cuid per installation, so any literal id here would only work
+// against one specific CRM). Flight requests need none: the CRM fixes the
+// company from the API credential. See docs/CRM_API_INTEGRATION.md.
 
 export const CONTACT_PHONE_DISPLAY = "+1 415 777 7788";
 export const CONTACT_PHONE_E164 = "+14157777788";

@@ -4,19 +4,16 @@ import { defineConfig, devices } from "@playwright/test";
 // dev server (see docs comment in tests/redesign.spec.ts for what this
 // covers). Not wired into CI/build — run with `npx playwright test`
 // against an already-running `npm run dev` on port 3100.
-// Specs that are NOT about a viewport: each in-memory PostgreSQL (PGlite) instance is 150-200 MB, the self-hosted spec starts a whole
-// server, and the deploy-script spec runs bash. Running them once per viewport project (4x) multiplied that memory use and, together with
-// browsers and a Next server on an 8 GB machine, produced "worker process exited unexpectedly" crashes. They live in their own
-// "Infrastructure" project, which runs ONCE and only after the viewport projects have finished. For the most predictable memory use run
-// it alone:  npm run test:infra   (one worker).
+// Specs that are NOT about a viewport: the CRM-API specs run a local stand-in CRM, the self-hosted and rate-limit specs start a whole standalone
+// server, and the deploy-script spec runs bash. Running them once per viewport project (4x) would multiply that work, and together with browsers and a
+// Next server on an 8 GB machine it produced "worker process exited unexpectedly" crashes. They live in their own "Infrastructure" project, which runs
+// ONCE and only after the viewport projects have finished. Run it alone (the dependencies are the browser projects, which submit real forms):
+//   npm run test:infra   (= --project=Infrastructure --no-deps --workers=1)
 const INFRASTRUCTURE_SPECS = [
-  /schema-guard.*\.spec\.ts$/,
-  /schema-init-e2e\.spec\.ts$/,
-  /runtime-role.*\.spec\.ts$/,
+  /crm-api-client\.spec\.ts$/,
+  /crm-api-actions-e2e\.spec\.ts$/,
   /self-hosted-e2e\.spec\.ts$/,
   /deploy-scripts\.spec\.ts$/,
-  /db-tls-driver\.spec\.ts$/,
-  /db-tls-real-pg\.spec\.ts$/,
   /rate-limit-actions-e2e\.spec\.ts$/,
   /vps-deployment\.spec\.ts$/,
 ];

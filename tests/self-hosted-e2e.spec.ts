@@ -1,100 +1,47 @@
 import { test, expect, type Page } from "@playwright/test";
-import { execFileSync, spawn, type ChildProcess } from "node:child_process";
-import { cpSync, existsSync, mkdtempSync, mkdirSync, readdirSync, rmSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { existsSync, readdirSync } from "node:fs";
 import http from "node:http";
-import os from "node:os";
 import path from "node:path";
-import { Client } from "pg";
+import { standaloneBuildPresent, startStandalone, type StandaloneServer } from "./support/standalone-server";
+import { startStubCrm, type StubCrm } from "./support/stub-crm";
 
 // The SELF-HOSTED runtime, end to end, without Docker: the standalone server is copied into a container-like layout (no .env, no source),
-// started with the exact environment compose.yaml sets (TRUSTED_PROXY=cloudflare, DATABASE_SSL_MODE=disable, DATABASE_AUTO_INIT=false),
-// connected as the least-privilege role to a disposable PostgreSQL server, and driven through a real browser with Cloudflare-style headers.
+// started with the settings compose.yaml gives it (TRUSTED_PROXY=cloudflare and the CRM's URL / key - and NO database setting of any kind),
+// and driven through a real browser with Cloudflare-style headers. The CRM is a LOCAL stand-in that enforces the CRM's published contract
+// (tests/support/stub-crm.ts), so this proves what the website sends to the CRM and what the visitor sees - not the CRM itself.
 //
-// Needs: `NEXT_OUTPUT=standalone npm run build` first, and INTEGRATION_ADMIN_DATABASE_URL pointing at a disposable LOOPBACK server
-// (see tests/runtime-role-pg-e2e.spec.ts). Skipped, never "passed", without them. It cannot prove the Docker image or the Docker network.
-const repo = path.resolve(__dirname, "..");
-const adminUrl = process.env.INTEGRATION_ADMIN_DATABASE_URL;
-const standalone = path.join(repo, ".next", "standalone", "server.js");
+// Needs `NEXT_OUTPUT=standalone npm run build` first. Skipped, never "passed", without it. It cannot prove the Docker image or the Docker network.
 const PORT = 3231;
-const ROLE_PASSWORD = "e2e-" + Math.random().toString(36).slice(2);
-const ready = Boolean(adminUrl) && existsSync(standalone);
+const KEY = "sentinel-api-key-" + "0123456789abcdef".repeat(3);
+const INGEST = "sentinel-ingest-" + "fedcba9876543210".repeat(3);
+const COMPANY = "test-company";
 
 test.describe.configure({ mode: "serial" });
-test.describe("self-hosted runtime (standalone server, restricted DB role, Cloudflare headers)", () => {
-  test.skip(!ready, "needs INTEGRATION_ADMIN_DATABASE_URL and a standalone build (NEXT_OUTPUT=standalone npm run build)");
+test.describe("self-hosted runtime (standalone server, CRM API, Cloudflare headers)", () => {
+  test.skip(!standaloneBuildPresent(), "needs a standalone build (NEXT_OUTPUT=standalone npm run build)");
   test.setTimeout(180_000);
 
-  let server: ChildProcess | undefined;
-  let layout = "";
-  let logs = "";
-  let ownerUrl = "";
+  let crm: StubCrm;
+  let server: StandaloneServer;
 
   test.beforeAll(async () => {
-    const out = execFileSync(process.execPath, [path.join(repo, "node_modules", "tsx", "dist", "cli.mjs"), "scripts/prepare-self-hosted-e2e-db.ts"], {
-      cwd: repo,
-      encoding: "utf8",
-      env: { ...process.env, E2E_ROLE_PASSWORD: ROLE_PASSWORD, NODE_OPTIONS: "--no-deprecation" },
+    crm = await startStubCrm({ apiKey: KEY, companyId: COMPANY, ingestSecret: INGEST });
+    // The tests below POST real forms. They may only talk to a server THIS test started, positively identified (tests/support/standalone-server.ts).
+    server = await startStandalone({
+      label: "self-hosted e2e",
+      port: PORT,
+      withStaticAssets: true,
+      env: { TRUSTED_PROXY: "cloudflare", CRM_API_URL: crm.url, CRM_API_KEY: KEY, CRM_COMPANY_ID: COMPANY, LEAD_INGEST_SECRET: INGEST },
     });
-    const prepared = JSON.parse(out.trim().split("\n").pop() as string);
-    const base = new URL(adminUrl as string);
-    const mk = (user: string, pw: string) => `postgresql://${user}:${pw}@${base.hostname === "[::1]" ? "[::1]" : "localhost"}:${base.port}/${prepared.database}`;
-    ownerUrl = mk(prepared.owner, prepared.ownerPassword);
-    const roleUrl = mk(prepared.role, ROLE_PASSWORD);
-
-    // The layout the Dockerfile's runner stage produces: standalone output + static assets + public + the health probe. NO .env.
-    layout = mkdtempSync(path.join(os.tmpdir(), "bft-runtime-"));
-    cpSync(path.join(repo, ".next", "standalone"), layout, { recursive: true, filter: (src) => !/[\\/]\.env($|\.)/.test(src) });
-    mkdirSync(path.join(layout, ".next"), { recursive: true });
-    cpSync(path.join(repo, ".next", "static"), path.join(layout, ".next", "static"), { recursive: true });
-    cpSync(path.join(repo, "public"), path.join(layout, "public"), { recursive: true });
-    mkdirSync(path.join(layout, "scripts"), { recursive: true });
-    cpSync(path.join(repo, "scripts", "healthcheck.mjs"), path.join(layout, "scripts", "healthcheck.mjs"));
-
-    // Only the variables compose.yaml passes. Nothing else from this machine's environment leaks in.
-    const env = {
-      PATH: process.env.PATH ?? "",
-      SystemRoot: process.env.SystemRoot ?? "",
-      NODE_ENV: "production",
-      HOSTNAME: "127.0.0.1",
-      PORT: String(PORT),
-      DATABASE_URL: roleUrl,
-      DATABASE_SSL_MODE: "disable",
-      DATABASE_AUTO_INIT: "false",
-      TRUSTED_PROXY: "cloudflare",
-    } as NodeJS.ProcessEnv;
-    const child = spawn(process.execPath, ["server.js"], { cwd: layout, env, stdio: ["ignore", "pipe", "pipe"] });
-    server = child;
-    child.stdout.on("data", (d) => (logs += d));
-    child.stderr.on("data", (d) => (logs += d));
-    for (let i = 0; i < 60; i++) {
-      try {
-        const r = await fetch(`http://127.0.0.1:${PORT}/api/health`);
-        if (r.status === 200) return;
-      } catch {
-        /* not up yet */
-      }
-      await new Promise((r) => setTimeout(r, 500));
-    }
-    throw new Error("the standalone server did not become healthy:\n" + logs.slice(-1500));
   });
-
+  test.beforeEach(() => {
+    server.assertAlive();
+    crm.reset();
+  });
   test.afterAll(async () => {
-    server?.kill();
-    await new Promise((r) => setTimeout(r, 1500)); // let the process release its working directory (Windows refuses to delete it otherwise)
-    if (layout) {
-      try {
-        rmSync(layout, { recursive: true, force: true });
-      } catch {
-        /* a leftover temp directory is harmless */
-      }
-    }
-    if (adminUrl) {
-      try {
-        execFileSync(process.execPath, [path.join(repo, "node_modules", "tsx", "dist", "cli.mjs"), "scripts/prepare-self-hosted-e2e-db.ts", "--drop"], { cwd: repo, encoding: "utf8", env: { ...process.env, NODE_OPTIONS: "--no-deprecation" } });
-      } catch {
-        /* a disposable database left behind on a disposable server is harmless */
-      }
-    }
+    await server?.stop();
+    await crm?.close();
   });
 
   const rawGet = (host: string, urlPath: string) =>
@@ -107,14 +54,17 @@ test.describe("self-hosted runtime (standalone server, restricted DB role, Cloud
       req.end();
     });
 
-  test("container-like layout: no .env present, the health probe works, the process is healthy without any source files", async () => {
-    expect(readdirSync(layout).filter((f) => f.startsWith(".env"))).toEqual([]);
-    expect(existsSync(path.join(layout, "src"))).toBe(false);
-    const code = execFileSync(process.execPath, ["scripts/healthcheck.mjs"], { cwd: layout, env: { ...process.env, PORT: String(PORT) }, encoding: "utf8" });
+  test("container-like layout: no .env present, no source, no database module; the health probe works without calling the CRM", async () => {
+    expect(readdirSync(server.layout).filter((f) => f.startsWith(".env"))).toEqual([]);
+    expect(existsSync(path.join(server.layout, "src"))).toBe(false);
+    expect(existsSync(path.join(server.layout, "node_modules", "@prisma"))).toBe(false);
+    expect(existsSync(path.join(server.layout, "node_modules", "pg"))).toBe(false);
+    const code = execFileSync(process.execPath, ["scripts/healthcheck.mjs"], { cwd: server.layout, env: { ...process.env, PORT: String(PORT) }, encoding: "utf8" });
     expect(code).toBe(""); // exits 0 silently
     const r = await fetch(`http://127.0.0.1:${PORT}/api/health`);
     expect(await r.json()).toEqual({ status: "ok" });
     expect(r.headers.get("cache-control")).toMatch(/no-store/);
+    expect(crm.requests).toHaveLength(0); // liveness never depends on the CRM
   });
 
   test("canonical host: the apex redirects to www (308, path and query kept); www, the internal name and look-alikes do not redirect", async () => {
@@ -132,7 +82,7 @@ test.describe("self-hosted runtime (standalone server, restricted DB role, Cloud
     expect(html).toContain('rel="canonical" href="https://www.businessflights.travel"');
   });
 
-  async function submitFlightRequest(page: Page, email: string, phone: string) {
+  async function fillFlightForm(page: Page, email: string, phone: string) {
     await page.goto(`http://127.0.0.1:${PORT}/flights`);
     await page.getByRole("button", { name: "One Way", exact: true }).click();
     const from = page.getByPlaceholder("City or airport code").first();
@@ -151,100 +101,111 @@ test.describe("self-hosted runtime (standalone server, restricted DB role, Cloud
     await form.getByLabel("Email Address", { exact: true }).fill(email);
     await page.locator("#phone").fill(phone); // the country selector defaults to "International", which needs the + prefix
     await page.waitForTimeout(3000); // the form's anti-bot minimum fill time (2.5 s)
-    await page.getByRole("button", { name: "Get a Free Flight Quote" }).click();
+  }
+  const submit = (page: Page) => page.getByRole("button", { name: "Get a Free Flight Quote" }).click();
+  async function submitFlightRequest(page: Page, email: string, phone: string) {
+    await fillFlightForm(page, email, phone);
+    await submit(page);
     try {
       await expect(page.getByText("Thank you for your request")).toBeVisible({ timeout: 30_000 });
     } catch (e) {
-      throw new Error(`${(e as Error).message}\n--- server log (credentials are never logged) ---\n${logs.slice(-2500)}`);
+      throw new Error(`${(e as Error).message}\n--- server log (credentials are never logged) ---\n${server.logs().slice(-2500)}`);
     }
   }
+  const flightCalls = () => crm.requests.filter((r) => r.path === "/api/v1/website/flight-inquiries");
 
-  const rows = async (email: string) => {
-    const c = new Client({ connectionString: ownerUrl });
-    await c.connect();
-    try {
-      return (
-        await c.query(
-          `SELECT l."id", l."assignedAgentId", l."queueDistributedAt", s."ipAddress", s."ipVersion", s."city", s."region", s."countryCode", s."country", s."geoSource",
-                  (SELECT count(*)::int FROM "Notification" n WHERE n."leadId" = l."id" AND n."type" = 'LEAD_ASSIGNED') AS notifications
-             FROM "Contact" c JOIN "Lead" l ON l."contactId" = c."id" LEFT JOIN "LeadSubmissionInfo" s ON s."leadId" = l."id"
-            WHERE c."primaryEmail" = $1`,
-          [email],
-        )
-      ).rows;
-    } finally {
-      await c.end();
-    }
-  };
-  const waitForRows = async (email: string, hasInfo: boolean) => {
-    for (let i = 0; i < 40; i++) {
-      const r = await rows(email);
-      if (r.length === 1 && (!hasInfo || r[0].ipAddress !== null || r[0].geoSource !== null) && r[0].notifications === 1) return r[0];
-      await new Promise((res) => setTimeout(res, 500));
-    }
-    return (await rows(email))[0];
-  };
-
-  test("a real submission behind Cloudflare headers: lead saved, queued, notified; IP and location come from CF headers, never from a forged X-Forwarded-For", async ({ browser }) => {
+  test("a real submission behind Cloudflare headers: the CRM gets the lead; IP and location come from CF headers, never from a forged X-Forwarded-For; the browser never sees the key", async ({ browser }) => {
     const context = await browser.newContext({
       extraHTTPHeaders: {
         "CF-Connecting-IP": "198.51.100.77",
         "CF-IPCountry": "AU",
         "CF-IPCity": "Sydney",
         "CF-Region": "New South Wales",
+        "CF-Region-Code": "NSW",
         "X-Forwarded-For": "8.8.8.8",
         "X-Real-IP": "8.8.4.4",
         "X-Vercel-Forwarded-For": "9.9.9.9",
       },
     });
     const page = await context.newPage();
+    const browserRequests: Array<{ url: string; auth: string | undefined }> = [];
+    page.on("request", (r) => browserRequests.push({ url: r.url(), auth: r.headers()["authorization"] }));
     await submitFlightRequest(page, "cf-headers@example.com", "+14155550123");
     await context.close();
-    const r = await waitForRows("cf-headers@example.com", true);
-    expect(r.id, "lead row").toBeTruthy();
-    expect(r.assignedAgentId).toBe("e2e-agent");
-    expect(r.queueDistributedAt).not.toBeNull();
-    expect(r.notifications).toBe(1);
-    expect(r.ipAddress).toBe("198.51.100.77");
-    expect(r.ipVersion).toBe("v4");
-    expect(r.countryCode).toBe("AU");
-    expect(r.city).toBe("Sydney");
-    expect(r.geoSource).toMatch(/Cloudflare/);
+
+    expect(flightCalls()).toHaveLength(1);
+    const r = flightCalls()[0];
+    expect(r.status).toBe(201);
+    expect(r.headers.authorization).toBe(`Bearer ${KEY}`);
+    expect(r.headers["idempotency-key"]).toMatch(/^[0-9a-f-]{36}$/); // the form's submission key
+    expect(r.json).toMatchObject({ firstName: "Selfhosted", lastName: "Tester", email: "cf-headers@example.com", phone: "+14155550123", tripType: "ONE_WAY", departureAirportIata: "JFK", arrivalAirportIata: "CDG" });
+    expect(r.visitor).toMatchObject({ state: "verified", ip: "198.51.100.77", country: "AU", city: "Sydney", region: "NSW" });
     expect(JSON.stringify(r)).not.toMatch(/8\.8\.8\.8|8\.8\.4\.4|9\.9\.9\.9/);
+    // The browser only ever talked to the website: it never contacted the CRM and never carried a credential.
+    for (const b of browserRequests) {
+      expect(b.url, b.url).not.toContain(new URL(crm.url).host);
+      expect(b.auth, b.url).toBeUndefined();
+    }
+    expect(JSON.stringify(browserRequests)).not.toContain(KEY);
   });
 
-  test("with ONLY forged forwarding headers (no CF-Connecting-IP) no IP is stored; the lead is still saved and assigned", async ({ browser }) => {
+  test("with ONLY forged forwarding headers (no CF-Connecting-IP) the lead still goes to the CRM, with no IP in the visitor context", async ({ browser }) => {
     const context = await browser.newContext({ extraHTTPHeaders: { "X-Forwarded-For": "8.8.8.8", "X-Real-IP": "8.8.4.4", Forwarded: "for=1.1.1.1", "CF-IPCountry": "AU" } });
     const page = await context.newPage();
     await submitFlightRequest(page, "forged@example.com", "+14155552671");
     await context.close();
-    const r = await waitForRows("forged@example.com", false);
-    expect(r.id).toBeTruthy();
-    expect(r.assignedAgentId).toBe("e2e-agent");
-    expect(r.ipAddress).toBeNull();
-    expect(JSON.stringify(r)).not.toMatch(/8\.8\.8\.8|8\.8\.4\.4|1\.1\.1\.1/);
+    expect(flightCalls()).toHaveLength(1);
+    expect(flightCalls()[0].json).toMatchObject({ email: "forged@example.com" });
+    expect(flightCalls()[0].visitor?.ip).toBeUndefined();
+    expect(JSON.stringify(flightCalls()[0])).not.toMatch(/8\.8\.8\.8|8\.8\.4\.4|1\.1\.1\.1/);
   });
 
-  test("a valid IP with no location headers at all is stored without a location (missing geo is graceful)", async ({ browser }) => {
+  test("a valid IPv6 address with no location headers at all is forwarded without a location (missing geo is graceful)", async ({ browser }) => {
     const context = await browser.newContext({ extraHTTPHeaders: { "CF-Connecting-IP": "2607:f8b0:4005:80a::200e" } });
     const page = await context.newPage();
     await submitFlightRequest(page, "nogeo@example.com", "+12125550123");
     await context.close();
-    const r = await waitForRows("nogeo@example.com", true);
-    expect(r.ipAddress).toBe("2607:f8b0:4005:80a::200e");
-    expect(r.ipVersion).toBe("v6");
-    expect(r.city).toBeNull();
-    expect(r.countryCode).toBeNull();
-    expect(r.assignedAgentId).toBe("e2e-agent");
+    expect(flightCalls()).toHaveLength(1);
+    expect(flightCalls()[0].visitor).toMatchObject({ state: "verified", ip: "2607:f8b0:4005:80a::200e" });
+    expect(flightCalls()[0].visitor?.city).toBeUndefined();
+    expect(flightCalls()[0].visitor?.country).toBeUndefined();
   });
 
-  test("the running server never created or altered schema and logged no credentials", async () => {
-    const c = new Client({ connectionString: ownerUrl });
-    await c.connect();
-    const owned = await c.query(`SELECT count(*)::int AS n FROM pg_class c JOIN pg_roles r ON r.oid = c.relowner WHERE r.rolname <> 'crm_e2e_owner' AND c.relnamespace = 'public'::regnamespace`);
-    await c.end();
-    expect(owned.rows[0].n).toBe(0);
-    expect(logs).not.toContain(ROLE_PASSWORD);
-    expect(logs).not.toMatch(/postgresql:\/\/[^\s]*:[^\s@]+@/);
+  test("the CRM is down for the first press of the button and back for the second: the visitor sees an error, then success - the SAME submission key every time, ONE lead", async ({ page }) => {
+    await fillFlightForm(page, "retry@example.com", "+14155552671");
+    crm.script({ status: 503, body: { ok: false, error: { code: "not_configured", message: "x" } } }, { count: 3 }); // all three attempts of the first press
+    await submit(page);
+    await expect(page.getByText(/something went wrong while submitting your request/)).toBeVisible({ timeout: 60_000 });
+    await expect(page.getByText("Thank you for your request")).toHaveCount(0);
+    expect(flightCalls()).toHaveLength(3);
+    await submit(page); // the visitor presses the button again
+    await expect(page.getByText("Thank you for your request")).toBeVisible({ timeout: 30_000 });
+    const keys = flightCalls().map((r) => r.headers["idempotency-key"]);
+    expect(keys).toHaveLength(4);
+    expect(new Set(keys).size).toBe(1);
+    expect(crm.leadCount()).toBe(1);
+  });
+
+  test("the contact page reaches the CRM's public endpoint through the browser", async ({ page }) => {
+    await page.goto(`http://127.0.0.1:${PORT}/contact`);
+    await page.locator("#c-firstName").fill("Contact");
+    await page.locator("#c-lastName").fill("Tester");
+    await page.locator("#c-email").fill("contact@example.com");
+    await page.locator("#c-phone").fill("+14155552671");
+    await page.locator("#c-subject").selectOption("GENERAL_INQUIRY");
+    await page.locator("#c-message").fill("Hello, this is an end-to-end test message for the CRM API.");
+    await page.waitForTimeout(2500); // the form's anti-bot minimum fill time (2 s)
+    await page.getByRole("button", { name: "Send Message" }).click();
+    await expect(page.getByText("Message received")).toBeVisible({ timeout: 30_000 });
+    const contact = crm.requests.filter((r) => r.path === "/api/public/contact-inquiry");
+    expect(contact).toHaveLength(1);
+    expect(contact[0].json).toMatchObject({ companyId: COMPANY, firstName: "Contact", email: "contact@example.com", subject: "GENERAL_INQUIRY" });
+    expect(contact[0].headers.authorization).toBeUndefined();
+  });
+
+  test("the running server logged no credential and no customer value, and holds no database module", async () => {
+    const logs = server.logs();
+    for (const needle of [KEY, INGEST, "cf-headers@example.com", "forged@example.com", "retry@example.com", "+14155550123", "Selfhosted"]) expect(logs, needle).not.toContain(needle);
+    expect(logs).not.toMatch(/DATABASE|prisma|postgres/i);
   });
 });

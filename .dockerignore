@@ -34,7 +34,6 @@ build
 coverage
 test-results
 playwright-report
-src/generated
 *.tsbuildinfo
 
 # ---- not needed to build the site -------------------------------------------------------------------------------------------

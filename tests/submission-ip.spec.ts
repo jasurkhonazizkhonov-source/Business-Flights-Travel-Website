@@ -4,7 +4,6 @@ import path from "node:path";
 import { normalizeIp, isPrivateOrReservedIp, resolveClientIp, trustedProxyMode } from "../src/lib/client-ip";
 import { readApproximateLocation, formatLocation } from "../src/lib/ip-geo";
 import { captureSubmissionInfo, hasSubmissionDetails } from "../src/lib/submission-info";
-import { saveLeadSubmissionInfo } from "../src/server/save-submission-info";
 import {
   buildFlightRequestNotificationEmail,
   buildFlightRequestNotificationSubject,
@@ -270,58 +269,6 @@ test.describe("the internal notification: Submission & IP Information", () => {
   });
 });
 
-test.describe("persisting the submission details (what the CRM reads)", () => {
-  type UpsertArgs = { where: { leadId: string }; create: Record<string, unknown>; update: Record<string, unknown> };
-  const fakeClient = () => {
-    const calls: UpsertArgs[] = [];
-    return { calls, client: { leadSubmissionInfo: { upsert: async (a: UpsertArgs) => void calls.push(a) } } as unknown as Parameters<typeof saveLeadSubmissionInfo>[0] };
-  };
-  const info = {
-    ip: { address: "203.0.113.42", version: "v4" as const },
-    location: { city: "San Francisco", regionCode: "CA", region: "California", country: "United States", countryCode: "US", timeZone: "America/Los_Angeles" },
-    locationSource: "Vercel edge geolocation (approximate)",
-    capturedAt: new Date("2026-10-04T10:00:00Z"),
-  };
-
-  test("stores the full IP, version, location, source, currency and timestamp against the Lead — and nothing else", async () => {
-    const { calls, client } = fakeClient();
-    expect(await saveLeadSubmissionInfo(client, "lead_1", info, "AUD")).toBe(true);
-    expect(calls).toHaveLength(1);
-    expect(calls[0].where).toEqual({ leadId: "lead_1" });
-    expect(calls[0].create).toEqual({
-      leadId: "lead_1", ipAddress: "203.0.113.42", ipVersion: "v4", city: "San Francisco", region: "California", country: "United States", countryCode: "US",
-      timeZone: "America/Los_Angeles", geoSource: "Vercel edge geolocation (approximate)", budgetCurrency: "AUD", capturedAt: info.capturedAt,
-    });
-  });
-
-  test("it is an upsert whose update is empty — repeating it for the same Lead (a retry) can never create a second row or overwrite the first", async () => {
-    const { calls, client } = fakeClient();
-    await saveLeadSubmissionInfo(client, "lead_1", info);
-    expect(calls[0].update).toEqual({});
-  });
-
-  test("an unknown region is stored as the code as supplied; absent values are stored as absent, not as placeholders", async () => {
-    const { calls, client } = fakeClient();
-    await saveLeadSubmissionInfo(client, "lead_2", { ip: { address: "198.51.100.9", version: "v4" }, location: { regionCode: "BY", countryCode: "DE" }, capturedAt: new Date() });
-    expect(calls[0].create).toMatchObject({ region: "BY", countryCode: "DE", ipAddress: "198.51.100.9" });
-    expect(calls[0].create.city).toBeUndefined();
-    expect(calls[0].create.timeZone).toBeUndefined();
-  });
-
-  test("nothing to store -> no database call", async () => {
-    const { calls, client } = fakeClient();
-    expect(await saveLeadSubmissionInfo(client, "lead_3", { capturedAt: new Date() })).toBe(false);
-    expect(await saveLeadSubmissionInfo(client, "lead_3", undefined)).toBe(false);
-    expect(calls).toHaveLength(0);
-  });
-
-  test("a budget currency alone (no IP, no location) is still stored", async () => {
-    const { calls, client } = fakeClient();
-    expect(await saveLeadSubmissionInfo(client, "lead_4", { capturedAt: new Date() }, "EUR")).toBe(true);
-    expect(calls[0].create).toMatchObject({ budgetCurrency: "EUR" });
-  });
-});
-
 test.describe("privacy and boundary guards (structural)", () => {
   const root = path.resolve(__dirname, "..");
   const read = (f: string) => fs.readFileSync(path.join(root, f), "utf8");
@@ -342,15 +289,11 @@ test.describe("privacy and boundary guards (structural)", () => {
     }
   });
 
-  test("the submission info is written best-effort through the after() helper, never inside the Lead transaction, and a duplicate re-runs only that idempotent upsert", () => {
-    const saveIdx = action.indexOf("saveLeadSubmissionInfo(prisma");
-    const createIdx = action.indexOf("await createWebsiteLead(");
-    expect(saveIdx).toBeGreaterThan(createIdx);
-    expect(action.lastIndexOf("afterResponse(", saveIdx)).toBeGreaterThan(createIdx);
-    expect(action).toContain("submission info not saved for lead");
-    expect(action).toMatch(/if \(created\.duplicate\) \{\s*await saveSubmissionInfo\(\);\s*return \{ ok: true, summary \};/);
-    expect(read("src/server/create-website-lead.ts")).not.toContain("LeadSubmissionInfo");
-    expect(action.slice(action.indexOf("await createWebsiteLead("), action.indexOf("lap(\"lead\")"))).not.toContain("LeadSubmissionInfo");
+  test("the visitor's IP and location reach the CRM only inside the SIGNED visitor context, and the website writes no database row of its own", () => {
+    expect(action).toContain("buildVisitorContextHeaders(submissionInfo, api.config.ingestSecret)");
+    expect(action).not.toMatch(/prisma|saveLeadSubmissionInfo|LeadSubmissionInfo/);
+    // The IP is never part of the JSON body: the CRM's strict endpoint rejects an `ipAddress` field, and only the signed context is believed.
+    expect(read("src/lib/crm-api/flight-inquiry.ts")).not.toMatch(/ipAddress|submissionInfo|\.ip\b/);
   });
 
   test("the IP modules are server-side only code: nothing in a client component imports them", () => {
@@ -362,7 +305,7 @@ test.describe("privacy and boundary guards (structural)", () => {
       for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
         const full = path.join(dir, e.name);
         if (e.isDirectory()) stack.push(full);
-        else if (/\.(ts|tsx)$/.test(e.name) && /client-ip|ip-geo|submission-info|save-submission-info/.test(fs.readFileSync(full, "utf8"))) offenders.push(path.relative(root, full));
+        else if (/\.(ts|tsx)$/.test(e.name) && /client-ip|ip-geo|submission-info|visitor-context/.test(fs.readFileSync(full, "utf8"))) offenders.push(path.relative(root, full));
       }
     }
     expect(offenders).toEqual([]);
