@@ -114,9 +114,11 @@ export const flightRequestSchema = z
     renderedAt: z.number().optional(),
 
     // One random UUID per mounted form, reused by every attempt of the same
-    // submission (see src/lib/submission-id.ts). Optional so an older cached
-    // client bundle, or a caller without one, still works — it just gets no
-    // retry protection. Strictly a UUID: it is hashed into a primary key.
+    // submission; the server action sends it to the CRM as the Idempotency-Key
+    // (see src/server/actions/submit-flight-request.ts). Optional so an older
+    // cached client bundle, or a caller without one, still works — it then gets
+    // a fresh key per call (retry protection within that call only). Strictly a
+    // UUID: the CRM derives the lead's primary key from it.
     submissionId: z.string().uuid().optional(),
   })
   .refine((v) => v.tripType !== "MULTI_CITY" || v.segments.length >= 2, {

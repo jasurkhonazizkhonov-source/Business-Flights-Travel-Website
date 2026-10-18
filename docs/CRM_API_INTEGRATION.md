@@ -70,7 +70,7 @@ the CRM accepted the request and **not** for a repeat (`duplicate`).
 | CRM answer | Website behaviour |
 |---|---|
 | `201 {ok,leadId,duplicate:false}` | success; the internal e-mail is sent |
-| `200 {ok,leadId,duplicate:true}` | success; **no** second e-mail (the first attempt already notified) |
+| `200 {ok,leadId,duplicate:true}` | success; **no** e-mail is sent (the CRM's reply cannot say whether the first one was — see "Internal notification e-mail and repeats") |
 | network error, timeout (10 s per attempt), `429` (honours `Retry-After`, capped at 5 s), `500`, `502`–`504`, an unreadable `2xx` | retried with the **same key and the same bytes**: up to 3 attempts, 1 s then 2 s apart. Then a friendly error. The CRM turns every repeat into the same lead, so a retry cannot create a second one. |
 | `400` (`validation_failed`, `invalid_json`, `idempotency_key_required`), `413`, `415` | not retried; a friendly error; the log names the CRM's error `code` and the failing field **paths** only |
 | `409 idempotency_key_reused` | not retried; the visitor is asked to reload the page (the same key was used for a *different* form — e.g. the visitor edited the form after an attempt whose answer was lost) |
@@ -79,6 +79,37 @@ the CRM accepted the request and **not** for a repeat (`duplicate`).
 
 Fewer attempts than the CRM's suggested 5 are deliberate: a visitor is waiting. After the last failure the visitor can press the button again
 (the form keeps the same `submissionId`), which is safe for the same reason.
+
+### Internal notification e-mail and repeats (known limitation)
+
+The website's internal notification e-mail (`GMAIL_*`) is sent only when the CRM answers `201 duplicate:false`. The CRM's documentation says the
+same for a repeat ("treat exactly like success, do not send a second notification email"), and that is what the website does. The limitation is
+that **`duplicate:true` carries no information about the e-mail**: the CRM only knows the lead exists (`{ ok, leadId, duplicate }`), and it never
+learns whether this website sent, queued or failed to send an e-mail. Traced against the CRM at `4d33c29` (`createWebsiteFlightLead`, the
+`flight-inquiries` route):
+
+| Case | CRM answer | E-mail | Correct? |
+|---|---|---|---|
+| First submission, reply received | `201 duplicate:false` | sent (after the response) | yes |
+| CRM stored the lead, reply lost, same-call retry | `200 duplicate:true` (`attempts` > 1) | **not sent** | **no — the team's e-mail is lost** |
+| Visitor presses submit again after a website error that followed a stored lead | `200 duplicate:true` (`attempts` = 1) | **not sent** | **no — lost** |
+| Genuine repeat after a success (double click, Next.js action retry) | `200 duplicate:true` | not sent | yes |
+
+The last three rows return the identical response, and `attempts` does not separate them (a lost reply and a plain repeat can both show
+`attempts` of 1 or more), so sending on `duplicate` or on `attempts > 1` would trade the lost e-mail for duplicates and was deliberately **not**
+done. The website has no database, so it cannot remember which submissions it already e-mailed; a per-process memory would be wrong after a
+restart and is not a durable fix, so none was added either.
+
+What is **not** lost: the lead itself (one lead, one key) and its distribution to an agent, which the CRM performs on creation and again from its
+cron sweep. Only the website's own heads-up e-mail to the shared Gmail inbox can be missed, in the rare cases above. The e-mail was already
+best-effort (an SMTP failure after `201` loses it too).
+
+**Minimum CRM-side change that would make it retryable and idempotent** (not made here; the CRM repository was not touched): the CRM records
+whether the website has confirmed its notification, and says so in the reply. For example, add `"notified": boolean` to the success body
+(`false` on creation), plus an authenticated `POST /api/v1/website/flight-inquiries/{leadId}/notification` (bearer key, idempotent) that sets it.
+The website then sends the e-mail whenever the reply says `notified:false` (including on `duplicate:true`) and confirms afterwards; a repeat
+after confirmation says `notified:true` and sends nothing. Simpler alternative: the CRM sends the internal e-mail itself from the same insert, and
+the website drops its own.
 
 ## Contact message: `POST /api/public/contact-inquiry`
 

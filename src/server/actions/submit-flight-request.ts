@@ -153,8 +153,11 @@ export async function submitFlightRequest(input: FlightRequestInput): Promise<Su
     `[submitFlightRequest] accepted by the CRM in ${ms}ms (attempts: ${outcome.attempts}; visitor context ${api.config.ingestSecret ? "signed" : "not configured"}; ip ${ipStatus}; location ${submissionInfo.location ? "captured" : "unavailable"})${outcome.status === "duplicate" ? " - duplicate of an already-received submission" : ""}`,
   );
 
-  // The CRM already has the request (a repeat of the same submission was answered as such): the customer gets the same success, but the team
-  // was already notified the first time, so no second email.
+  // The CRM already has the request (a repeat of the same submission was answered as such): the customer gets the same success. No second
+  // email is sent, because the CRM's reply cannot tell us whether the first one was: `duplicate` only says the lead exists, and the CRM never
+  // learns whether this website's email was sent. Known limitation: if the first attempt's reply was lost, or the visitor pressed submit
+  // again after an error, that email is never sent (the CRM still has the lead and offers it to an agent). Making it retryable needs a
+  // CRM-side signal - see docs/CRM_API_INTEGRATION.md, "Internal notification e-mail and repeats".
   if (outcome.status === "duplicate") return { ok: true, summary };
 
   // Internal-only notification to the Business Flights Travel team - NOT the customer-facing response, which is unchanged either way. Queued
