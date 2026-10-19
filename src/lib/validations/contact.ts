@@ -1,10 +1,9 @@
 import { z } from "zod";
 import { CONTACT_SUBJECT_VALUES, CONTACT_SUBJECT_OPTIONS, type ContactSubject } from "./contact-options";
 
-// Values match the CRM's InquirySubject enum (ContactInquiry model,
-// prisma/schema.prisma) exactly, as plain string literals rather than an
-// import from the generated Prisma client — importing the generated client
-// into a browser bundle pulls in Node-only internals that break the build.
+// Values match the subjects the CRM's POST /api/public/contact-inquiry
+// accepts (its InquirySubject enum) exactly, as plain string literals — the
+// website has no CRM code or database client to import them from.
 //
 // CONTACT_SUBJECT_VALUES/OPTIONS live in contact-options.ts (no zod import)
 // and are re-exported here so this stays the one canonical import path for

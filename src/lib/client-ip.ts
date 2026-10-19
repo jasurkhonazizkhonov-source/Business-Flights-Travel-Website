@@ -2,8 +2,8 @@
 // this module only reads the request's own headers, and only the ones the
 // platform in front of the app is known to set itself.
 //
-// A port of the CRM's src/lib/request-ip.ts (the "Compass Tools" app that
-// shares this database) so both apps resolve a client IP by the same rule.
+// A port of the CRM's src/lib/request-ip.ts (the "Compass Tools" app) so both
+// apps resolve a client IP by the same rule.
 //
 // Forwarded-for style headers are only trustworthy when a proxy that sits in
 // front of the app overwrites them. If the app were reachable directly, a

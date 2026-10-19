@@ -6,14 +6,21 @@
 # never touched by any command in this file's directory (every command in the guide uses `-p business-flights-travel` and names only
 # `bft-web`).
 #
-# What it needs from the host: ONE external network, the CRM project's `compass-tools_internal`, which already carries the CRM app, its
-# PostgreSQL (`db`) and the Cloudflare connector (`cloudflared`). Joining it is what lets (a) the website reach `db` and (b) the tunnel reach
-# `http://bft-web:3000`. Compose never creates it and separate projects do NOT share networks automatically: if the name is wrong,
-# `up` fails with "network ... declared as external, but could not be found" instead of silently creating an empty network.
+# THE WEBSITE HAS NO DATABASE. It sends every form to the Compass Tools CRM over HTTP (docs/CRM_API_INTEGRATION.md) and holds no database
+# URL, credential, driver or network route to PostgreSQL.
 #
-# Because that network is shared and flat, the service name and alias are deliberately unique and project-prefixed. Docker DNS answers a
-# name from EVERY container that carries it, so this service must never be called `app`, `db`, `web` or `cloudflared`, and it must not
-# add aliases other than `bft-web`. deploy/preflight.sh checks for a collision before every deploy.
+# What it needs from the host: TWO external networks that the CRM project already owns. Compose never creates them and separate projects
+# do NOT share networks automatically: if a name is wrong, `up` fails with "network ... declared as external, but could not be found"
+# instead of silently creating an empty network.
+#   crm_api   `compass-tools-website-api` — an `internal: true` network that carries the CRM app (answering as http://compass-crm:3000)
+#             and nothing else: not PostgreSQL, not the tunnel. It is how the website reaches the CRM's API.
+#   tunnel    `compass-tools_web` — the network the Cloudflare Tunnel connector (`cloudflared`) is on, so the tunnel's public hostname for
+#             this site can point at http://bft-web:3000. It must NOT be a network that also carries PostgreSQL: deploy/preflight.sh
+#             refuses to continue if any container on either network answers to the name `db`.
+#
+# Because those networks are shared, the service name and alias are deliberately unique and project-prefixed. Docker DNS answers a name from
+# EVERY container that carries it, so this service must never be called `app`, `db`, `web` or `cloudflared`, and it must not add aliases
+# other than `bft-web`. deploy/preflight.sh checks for a collision before every deploy.
 #
 # Nothing is published on the host. There is no `ports:` here and there must never be: the only way to reach the site is through the
 # tunnel, which is also what makes TRUSTED_PROXY=cloudflare safe (a reachable port would let a client forge CF-Connecting-IP).
@@ -41,17 +48,14 @@ services:
     environment:
       HOSTNAME: 0.0.0.0
       PORT: "3000"
-      # --- database: the CRM's PostgreSQL, over the private Docker network (see docs/DEPLOYMENT_VPS.md, "Database") ---
-      DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL in .env (postgresql://<runtime role>:<password>@db:5432/<database>)}
-      # TLS is an EXPLICIT owner decision with NO default here (docs/DEPLOYMENT_VPS.md, 7.3). Preferred: DATABASE_SSL_CA (server certificate AND
-      # host name verified). The exception DATABASE_SSL_MODE=disable (plaintext) is accepted by src/lib/db-tls.ts only for the host `db` and
-      # must be written into .env deliberately; deploy/preflight.sh refuses to continue if .env makes no TLS decision at all.
-      DATABASE_SSL_MODE: ${DATABASE_SSL_MODE:-}
-      DATABASE_SSL_CA: ${DATABASE_SSL_CA:-}
-      DATABASE_SSL_VERIFY: ${DATABASE_SSL_VERIFY:-}
-      # The website must NEVER create or alter schema. The CRM owns the schema and its migrations. A value other than the exact string
-      # "true" keeps the schema guard read-only; it is fixed here so a stray shell variable cannot turn it on.
-      DATABASE_AUTO_INIT: "false"
+      # --- the Compass Tools CRM, over the private `crm_api` network (docs/CRM_API_INTEGRATION.md) ---
+      CRM_API_URL: ${CRM_API_URL:-http://compass-crm:3000}
+      # The CRM's WEBSITE_API_KEY (>= 32 characters). Bearer credential for POST /api/v1/website/flight-inquiries. Never NEXT_PUBLIC_*.
+      CRM_API_KEY: ${CRM_API_KEY:?Set CRM_API_KEY in .env (the same value as the CRM's WEBSITE_API_KEY)}
+      # The CRM Company id the contact form and the newsletter sign-up are filed under (the CRM's public endpoints take it in the body).
+      CRM_COMPANY_ID: ${CRM_COMPANY_ID:?Set CRM_COMPANY_ID in .env (the CRM's WEBSITE_API_COMPANY_ID)}
+      # Optional: signs the visitor's IP / approximate location so the CRM can record them. Identical to the CRM's LEAD_INGEST_SECRET.
+      LEAD_INGEST_SECRET: ${LEAD_INGEST_SECRET:-}
       # --- visitor IP: the origin is reachable only through cloudflared, which carries Cloudflare's CF-Connecting-IP ---
       TRUSTED_PROXY: cloudflare
       # --- notification email (Gmail SMTP, one sender address, app password) ---
@@ -62,10 +66,11 @@ services:
       - "3000"
     networks:
       # This project's own network: gives the container outbound internet (Gmail SMTP, images.unsplash.com for next/image), which the
-      # CRM's network may not have.
+      # CRM's internal networks do not have.
       default: {}
-      # The CRM project's network. The alias is unique on purpose: the tunnel's Service URL is http://bft-web:3000 and the database is `db`.
-      crm_internal:
+      crm_api: {}
+      # The alias is unique on purpose: the tunnel's Service URL is http://bft-web:3000.
+      tunnel:
         aliases: [bft-web]
     security_opt:
       - no-new-privileges:true
@@ -79,11 +84,14 @@ services:
     cpus: 1.0
     pids_limit: 256
     stop_grace_period: 20s
-    # HEALTHCHECK is defined in the image (scripts/healthcheck.mjs -> GET /api/health, which deliberately does not touch the database).
+    # HEALTHCHECK is defined in the image (scripts/healthcheck.mjs -> GET /api/health, which deliberately does not call the CRM).
     logging: *default-logging
 
 networks:
   default: {}
-  crm_internal:
+  crm_api:
     external: true
-    name: ${CRM_NETWORK_NAME:-compass-tools_internal}
+    name: ${CRM_API_NETWORK_NAME:-compass-tools-website-api}
+  tunnel:
+    external: true
+    name: ${TUNNEL_NETWORK_NAME:-compass-tools_web}

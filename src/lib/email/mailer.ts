@@ -64,7 +64,7 @@ export interface Mailer {
   send(message: MailMessage): Promise<{ messageId: string; response: string; accepted: unknown[]; rejected: unknown[] }>;
 }
 
-// Lazy, like src/lib/prisma.ts's own client: importing this module must
+// Lazy: importing this module must
 // never throw just because email isn't configured yet (most of this site
 // works with no email sending at all) — only an actual send attempt does.
 // Explicit host/port/secure rather than Nodemailer's `service: "gmail"`

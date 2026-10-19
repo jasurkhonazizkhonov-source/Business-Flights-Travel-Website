@@ -1,14 +1,15 @@
 import { test, expect } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { getDatabaseTlsMode, isAllowedPlaintextDatabaseHost, resolveDatabaseSsl } from "../src/lib/db-tls";
 import { CLOUDFLARE_GEO_SOURCE, GEO_SOURCE, decodeUtf8Header, readCloudflareApproximateLocation } from "../src/lib/ip-geo";
 import { captureSubmissionInfo } from "../src/lib/submission-info";
 import { resolveClientIp } from "../src/lib/client-ip";
+import { standaloneBuildPresent, startStandalone, type StandaloneServer } from "./support/standalone-server";
 
-// Self-hosted (OVH VPS + Docker Compose + Cloudflare Tunnel) deployment: the TLS policy for the private database, visitor IP /
-// location behind Cloudflare, and the static properties of the container files. None of this needs Docker or a database; what could
-// not be exercised without them is listed in docs/DEPLOYMENT_VPS.md ("What was and was not tested").
+// Self-hosted (OVH VPS + Docker Compose + Cloudflare Tunnel) deployment: visitor IP / location behind Cloudflare, the static properties of
+// the container files, and the liveness route on the production build. The website has NO database, so there is no database TLS, grant or
+// role to test here: the CRM API client is covered by tests/crm-api-client.spec.ts and tests/crm-api-actions-e2e.spec.ts. None of this needs
+// Docker; what could not be exercised without it is listed in docs/DEPLOYMENT_VPS.md ("What was and was not tested").
 const root = path.resolve(__dirname, "..");
 const read = (rel: string) => readFileSync(path.join(root, rel), "utf8");
 
@@ -29,75 +30,6 @@ function withEnv<T>(vars: Record<string, string | undefined>, fn: () => T): T {
   }
 }
 const H = (o: Record<string, string>) => new Headers(o);
-
-test.describe("database TLS (src/lib/db-tls.ts)", () => {
-  const DB = "postgresql://role:pw@db:5432/app";
-  const PEM = "-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----";
-
-  test("default is unchanged: encrypted, not identity-verified (Vercel / Aiven keep working)", () => {
-    expect(resolveDatabaseSsl({ DATABASE_URL: "postgresql://u:p@example.aivencloud.com:1234/x" })).toEqual({ rejectUnauthorized: false });
-    expect(getDatabaseTlsMode({})).toBe("unverified");
-  });
-
-  test("CA and system verification turn certificate checking ON", () => {
-    expect(resolveDatabaseSsl({ DATABASE_SSL_CA: PEM })).toEqual({ rejectUnauthorized: true, ca: PEM });
-    expect(resolveDatabaseSsl({ DATABASE_SSL_CA: PEM.replace(/\n/g, "\\n") })).toEqual({ rejectUnauthorized: true, ca: PEM });
-    expect(resolveDatabaseSsl({ DATABASE_SSL_VERIFY: "system" })).toEqual({ rejectUnauthorized: true });
-    expect(() => resolveDatabaseSsl({ DATABASE_SSL_CA: "not a certificate" })).toThrow(/PEM/);
-  });
-
-  test('"disable" works only for the exact allow-listed hosts', () => {
-    for (const host of ["db", "DB", "localhost", "127.0.0.1", "[::1]"]) {
-      expect(resolveDatabaseSsl({ DATABASE_SSL_MODE: "disable", DATABASE_URL: `postgresql://u:p@${host}:5432/x` }), host).toBe(false);
-    }
-    expect(getDatabaseTlsMode({ DATABASE_SSL_MODE: "disable" })).toBe("disabled");
-  });
-
-  test('"disable" is refused for every other host, so TLS can never be silently dropped for a public or unintended database', () => {
-    const refused = [
-      "postgresql://u:p@db.example.com:5432/x", // public-looking
-      "postgresql://u:p@postgres:5432/x", // other single-label name
-      "postgresql://u:p@host.docker.internal:5432/x", // the Docker host
-      "postgresql://u:p@something.internal:5432/x",
-      "postgresql://u:p@10.0.0.5:5432/x", // private IP is not a container name
-      "postgresql://u:p@192.168.1.10:5432/x",
-      "postgresql://u:p@db.:5432/x", // trailing dot
-      "postgresql://u:p@db:5432/x?host=attacker.example", // driver would connect elsewhere
-      "postgresql://u:p@db:5432/x?hostaddr=203.0.113.9",
-      "not a url",
-    ];
-    for (const url of refused) expect(() => resolveDatabaseSsl({ DATABASE_SSL_MODE: "disable", DATABASE_URL: url }), url).toThrow(/DATABASE_SSL_MODE=disable/);
-    expect(() => resolveDatabaseSsl({ DATABASE_SSL_MODE: "disable" })).toThrow(/DATABASE_SSL_MODE=disable/); // no URL at all
-  });
-
-  test("contradictory or unknown settings are refused, never guessed", () => {
-    expect(() => resolveDatabaseSsl({ DATABASE_SSL_MODE: "disable", DATABASE_URL: DB, DATABASE_SSL_CA: PEM })).toThrow(/conflicts/);
-    expect(() => resolveDatabaseSsl({ DATABASE_SSL_MODE: "disable", DATABASE_URL: DB, DATABASE_SSL_VERIFY: "system" })).toThrow(/conflicts/);
-    for (const v of ["require", "false", "off", "verify-full", "true"]) expect(() => resolveDatabaseSsl({ DATABASE_SSL_MODE: v, DATABASE_URL: DB }), v).toThrow(/must be "disable"/);
-    expect(isAllowedPlaintextDatabaseHost("db")).toBe(true);
-    expect(isAllowedPlaintextDatabaseHost("db.")).toBe(false);
-  });
-
-  test("error messages never echo the connection string or certificate", () => {
-    try {
-      resolveDatabaseSsl({ DATABASE_SSL_MODE: "disable", DATABASE_URL: "postgresql://secretuser:secretpw@db.example.com:5432/x" });
-    } catch (e) {
-      expect(String((e as Error).message)).not.toMatch(/secretuser|secretpw|example\.com/);
-    }
-  });
-
-  test("both connection sites use the shared resolver (no stray rejectUnauthorized:false)", () => {
-    for (const f of ["src/lib/prisma.ts", "src/server/schema-ready.ts"]) {
-      // Code only: the comments in these files describe the historical default.
-      const code = read(f)
-        .split("\n")
-        .filter((line) => !line.trim().startsWith("//"))
-        .join("\n");
-      expect(code, f).toContain("resolveDatabaseSsl()");
-      expect(code, f).not.toMatch(/rejectUnauthorized:\s*false/);
-    }
-  });
-});
 
 test.describe("visitor IP and location behind Cloudflare (TRUSTED_PROXY=cloudflare)", () => {
   const cf = (extra: Record<string, string> = {}) => H({ "cf-connecting-ip": "198.51.100.50", ...extra });
@@ -166,19 +98,21 @@ test.describe("visitor IP and location behind Cloudflare (TRUSTED_PROXY=cloudfla
   });
 });
 
+
 test.describe("container files (static checks; Docker itself was not available to run them)", () => {
   const dockerfile = read("Dockerfile");
   const compose = read("compose.yaml");
+  const composeCode = compose.split("\n").filter((l) => !l.trim().startsWith("#")).join("\n");
 
-  test("Dockerfile: pinned base image, non-root runtime, health check, no secrets, no migrations or schema creation", () => {
+  test("Dockerfile: pinned base image, non-root runtime, health check, no secrets, no database tooling", () => {
     expect(dockerfile).toMatch(/^ARG NODE_IMAGE=node:\d+\.\d+\.\d+-bookworm-slim@sha256:[0-9a-f]{64}$/m);
     expect(dockerfile).toMatch(/^USER node$/m);
     expect(dockerfile).toMatch(/^HEALTHCHECK .*scripts\/healthcheck\.mjs/m);
     expect(dockerfile).toMatch(/^CMD \["node", "server\.js"\]$/m);
     expect(dockerfile).toMatch(/NEXT_OUTPUT=standalone/);
     expect(dockerfile).not.toMatch(/\bARG\s+\w*(PASSWORD|SECRET|TOKEN|DATABASE_URL|KEY)\w*/i);
-    expect(dockerfile).not.toMatch(/ENV\s+(DATABASE_URL|GMAIL_APP_PASSWORD)/);
-    expect(dockerfile).not.toMatch(/prisma migrate|prisma db push|vercel-build|bootstrap/);
+    expect(dockerfile).not.toMatch(/ENV\s+(DATABASE_URL|GMAIL_APP_PASSWORD|CRM_API_KEY|LEAD_INGEST_SECRET)/);
+    expect(dockerfile.split("\n").filter((l) => !l.trim().startsWith("#")).join("\n")).not.toMatch(/prisma|vercel-build|bootstrap|openssl|COPY\s+prisma/);
     expect(dockerfile).not.toMatch(/COPY\s+[^\n]*\.env(\s|$)/);
     expect(dockerfile).toContain("-name '.env'"); // the build fails if an env file slipped into the image
   });
@@ -203,99 +137,113 @@ test.describe("container files (static checks; Docker itself was not available t
     expect(ignore).toMatch(/!\*\*\/\.env\.vps\.example/);
   });
 
-  test("compose: one service, own project, nothing published, only external networks shared, secrets by reference", () => {
+  test("compose: one service, own project, nothing published, only the CRM's two EXTERNAL networks, secrets by reference", () => {
     expect(compose).toMatch(/^name: business-flights-travel$/m);
     const servicesBlock = compose.slice(compose.indexOf("\nservices:"), compose.indexOf("\nnetworks:"));
     const services = [...servicesBlock.matchAll(/^ {2}([a-z][\w-]*):\s*$/gm)].map((m) => m[1]);
     // One service, named uniquely: Docker adds the service name as a DNS alias on the CRM's shared network, so it must not be a generic
     // name (web, app, db, cloudflared) that another container could also answer to. No db, no cloudflared, no CRM service defined here.
     expect(services).toEqual(["bft-web"]);
-    expect(compose).not.toMatch(/^\s+ports:/m);
-    expect(compose).not.toMatch(/published:/);
+    expect(composeCode).not.toMatch(/^\s+ports:/m);
+    expect(composeCode).not.toMatch(/published:/);
     expect(compose).toMatch(/^\s+expose:\s*\n\s+- "3000"/m);
-    expect(compose).not.toMatch(/privileged:|network_mode:|pid: host|cap_add:|\/var\/run\/docker\.sock/);
+    expect(composeCode).not.toMatch(/privileged:|network_mode:|pid: host|cap_add:|\/var\/run\/docker\.sock/);
     expect(compose).toMatch(/cap_drop:\s*\n\s+- ALL/);
     expect(compose).toMatch(/no-new-privileges:true/);
     expect(compose).toMatch(/restart: unless-stopped/);
-    // The one shared network (the CRM project's) is EXTERNAL: compose must refuse to start rather than create an empty one. Its default
-    // name is the one observed on the VPS; it is overridable, never created.
-    expect(compose).toMatch(/crm_internal:\s*\n\s+external: true\s*\n\s+name: \$\{CRM_NETWORK_NAME:-compass-tools_internal\}/);
-    expect([...compose.matchAll(/external: true/g)]).toHaveLength(1);
-    // The service joins it with exactly one alias, unique and project-prefixed (the tunnel's Service URL is http://bft-web:3000).
-    expect(compose).toMatch(/crm_internal:\s*\n\s+aliases: \[bft-web\]/);
+    // The two networks the CRM project owns are EXTERNAL: compose must refuse to start rather than create an empty one. The defaults are the
+    // CRM release's own names; they are overridable, never created.
+    expect(compose).toMatch(/crm_api:\s*\n\s+external: true\s*\n\s+name: \$\{CRM_API_NETWORK_NAME:-compass-tools-website-api\}/);
+    expect(compose).toMatch(/tunnel:\s*\n\s+external: true\s*\n\s+name: \$\{TUNNEL_NETWORK_NAME:-compass-tools_web\}/);
+    expect([...compose.matchAll(/external: true/g)]).toHaveLength(2);
+    // The service joins the tunnel network with exactly one alias, unique and project-prefixed (the tunnel's Service URL is http://bft-web:3000),
+    // and the API network with none.
+    expect(compose).toMatch(/tunnel:\s*\n\s+aliases: \[bft-web\]/);
+    expect(compose).toMatch(/crm_api: \{\}/);
     expect([...compose.matchAll(/aliases:/g)]).toHaveLength(1);
     // None of the CRM's service names may be used as a name or alias here.
-    expect(compose.split("\n").filter((l) => !l.trim().startsWith("#")).join("\n")).not.toMatch(/aliases:\s*\[[^\]]*(?<![\w-])(app|db|web|cloudflared)(?![\w-])|container_name:/);
-    expect(compose).not.toMatch(/bft-edge|EDGE_NETWORK_NAME|compass-tools_data|CRM_DATA_NETWORK/);
-    expect(compose).not.toMatch(/\bvolumes:/); // no volumes at all: this site stores no files
-    expect(compose).not.toMatch(/-v\b|down -v|prune/);
+    expect(composeCode).not.toMatch(/aliases:\s*\[[^\]]*(?<![\w-])(app|db|web|cloudflared)(?![\w-])|container_name:/);
+    // The website must have no route to the database: no data network, no internal-network name that carries PostgreSQL.
+    expect(composeCode).not.toMatch(/compass-tools_data|compass-tools_internal|CRM_NETWORK_NAME|CRM_DATA_NETWORK|\bdb\b/);
+    expect(composeCode).not.toMatch(/\bvolumes:/); // no volumes at all: this site stores no files
+    expect(composeCode).not.toMatch(/-v\b|down -v|prune/);
   });
 
-  test("compose: trust and schema settings are fixed, and every secret is a ${VAR} reference (no literal credential)", () => {
-    expect(compose).toMatch(/TRUSTED_PROXY: cloudflare/);
-    expect(compose).toMatch(/DATABASE_AUTO_INIT: "false"/); // the website never creates or alters schema
-    // TLS has NO default in compose: plaintext can never be selected by omission (deploy/preflight.sh demands an explicit choice).
-    expect(compose).toContain("DATABASE_SSL_MODE: ${DATABASE_SSL_MODE:-}");
-    expect(compose.split("\n").filter((l) => !l.trim().startsWith("#")).join("\n")).not.toMatch(/DATABASE_SSL_MODE:[^\n]*disable/);
-    expect(compose).toMatch(/DATABASE_URL: \$\{DATABASE_URL:\?/);
-    expect(compose).toMatch(/GMAIL_APP_PASSWORD: \$\{GMAIL_APP_PASSWORD:\?/);
-    expect(compose).not.toMatch(/postgresql:\/\/[^\s$]*:[^\s$@]+@/); // no literal user:password@ URL
+  test("compose: the trust setting is fixed, the CRM key and the mail password are ${VAR} references, and there is no database setting at all", () => {
+    expect(composeCode).toMatch(/TRUSTED_PROXY: cloudflare/);
+    expect(composeCode).toMatch(/CRM_API_URL: \$\{CRM_API_URL:-http:\/\/compass-crm:3000\}/);
+    expect(composeCode).toMatch(/CRM_API_KEY: \$\{CRM_API_KEY:\?/); // required: the container refuses to start without it
+    expect(composeCode).toMatch(/CRM_COMPANY_ID: \$\{CRM_COMPANY_ID:\?/);
+    expect(composeCode).toMatch(/LEAD_INGEST_SECRET: \$\{LEAD_INGEST_SECRET:-\}/);
+    expect(composeCode).toMatch(/GMAIL_APP_PASSWORD: \$\{GMAIL_APP_PASSWORD:\?/);
+    expect(composeCode).not.toMatch(/DATABASE_|DIRECT_URL|postgres/i);
+    expect(composeCode).not.toMatch(/postgresql:\/\/[^\s$]*:[^\s$@]+@/); // no literal user:password@ URL
+    expect(composeCode).not.toMatch(/(CRM_API_KEY|LEAD_INGEST_SECRET):\s*["']?[A-Za-z0-9]{16,}/); // no literal credential
   });
 
-  test(".env.vps.example holds placeholders only", () => {
+  test(".env.vps.example holds placeholders only, and no database setting", () => {
     const example = read(".env.vps.example");
-    expect(example).toMatch(/DATABASE_URL=postgresql:\/\/<runtime_role>:<url_encoded_password>@db:5432\/<database_name>/);
+    expect(example).toMatch(/^CRM_API_KEY=<same-value-as-the-CRMs-WEBSITE_API_KEY>$/m);
+    expect(example).toMatch(/^CRM_COMPANY_ID=<crm-company-id>$/m);
     expect(example).toMatch(/GMAIL_APP_PASSWORD=<google-app-password>/);
     expect(example).not.toMatch(/^[A-Z_]+=[A-Za-z0-9+/=_-]{24,}$/m); // nothing key-shaped
+    expect(example.split("\n").filter((l) => !l.trim().startsWith("#")).join("\n")).not.toMatch(/DATABASE|DIRECT_URL|postgres/i);
   });
 
-  test("deploy scripts are scoped to this project and contain no destructive or CRM-touching command", () => {
+  test("deploy scripts are scoped to this project and contain no destructive, database or CRM-touching command", () => {
     for (const f of ["deploy/common.sh", "deploy/preflight.sh", "deploy/deploy.sh", "deploy/rollback.sh", "deploy/verify.sh"]) {
       const src = read(f);
       // Strip comments so the explanation of what is NOT done does not trip the check.
       const code = src.split("\n").filter((l) => !l.trim().startsWith("#")).join("\n");
-      expect(code, f).not.toMatch(/compose\s+down|\bvolume\s+(rm|prune)|system prune|image prune|network (rm|prune)|rm -rf|docker (stop|kill|restart|rm)\b|compass-tools(?!_internal)|cloudflared (tunnel|service)|psql|pg_dump|migrate/);
+      expect(code, f).not.toMatch(/compose\s+down|\bvolume\s+(rm|prune)|system prune|image prune|network (rm|prune|create|connect|disconnect)|rm -rf|docker (stop|kill|restart|rm)\b|compass-tools(?!-website-api|_web)|cloudflared (tunnel|service)|psql|pg_dump|migrate/);
     }
     expect(read("deploy/common.sh")).toContain('PROJECT="business-flights-travel"');
     expect(read("deploy/deploy.sh")).toContain("compose up -d --no-deps");
     expect(read("deploy/rollback.sh")).toContain("--no-build");
   });
 
-  test("the lead-queue claim locks only the queue entry, so the runtime role never needs UPDATE on Account", () => {
-    const src = read("src/server/lead-distribution.ts");
-    expect(src).toContain("FOR UPDATE OF lqe SKIP LOCKED");
-    expect(src).not.toMatch(/FOR UPDATE SKIP LOCKED/);
-    // And the grants file must not hand the website write access to accounts.
-    const grants = read("deploy/sql/website-runtime-role-grants.sql").split("\n").filter((l) => !l.trim().startsWith("--")).join("\n");
-    expect(grants).not.toMatch(/(UPDATE|INSERT|DELETE|ALL)[^;]*"Account"/);
-    expect(grants).not.toMatch(/GRANT[^;]*\b(DELETE|TRUNCATE|ALL PRIVILEGES)\b/i);
-    // Account and Company are readable only by the columns the website uses; no default privileges, no sequence except Airport's.
-    // UPDATE is column-level only (no table-wide UPDATE anywhere), and Airport / LeadSubmissionInfo are never updated.
-    expect(grants).not.toMatch(/GRANT[^;(]*\bUPDATE\b[^;(]*\bON\b/i);
-    expect(grants).toMatch(/GRANT UPDATE \("assignedAgentId", "queueDistributedAt", "updatedAt"\) ON "Lead"/);
-    expect(grants).not.toMatch(/UPDATE[^;]*ON "LeadSubmissionInfo"/);
-    expect(grants).toContain('GRANT UPDATE ("name", "city", "country") ON "Airport"'); // exactly the three columns submit-flight-request.ts syncs
-    expect(grants).toContain('GRANT SELECT ("id", "role") ON "Account"');
-    expect(grants).toContain('GRANT SELECT ("id") ON "Company"');
-    expect(grants).not.toMatch(/ALTER DEFAULT PRIVILEGES|GRANT[^;]*ALL SEQUENCES|GRANT[^;]*ALL TABLES|TO\s+PUBLIC|WITH GRANT OPTION|GRANT[^;]*\bCREATE\b/i);
-    expect(grants.match(/ON SEQUENCE\s+"[^"]+"/g)).toEqual(['ON SEQUENCE "Airport_id_seq"']);
+  test("no database artefact is left in the repository: no SQL grants, no role scripts, no schema or migration files", () => {
+    const tracked = (rel: string) => {
+      try {
+        readFileSync(path.join(root, rel));
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    for (const gone of ["deploy/sql/website-runtime-role-grants.sql", "deploy/sql/verify-website-runtime-role.sql", "prisma/schema.prisma", "prisma.config.ts", "scripts/vercel-build.mjs", "src/server/lead-distribution.ts"]) {
+      expect(tracked(gone), gone).toBe(false);
+    }
   });
 });
 
-test.describe("liveness route and robots", () => {
-  test("/api/health: 200 {status:ok}, never cached, never indexed, and reveals nothing", async ({ request }) => {
-    const res = await request.get("/api/health", { maxRedirects: 0 });
-    expect(res.status()).toBe(200);
+// The liveness route and robots, on the PRODUCTION build (started and identified by this test - there is no dev server involved).
+test.describe("liveness route and robots (standalone build)", () => {
+  test.skip(!standaloneBuildPresent(), "needs a standalone build (NEXT_OUTPUT=standalone npm run build)");
+  test.setTimeout(120_000);
+  let server: StandaloneServer;
+  test.beforeAll(async () => {
+    // Deliberately NO CRM setting: the health route must not depend on the CRM, and a robots/sitemap request never calls it.
+    server = await startStandalone({ label: "vps-deployment liveness", port: 3236, env: { TRUSTED_PROXY: "cloudflare" } });
+  });
+  test.afterAll(async () => {
+    await server?.stop();
+  });
+  test.beforeEach(() => server.assertAlive());
+
+  test("/api/health: 200 {status:ok}, never cached, never indexed, reveals nothing, and needs no CRM", async () => {
+    const res = await fetch(`${server.origin}/api/health`, { redirect: "manual" });
+    expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ status: "ok" });
-    expect(res.headers()["cache-control"]).toMatch(/no-store/);
-    expect(res.headers()["x-robots-tag"]).toMatch(/noindex/);
+    expect(res.headers.get("cache-control")).toMatch(/no-store/);
+    expect(res.headers.get("x-robots-tag")).toMatch(/noindex/);
   });
 
-  test("robots.txt keeps the whole site crawlable except /api/, and the route is not in the sitemap", async ({ request }) => {
-    const robots = await (await request.get("/robots.txt")).text();
+  test("robots.txt keeps the whole site crawlable except /api/, and the route is not in the sitemap", async () => {
+    const robots = await (await fetch(`${server.origin}/robots.txt`)).text();
     expect(robots).toMatch(/Disallow: \/api\//);
     expect(robots).toMatch(/Allow: \//);
     expect(robots).not.toMatch(/^Disallow:\s*\/\s*$/m);
-    expect(await (await request.get("/sitemap.xml")).text()).not.toContain("/api/health");
+    expect(await (await fetch(`${server.origin}/sitemap.xml`)).text()).not.toContain("/api/health");
   });
 });

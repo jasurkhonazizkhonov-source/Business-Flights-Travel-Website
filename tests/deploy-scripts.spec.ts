@@ -6,8 +6,9 @@ import path from "node:path";
 
 // Dry-run of deploy/*.sh with a STUB `docker` (no Docker, no network, no host state): the scripts run for real under bash, in a throwaway
 // copy of the repository, and every docker command they issue is recorded. This proves the scripts' own logic — preflight refusals,
-// the alias-collision check, "nothing else on the shared network changed", rollback — and that they only ever issue the commands the
-// runbook documents. It does NOT prove that Docker, Compose or the real images behave as the stub assumes: see docs/DEPLOYMENT_VPS.md.
+// the alias-collision check, "the website has no route to the database", "nothing else on the shared networks changed", rollback — and that
+// they only ever issue the commands the runbook documents. It does NOT prove that Docker, Compose or the real images behave as the stub
+// assumes: see docs/DEPLOYMENT_VPS.md.
 const repo = path.resolve(__dirname, "..");
 // bash: PATH first (Linux/macOS CI), then Git for Windows. WSL's launcher is not a usable bash for these scripts.
 const BASH =
@@ -16,10 +17,12 @@ const bashAvailable = BASH !== "";
 
 const PROJECT = "business-flights-travel";
 const SITE = `${PROJECT}-bft-web-1`;
+const API_NET = "compass-tools-website-api";
+const TUN_NET = "compass-tools_web";
 
-type C = { id: string; startedAt: string; aliases: string[]; ports?: string; image?: string; health?: string };
+type C = { id: string; startedAt: string; aliases: string[]; ports?: string; image?: string; health?: string; networks?: string[] };
 interface State {
-  networkExists: boolean;
+  networks: string[];
   containers: Record<string, C>;
   images: string[];
   rendered: string;
@@ -54,7 +57,7 @@ if (cmd === "compose") {
   if (sub[0] === "build") { if (S.buildFails) fail(1, "build failed"); process.exit(0); }
   if (sub[0] === "up") {
     const tag = process.env.APP_VERSION || "local";
-    S.containers[SITE] = { id: "site" + Date.now(), startedAt: new Date().toISOString(), aliases: ["bft-web"], image: "business-flights-web:" + tag, health: S.healthAfterUp };
+    S.containers[SITE] = { id: "site" + Date.now(), startedAt: new Date().toISOString(), aliases: ["bft-web"], image: "business-flights-web:" + tag, health: S.healthAfterUp, networks: S.networks.slice() };
     if (!S.images.includes("business-flights-web:" + tag)) S.images.push("business-flights-web:" + tag);
     if (S.crmRestartOnUp) S.containers["compass-tools-app-1"].startedAt = "RESTARTED-" + Date.now();
     save();
@@ -63,9 +66,10 @@ if (cmd === "compose") {
   fail(97, "fake docker: unexpected compose subcommand " + JSON.stringify(sub));
 }
 if (cmd === "network" && rest[0] === "inspect") {
-  if (!S.networkExists) fail(1, "Error: No such network");
+  const net = rest[1];
+  if (!S.networks.includes(net)) fail(1, "Error: No such network");
   const t = tpl(rest);
-  if (t && t.includes(".Containers")) { out(names().map((n) => n + " ").join("")); process.exit(0); }
+  if (t && t.includes(".Containers")) { out(names().filter((n) => (S.containers[n].networks || []).includes(net)).map((n) => n + " ").join("")); process.exit(0); }
   out("[]"); process.exit(0);
 }
 if (cmd === "inspect") {
@@ -96,15 +100,17 @@ if (cmd === "logs") { out("log line"); process.exit(0); }
 fail(99, "fake docker: unexpected command " + JSON.stringify(args));
 `;
 
+// The CRM project as its own compose file lays it out (release commit 4d33c29): the app answers as `compass-crm` on the internal website-API
+// network and sits behind the tunnel on `web`; PostgreSQL (`db`) is on a third, internal `data` network the website never joins.
 const CRM: Record<string, C> = {
-  "compass-tools-app-1": { id: "aaa111", startedAt: "2026-10-01T00:00:00Z", aliases: ["app"] },
-  "compass-tools-db-1": { id: "bbb222", startedAt: "2026-10-01T00:00:00Z", aliases: ["db"] },
-  "compass-tools-cloudflared-1": { id: "ccc333", startedAt: "2026-10-01T00:00:00Z", aliases: ["cloudflared"] },
+  "compass-tools-app-1": { id: "aaa111", startedAt: "2026-10-01T00:00:00Z", aliases: ["app", "compass-crm"], networks: [API_NET, TUN_NET] },
+  "compass-tools-db-1": { id: "bbb222", startedAt: "2026-10-01T00:00:00Z", aliases: ["db"], networks: ["compass-tools_data"] },
+  "compass-tools-cloudflared-1": { id: "ccc333", startedAt: "2026-10-01T00:00:00Z", aliases: ["cloudflared"], networks: [TUN_NET] },
 };
 
 function baseState(over: Partial<State> = {}): State {
   return {
-    networkExists: true,
+    networks: [API_NET, TUN_NET, "compass-tools_data"],
     containers: JSON.parse(JSON.stringify(CRM)),
     images: [],
     rendered: "name: business-flights-travel\nservices:\n  bft-web:\n    expose:\n      - '3000'\n",
@@ -116,13 +122,17 @@ function baseState(over: Partial<State> = {}): State {
   };
 }
 
+// A valid .env for the API-only website. Values are fakes: 40 and 48 characters of filler.
+const KEY40 = "k".repeat(40);
+const ENV_OK = `CRM_API_KEY=${KEY40}\nCRM_COMPANY_ID=company-1\nGMAIL_SENDER_EMAIL=a@example.com\nGMAIL_APP_PASSWORD=not-a-real-password\n`;
+
 /** A throwaway clean git checkout containing only what the scripts need, plus the stub docker. */
-function sandbox(state: State, opts: { dirty?: boolean } = {}) {
+function sandbox(state: State, opts: { dirty?: boolean; env?: string } = {}) {
   const root = mkdtempSync(path.join(os.tmpdir(), "bft-deploy-"));
   cpSync(path.join(repo, "deploy"), path.join(root, "deploy"), { recursive: true });
   cpSync(path.join(repo, "compose.yaml"), path.join(root, "compose.yaml"));
   writeFileSync(path.join(root, ".gitignore"), ".env\n");
-  writeFileSync(path.join(root, ".env"), "DATABASE_URL=postgresql://x:y@db:5432/z\nGMAIL_SENDER_EMAIL=a@example.com\nGMAIL_APP_PASSWORD=not-a-real-password\nDATABASE_SSL_MODE=disable\n");
+  writeFileSync(path.join(root, ".env"), opts.env ?? ENV_OK);
   chmodSync(path.join(root, ".env"), 0o600);
   const git = (...a: string[]) => spawnSync("git", ["-c", "user.name=t", "-c", "user.email=t@example.com", ...a], { cwd: root, encoding: "utf8" });
   git("init", "-q");
@@ -175,14 +185,17 @@ test.describe("deploy scripts, dry-run against a stub docker", () => {
     expect(lines).toHaveLength(4);
   });
 
-  test("preflight passes on a healthy shared network and changes nothing", () => {
+  test("preflight passes on the CRM's networks, proves the website has no route to the database, and changes nothing", () => {
     const s = sandbox(baseState());
     const r = s.run("preflight.sh");
     expect(r.code, r.out).toBe(0);
-    expect(r.out).toContain("container 'compass-tools-db-1' answers to 'db'");
+    expect(r.out).toContain(`CRM API network '${API_NET}' exists`);
+    expect(r.out).toContain(`tunnel network '${TUN_NET}' exists`);
+    expect(r.out).toContain("container 'compass-tools-app-1' answers to 'compass-crm'");
+    expect(r.out).toContain("no database container on either network");
     expect(r.out).toContain("no other container answers to 'bft-web'");
     expect(r.out).toContain("a cloudflared container is attached");
-    expect(r.out).toContain("PostgreSQL publishes no host port");
+    expect(r.out).toContain("no database variables in .env");
     expect(r.out).not.toContain("FAIL");
     allCalls.push(...s.calls());
     // read-only: nothing that builds, starts, stops, tags or removes
@@ -193,7 +206,7 @@ test.describe("deploy scripts, dry-run against a stub docker", () => {
 
   test("preflight refuses: another container already answers to bft-web", () => {
     const st = baseState();
-    st.containers["rogue-1"] = { id: "r", startedAt: "x", aliases: ["bft-web"] };
+    st.containers["rogue-1"] = { id: "r", startedAt: "x", aliases: ["bft-web"], networks: [TUN_NET] };
     const s = sandbox(st);
     const r = s.run("preflight.sh");
     expect(r.code).not.toBe(0);
@@ -201,19 +214,35 @@ test.describe("deploy scripts, dry-run against a stub docker", () => {
     allCalls.push(...s.calls());
   });
 
-  test("preflight refuses: network missing, db alias missing, rendered config publishing a port, .env missing", () => {
-    let s = sandbox(baseState({ networkExists: false }));
+  test("preflight refuses: a network missing, no 'compass-crm' on the API network, a database container on a shared network, a published port", () => {
+    let s = sandbox(baseState({ networks: [TUN_NET] }));
     let r = s.run("preflight.sh");
     expect(r.code).not.toBe(0);
-    expect(r.out).toMatch(/network 'compass-tools_internal' does not exist/);
+    expect(r.out).toMatch(new RegExp(`network '${API_NET}' does not exist`));
     allCalls.push(...s.calls());
 
-    const noDb = baseState();
-    delete noDb.containers["compass-tools-db-1"];
-    s = sandbox(noDb);
+    s = sandbox(baseState({ networks: [API_NET] }));
     r = s.run("preflight.sh");
     expect(r.code).not.toBe(0);
-    expect(r.out).toMatch(/no container on 'compass-tools_internal' has the network alias 'db'/);
+    expect(r.out).toMatch(new RegExp(`network '${TUN_NET}' does not exist`));
+    allCalls.push(...s.calls());
+
+    const noCrm = baseState();
+    noCrm.containers["compass-tools-app-1"].aliases = ["app"];
+    s = sandbox(noCrm);
+    r = s.run("preflight.sh");
+    expect(r.code).not.toBe(0);
+    expect(r.out).toMatch(new RegExp(`no container on '${API_NET}' answers to 'compass-crm'`));
+    allCalls.push(...s.calls());
+
+    // The old layout: the tunnel network also carries PostgreSQL. The website must not join a network with a route to the database.
+    const dbShared = baseState();
+    dbShared.containers["compass-tools-db-1"].networks = [TUN_NET];
+    s = sandbox(dbShared);
+    r = s.run("preflight.sh");
+    expect(r.code).not.toBe(0);
+    expect(r.out).toMatch(/a container answering to 'db' shares a network with the website: compass-tools-db-1@compass-tools_web/);
+    expect(r.out).not.toContain("FAIL: network");
     allCalls.push(...s.calls());
 
     s = sandbox(baseState({ rendered: "services:\n  bft-web:\n    ports:\n      - 3000:3000\n" }));
@@ -221,56 +250,85 @@ test.describe("deploy scripts, dry-run against a stub docker", () => {
     expect(r.code).not.toBe(0);
     expect(r.out).toMatch(/publishes a host port/);
     allCalls.push(...s.calls());
+  });
 
-    s = sandbox(baseState());
-    writeFileSync(path.join(s.root, ".env"), "GMAIL_SENDER_EMAIL=a@example.com\n"); // DATABASE_URL and the app password are missing
-    r = s.run("preflight.sh");
+  test("preflight refuses a .env that is missing a required variable, without echoing any value", () => {
+    for (const missing of ["CRM_API_KEY", "CRM_COMPANY_ID", "GMAIL_SENDER_EMAIL", "GMAIL_APP_PASSWORD"]) {
+      const env = ENV_OK.split("\n").filter((l) => !l.startsWith(`${missing}=`)).join("\n");
+      const s = sandbox(baseState(), { env });
+      const r = s.run("preflight.sh");
+      expect(r.code, missing).not.toBe(0);
+      expect(r.out).toContain(`${missing} is not set in .env`);
+      expect(r.out).not.toContain("not-a-real-password");
+      expect(r.out).not.toContain(KEY40);
+      allCalls.push(...s.calls());
+    }
+    const s = sandbox(baseState());
+    writeFileSync(path.join(s.root, ".env"), "GMAIL_SENDER_EMAIL=a@example.com\n"); // nearly everything is missing
+    const r = s.run("preflight.sh");
     expect(r.code).not.toBe(0);
-    expect(r.out).toMatch(/DATABASE_URL is not set in \.env/);
     expect(r.out).not.toContain("not-a-real-password");
     allCalls.push(...s.calls());
   });
 
-  test("preflight warns (does not fail) when PostgreSQL publishes a port or the connector is missing; CRM_NETWORK_NAME is honoured", () => {
-    const st = baseState();
-    delete st.containers["compass-tools-cloudflared-1"];
-    st.containers["compass-tools-db-1"].ports = "5432/tcp -> 0.0.0.0:5432";
-    const s = sandbox(st);
-    const r = s.run("preflight.sh");
-    expect(r.out).toMatch(/WARN: 'compass-tools-db-1' publishes a host port/);
-    expect(r.out).toMatch(/WARN: no cloudflared container is attached/);
-    allCalls.push(...s.calls());
-  });
-
-  test("preflight requires an EXPLICIT database TLS decision: none, conflicting or invalid values are refused; verified TLS passes quietly; plaintext warns", () => {
-    const base = "DATABASE_URL=postgresql://x:y@db:5432/z\nGMAIL_SENDER_EMAIL=a@example.com\nGMAIL_APP_PASSWORD=not-a-real-password\n";
-    const run = (tls: string) => {
-      const s = sandbox(baseState());
-      writeFileSync(path.join(s.root, ".env"), base + tls);
-      chmodSync(path.join(s.root, ".env"), 0o600);
+  test("preflight checks the CRM settings: a key under 32 characters, a short or valid LEAD_INGEST_SECRET, a malformed CRM_API_URL", () => {
+    const run = (extra: string, base = ENV_OK) => {
+      const s = sandbox(baseState(), { env: base + extra });
       const r = s.run("preflight.sh");
       allCalls.push(...s.calls());
       return r;
     };
-    let r = run("");
+    let r = run("", ENV_OK.replace(KEY40, "k".repeat(31)));
     expect(r.code).not.toBe(0);
-    expect(r.out).toMatch(/makes no database TLS decision/);
-    r = run("DATABASE_SSL_CA=-----BEGIN CERTIFICATE-----\\nAAA\\n-----END CERTIFICATE-----\n");
+    expect(r.out).toMatch(/CRM_API_KEY is shorter than 32 characters/);
+    expect(r.out).not.toContain("k".repeat(31));
+    r = run("", ENV_OK.replace(KEY40, "k".repeat(32)));
     expect(r.code, r.out).toBe(0);
-    expect(r.out).toContain("verified TLS is configured");
-    expect(r.out).not.toContain("PLAINTEXT");
-    expect(r.out).not.toContain("BEGIN CERTIFICATE"); // the certificate text is never echoed
-    r = run("DATABASE_SSL_VERIFY=system\n");
+    r = run("");
     expect(r.code, r.out).toBe(0);
-    r = run("DATABASE_SSL_MODE=disable\n");
-    expect(r.code, r.out).toBe(0);
-    expect(r.out).toMatch(/WARN: DATABASE_SSL_MODE=disable: PLAINTEXT/);
-    r = run("DATABASE_SSL_MODE=disable\nDATABASE_SSL_VERIFY=system\n");
+    expect(r.out).toMatch(/WARN: LEAD_INGEST_SECRET is not set: leads are created WITHOUT the visitor's IP/);
+    r = run("LEAD_INGEST_SECRET=short\n");
     expect(r.code).not.toBe(0);
-    expect(r.out).toMatch(/conflicts with DATABASE_SSL_CA/);
-    r = run("DATABASE_SSL_MODE=require\n");
+    expect(r.out).toMatch(/LEAD_INGEST_SECRET is shorter than 32 characters/);
+    r = run(`LEAD_INGEST_SECRET=${"s".repeat(40)}\n`);
+    expect(r.code, r.out).toBe(0);
+    expect(r.out).toContain("LEAD_INGEST_SECRET is set");
+    expect(r.out).not.toContain("s".repeat(40));
+    r = run("CRM_API_URL=ftp://compass-crm\n");
     expect(r.code).not.toBe(0);
-    expect(r.out).toMatch(/must be exactly 'disable' or unset/);
+    expect(r.out).toMatch(/CRM_API_URL must start with http:\/\/ or https:\/\//);
+    r = run("CRM_API_URL=http://compass-crm:3000\n");
+    expect(r.code, r.out).toBe(0);
+  });
+
+  test("preflight REFUSES any database setting in .env: the website must not hold database configuration at all", () => {
+    for (const line of ["DATABASE_URL=postgresql://x:y@db:5432/z", "DIRECT_URL=postgresql://x:y@db:5432/z", "DATABASE_SSL_MODE=disable", "DATABASE_SSL_CA=abc", "DATABASE_SSL_VERIFY=system", "DATABASE_AUTO_INIT=true"]) {
+      const s = sandbox(baseState(), { env: `${ENV_OK}${line}\n` });
+      const r = s.run("preflight.sh");
+      const name = line.split("=")[0];
+      expect(r.code, line).not.toBe(0);
+      expect(r.out).toContain(`${name} is set in .env. The website does not use a database`);
+      expect(r.out).not.toContain("postgresql://x:y");
+      allCalls.push(...s.calls());
+    }
+  });
+
+  test("preflight warns (does not fail) when no cloudflared is on the tunnel network; the network names are overridable", () => {
+    const st = baseState();
+    delete st.containers["compass-tools-cloudflared-1"];
+    const s = sandbox(st);
+    const r = s.run("preflight.sh");
+    expect(r.code, r.out).toBe(0);
+    expect(r.out).toMatch(/WARN: no cloudflared container is attached/);
+    allCalls.push(...s.calls());
+
+    const renamed = baseState({ networks: ["crm-api-x", "tunnel-x"] });
+    for (const c of Object.values(renamed.containers)) c.networks = (c.networks ?? []).map((n) => (n === API_NET ? "crm-api-x" : n === TUN_NET ? "tunnel-x" : n));
+    const s2 = sandbox(renamed, { env: `${ENV_OK}CRM_API_NETWORK_NAME=crm-api-x\nTUNNEL_NETWORK_NAME=tunnel-x\n` });
+    const r2 = s2.run("preflight.sh");
+    expect(r2.code, r2.out).toBe(0);
+    expect(r2.out).toContain("CRM API network 'crm-api-x' exists");
+    allCalls.push(...s2.calls());
   });
 
   test("deploy.sh: preflight, build and start ONLY bft-web, wait healthy, verify, and prove no other container changed", () => {
@@ -296,7 +354,7 @@ test.describe("deploy scripts, dry-run against a stub docker", () => {
 
   test("deploy.sh: tags the running image as :previous before replacing it", () => {
     const st = baseState();
-    st.containers[SITE] = { id: "old", startedAt: "2026-10-10T00:00:00Z", aliases: ["bft-web"], image: "business-flights-web:abc1234" };
+    st.containers[SITE] = { id: "old", startedAt: "2026-10-10T00:00:00Z", aliases: ["bft-web"], image: "business-flights-web:abc1234", networks: [API_NET, TUN_NET] };
     st.images = ["business-flights-web:abc1234"];
     const s = sandbox(st);
     const r = s.run("deploy.sh");
@@ -308,7 +366,7 @@ test.describe("deploy scripts, dry-run against a stub docker", () => {
 
   test("deploy.sh does NOT retag :previous from an unhealthy running container (a second attempt after a failed deploy must not poison the rollback target)", () => {
     const st = baseState();
-    st.containers[SITE] = { id: "broken", startedAt: "2026-10-11T00:00:00Z", aliases: ["bft-web"], image: "business-flights-web:badbad1", health: "unhealthy" };
+    st.containers[SITE] = { id: "broken", startedAt: "2026-10-11T00:00:00Z", aliases: ["bft-web"], image: "business-flights-web:badbad1", health: "unhealthy", networks: [API_NET, TUN_NET] };
     st.images = ["business-flights-web:badbad1", "business-flights-web:previous"];
     const s = sandbox(st);
     const r = s.run("deploy.sh");
@@ -317,7 +375,7 @@ test.describe("deploy scripts, dry-run against a stub docker", () => {
     allCalls.push(...s.calls());
   });
 
-  test("deploy.sh FAILS (does not report success) if any other container on the shared network was restarted", () => {
+  test("deploy.sh FAILS (does not report success) if any other container on the shared networks was restarted", () => {
     const s = sandbox(baseState({ crmRestartOnUp: true }));
     const r = s.run("deploy.sh");
     expect(r.code).not.toBe(0);
@@ -338,7 +396,7 @@ test.describe("deploy scripts, dry-run against a stub docker", () => {
 
   test("deploy.sh: a failed build leaves the running container alone; a dirty working tree is refused before anything is built", () => {
     const st = baseState({ buildFails: true });
-    st.containers[SITE] = { id: "old", startedAt: "2026-10-10T00:00:00Z", aliases: ["bft-web"], image: "business-flights-web:abc1234" };
+    st.containers[SITE] = { id: "old", startedAt: "2026-10-10T00:00:00Z", aliases: ["bft-web"], image: "business-flights-web:abc1234", networks: [API_NET, TUN_NET] };
     let s = sandbox(st);
     let r = s.run("deploy.sh");
     expect(r.code).not.toBe(0);
@@ -356,7 +414,7 @@ test.describe("deploy scripts, dry-run against a stub docker", () => {
 
   test("rollback.sh: recreates only bft-web from an existing image with --no-build; refuses an unknown tag without touching anything", () => {
     const st = baseState();
-    st.containers[SITE] = { id: "new", startedAt: "2026-10-11T00:00:00Z", aliases: ["bft-web"], image: "business-flights-web:def5678" };
+    st.containers[SITE] = { id: "new", startedAt: "2026-10-11T00:00:00Z", aliases: ["bft-web"], image: "business-flights-web:def5678", networks: [API_NET, TUN_NET] };
     st.images = ["business-flights-web:previous", "business-flights-web:def5678"];
     let s = sandbox(st);
     let r = s.run("rollback.sh", ["previous"]);
@@ -392,17 +450,18 @@ test.describe("deploy scripts, dry-run against a stub docker", () => {
         if (sub === "up") expect(c, flat).toContain("--no-deps");
       }
       if (c[0] === "exec") expect(c[1], flat).toBe(SITE);
-      if (c[0] === "inspect" || c[0] === "port" || c[0] === "logs") expect(flat, flat).toMatch(/compass-tools|business-flights-travel-bft-web-1/);
+      if (c[0] === "inspect" || c[0] === "port" || c[0] === "logs") expect(flat, flat).toMatch(/compass-tools|business-flights-travel-bft-web-1|rogue-1/);
       expect(flat).not.toMatch(/--privileged|-v\s|--volume|--network host|--pid|docker\.sock/);
     }
     // nothing ever read an environment file's values through docker
     expect(allCalls.flat().join(" ")).not.toContain("not-a-real-password");
+    expect(allCalls.flat().join(" ")).not.toContain(KEY40);
   });
 
-  test("no script prints secrets, and none contains a destructive or production-data command", () => {
+  test("no script prints secrets, and none contains a destructive or database command", () => {
     for (const f of ["common.sh", "preflight.sh", "deploy.sh", "rollback.sh", "verify.sh"]) {
       const code = readFileSync(path.join(repo, "deploy", f), "utf8").split("\n").filter((l) => !l.trim().startsWith("#")).join("\n");
-      expect(code, f).not.toMatch(/\bcat\b[^|\n]*\.env|echo[^\n]*(PASSWORD|DATABASE_URL)|printenv|\benv\b\s*\|/);
+      expect(code, f).not.toMatch(/\bcat\b[^|\n]*\.env|echo[^\n]*(PASSWORD|CRM_API_KEY|LEAD_INGEST_SECRET)|printenv|\benv\b\s*\|/);
       expect(code, f).not.toMatch(/psql|pg_dump|pg_restore|prisma|migrate|DROP |TRUNCATE|DELETE FROM|GRANT |docker\s+(rm|stop|kill|restart|system|volume|network\s+(create|rm|connect|disconnect|prune))/);
     }
   });

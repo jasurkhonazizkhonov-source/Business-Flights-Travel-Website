@@ -1,23 +1,21 @@
 import { test, expect } from "@playwright/test";
-import { spawn, type ChildProcess } from "node:child_process";
-import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
-import os from "node:os";
+import { readFileSync } from "node:fs";
 import path from "node:path";
+import { standaloneBuildPresent, startStandalone, type StandaloneServer } from "./support/standalone-server";
 
 // The three public form actions, called for real over HTTP on the standalone server exactly as the browser calls them (a server-action POST),
-// with TRUSTED_PROXY=cloudflare - the VPS configuration. No database is involved: every request here ends at the rate limiter, the
-// honeypot or validation, all of which run before any database access (the server is given an unreachable DATABASE_URL to prove it).
+// with TRUSTED_PROXY=cloudflare - the VPS configuration. The CRM is not involved: every request here ends at the rate limiter, the honeypot
+// or validation, all of which run before the CRM is called (the server is given an unreachable CRM_API_URL to prove it).
 //
-// Needs `NEXT_OUTPUT=standalone npm run build` first; otherwise skipped (never "passed").
-const repo = path.resolve(__dirname, "..");
-const standalone = path.join(repo, ".next", "standalone");
+// Needs `NEXT_OUTPUT=standalone npm run build` first; otherwise skipped (never "passed"). The server is started by this test and identified
+// before anything is sent to it (tests/support/standalone-server.ts).
 const PORT = 3233;
 const BASE = `http://127.0.0.1:${PORT}`;
 
 interface ActionCase {
   name: "subscribeToNewsletter" | "submitContactMessage" | "submitFlightRequest";
   limit: number;
-  /** An argument that reaches the limiter and then ends cheaply (honeypot / validation) without touching the database. */
+  /** An argument that reaches the limiter and then ends cheaply (honeypot / validation) without calling the CRM. */
   args: unknown[];
   allowedMarker: RegExp;
   blockedMarker: RegExp;
@@ -49,59 +47,36 @@ const CASES: ActionCase[] = [
 
 test.describe.configure({ mode: "serial" });
 test.describe("rate limits on the real public actions (standalone server, TRUSTED_PROXY=cloudflare)", () => {
-  test.skip(!existsSync(path.join(standalone, "server.js")), "needs a standalone build (NEXT_OUTPUT=standalone npm run build)");
+  test.skip(!standaloneBuildPresent(), "needs a standalone build (NEXT_OUTPUT=standalone npm run build)");
   test.setTimeout(120_000);
 
-  let server: ChildProcess | undefined;
-  let layout = "";
-  let logs = "";
+  let server: StandaloneServer | undefined;
   const ids: Record<string, string> = {};
 
   test.beforeAll(async () => {
-    layout = mkdtempSync(path.join(os.tmpdir(), "bft-ratelimit-"));
-    cpSync(standalone, layout, { recursive: true, filter: (src) => !/[\\/]\.env($|\.)/.test(src) }); // like the image: no .env
-    const manifest = JSON.parse(readFileSync(path.join(layout, ".next", "server", "server-reference-manifest.json"), "utf8")) as {
+    server = await startStandalone({
+      label: "rate-limit e2e",
+      port: PORT,
+      env: {
+        TRUSTED_PROXY: "cloudflare",
+        // unreachable on purpose: nothing below may need the CRM
+        CRM_API_URL: "http://127.0.0.1:1",
+        CRM_API_KEY: "k".repeat(40),
+        CRM_COMPANY_ID: "unused",
+      },
+    });
+    const manifest = JSON.parse(readFileSync(path.join(server.layout, ".next", "server", "server-reference-manifest.json"), "utf8")) as {
       node: Record<string, { exportedName: string }>;
     };
     for (const [id, v] of Object.entries(manifest.node)) ids[v.exportedName] = id;
     for (const c of CASES) expect(ids[c.name], `server action id for ${c.name}`).toBeTruthy();
-
-    const env = {
-      PATH: process.env.PATH ?? "",
-      SystemRoot: process.env.SystemRoot ?? "",
-      NODE_ENV: "production",
-      HOSTNAME: "127.0.0.1",
-      PORT: String(PORT),
-      TRUSTED_PROXY: "cloudflare",
-      DATABASE_URL: "postgresql://nobody:none@127.0.0.1:1/none", // unreachable on purpose: nothing below may need a database
-      DATABASE_SSL_MODE: "disable",
-      DATABASE_AUTO_INIT: "false",
-    } as NodeJS.ProcessEnv;
-    const child = spawn(process.execPath, ["server.js"], { cwd: layout, env, stdio: ["ignore", "pipe", "pipe"] });
-    server = child;
-    child.stdout.on("data", (d) => (logs += d));
-    child.stderr.on("data", (d) => (logs += d));
-    for (let i = 0; i < 60; i++) {
-      try {
-        if ((await fetch(`${BASE}/api/health`)).status === 200) return;
-      } catch {
-        /* not up yet */
-      }
-      await new Promise((r) => setTimeout(r, 500));
-    }
-    throw new Error("the standalone server did not start:\n" + logs.slice(-1200));
   });
 
+  // Before every test: the process this test started must still be the one running.
+  test.beforeEach(() => server?.assertAlive());
+
   test.afterAll(async () => {
-    server?.kill();
-    await new Promise((r) => setTimeout(r, 1500));
-    if (layout) {
-      try {
-        rmSync(layout, { recursive: true, force: true });
-      } catch {
-        /* a leftover temp directory is harmless */
-      }
-    }
+    await server?.stop();
   });
 
   /** One server-action call, the way the browser makes it. Returns the response text (the React Flight payload). */
@@ -154,7 +129,7 @@ test.describe("rate limits on the real public actions (standalone server, TRUSTE
   }
 
   test("the fallback is announced once in the server log, without any header value", async () => {
-    const fallbackLines = logs.split("\n").filter((l) => l.includes("[rate-limit] no trusted client IP"));
+    const fallbackLines = server!.logs().split("\n").filter((l) => l.includes("[rate-limit] no trusted client IP"));
     expect(fallbackLines.length).toBeGreaterThanOrEqual(1);
     expect(fallbackLines.length).toBeLessThanOrEqual(2); // throttled: dozens of unresolved requests above, a handful of lines at most
     expect(fallbackLines.join("\n")).not.toMatch(/not-an-ip|999\.1\.1\.1|203\.0\.113|198\.51\.100/);

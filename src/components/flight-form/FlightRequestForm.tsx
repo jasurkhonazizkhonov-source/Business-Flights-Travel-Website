@@ -65,10 +65,12 @@ export function FlightRequestForm({
   // One key per mounted form, identical on every attempt of this submission —
   // including the automatic retry Next.js makes of a failed Server Action
   // POST — so the server can recognise a repeat of the same submission and
-  // not save it twice (src/lib/submission-id.ts). A reload mounts a new form
-  // and therefore a new key: that is a deliberate new request. Absent only
-  // where randomUUID is unavailable (insecure context); the server then just
-  // applies no retry protection.
+  // not save it twice: the server action sends it to the CRM as the
+  // Idempotency-Key (src/server/actions/submit-flight-request.ts). A reload
+  // mounts a new form and therefore a new key: that is a deliberate new
+  // request. Absent only where randomUUID is unavailable (insecure context);
+  // the server then uses a fresh key per call, which protects only the
+  // retries inside that one call.
   const [submissionId] = useState(() => globalThis.crypto?.randomUUID?.());
   const [showMore, setShowMore] = useState(false);
 
