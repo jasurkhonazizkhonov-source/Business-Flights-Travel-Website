@@ -12,6 +12,7 @@ import { defineConfig, devices } from "@playwright/test";
 const INFRASTRUCTURE_SPECS = [
   /crm-api-client\.spec\.ts$/,
   /crm-api-actions-e2e\.spec\.ts$/,
+  /crm-contract-live\.spec\.ts$/, // opt-in: skipped unless CRM_CONTRACT_URL / CRM_CONTRACT_KEY point at a non-production CRM
   /self-hosted-e2e\.spec\.ts$/,
   /deploy-scripts\.spec\.ts$/,
   /rate-limit-actions-e2e\.spec\.ts$/,

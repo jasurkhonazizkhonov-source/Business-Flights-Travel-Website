@@ -26,10 +26,16 @@ elif [ "$(printf '%s' "${ingest}" | wc -c)" -lt 32 ]; then
 else
   ok "LEAD_INGEST_SECRET is set (visitor IP / location will be sent, signed)"
 fi
-case "$(env_or_default CRM_API_URL http://compass-crm:3000)" in
+CRM_URL="$(env_or_default CRM_API_URL http://compass-crm:3000)"
+case "${CRM_URL}" in
   http://*|https://*) ok "CRM_API_URL is an http(s) URL" ;;
   *) die "CRM_API_URL must start with http:// or https:// (default http://compass-crm:3000)" ;;
 esac
+# The host the website will actually resolve (no scheme, credentials, port or path). The reachability check below verifies THIS name, not a
+# fixed one: 'compass-crm' is only an alias the CRM's own compose file may or may not define, so it is never assumed.
+CRM_HOST="${CRM_URL#*://}"; CRM_HOST="${CRM_HOST%%/*}"; CRM_HOST="${CRM_HOST##*@}"; CRM_HOST="${CRM_HOST%%:*}"
+[ -n "${CRM_HOST}" ] || die "CRM_API_URL has no host"
+case "${CRM_HOST}" in *[!A-Za-z0-9._-]*) die "CRM_API_URL's host must be a Docker network name (letters, digits, '.', '_' and '-' only)" ;; esac
 
 say "The website must have NO database configuration"
 # The architecture is website -> authenticated CRM API -> CRM database. Database credentials in the website's .env would be unused AND a risk.
@@ -56,12 +62,12 @@ ok "tunnel network '${TUN_NET}' exists"
 # Aliases a container answers to on a network (docker inspect, read-only).
 aliases_of() { docker inspect -f "{{range \$k,\$v := .NetworkSettings.Networks}}{{if eq \$k \"$2\"}}{{range \$v.Aliases}}{{.}} {{end}}{{end}}{{end}}" "$1"; }
 
-say "The CRM API is reachable by the name 'compass-crm', the database is NOT reachable, and no name collides"
+say "The CRM API is reachable by the name '${CRM_HOST}' (from CRM_API_URL), the database is NOT reachable, and no name collides"
 crm=""; dbfound=""; clash=""
 for NET in "${API_NET}" "${TUN_NET}"; do
   for c in $(docker network inspect "${NET}" -f '{{range .Containers}}{{.Name}} {{end}}'); do
     a=" $(aliases_of "${c}" "${NET}") "
-    if [ "${NET}" = "${API_NET}" ]; then case "${a}" in *" compass-crm "*) crm="${c}";; esac; fi
+    if [ "${NET}" = "${API_NET}" ]; then case "${a}" in *" ${CRM_HOST} "*) crm="${c}";; esac; fi
     # The website has no database and must have no network path to one: a container answering to 'db' on either network is a layout error.
     case "${a}" in *" db "*) dbfound="${dbfound} ${c}@${NET}";; esac
     # Docker DNS answers a name from every container that carries it. Another container (not ours) already called bft-web would make the
@@ -69,8 +75,8 @@ for NET in "${API_NET}" "${TUN_NET}"; do
     if [ "${c}" != "${CONTAINER}" ]; then case "${a}" in *" bft-web "*) clash="${clash} ${c}";; esac; fi
   done
 done
-[ -n "${crm}" ] || die "no container on '${API_NET}' answers to 'compass-crm'. The CRM must be up with its website API network, and CRM_API_URL must use that name (default http://compass-crm:3000)."
-ok "container '${crm}' answers to 'compass-crm' on '${API_NET}'"
+[ -n "${crm}" ] || die "no container on '${API_NET}' answers to '${CRM_HOST}'. The CRM must be up on that network under the name CRM_API_URL uses (default http://compass-crm:3000: an alias the CRM's compose file must define - read the real aliases with docker network inspect)."
+ok "container '${crm}' answers to '${CRM_HOST}' on '${API_NET}'"
 [ -z "${dbfound}" ] || die "a container answering to 'db' shares a network with the website:${dbfound}. The website must not have any route to the database. Use the CRM's separate tunnel network (TUNNEL_NETWORK_NAME), not one that carries PostgreSQL."
 ok "no database container on either network"
 [ -z "${clash}" ] || die "another container already answers to 'bft-web':${clash}. Resolve this before deploying."

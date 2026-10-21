@@ -5,7 +5,8 @@ import type { CrmApiConfig } from "./config";
 // reads the environment is src/server/crm-api.ts). It takes its configuration and `fetch` as arguments so every outcome can be tested against
 // a local stand-in server.
 //
-// Contracts (verified against the CRM at commit 4d33c29; see docs/CRM_API_INTEGRATION.md):
+// Contracts (verified against the CRM at commit 4d33c29 and against the CRM pull-request build 01e809d, which this client was run against
+// with fake data; see docs/CRM_API_INTEGRATION.md):
 //   * POST /api/v1/website/flight-inquiries   authenticated (Bearer), REQUIRED Idempotency-Key, strict JSON body. Safe to retry with the SAME key.
 //   * POST /api/public/contact-inquiry        the CRM's browser-facing, UNauthenticated endpoint (companyId in the body). NOT idempotent.
 //   * POST /api/public/subscribe              the same kind of endpoint. Server-side an upsert, but the CRM notifies on a new subscriber.

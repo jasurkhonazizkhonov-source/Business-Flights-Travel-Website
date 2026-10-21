@@ -13,7 +13,9 @@
 # do NOT share networks automatically: if a name is wrong, `up` fails with "network ... declared as external, but could not be found"
 # instead of silently creating an empty network.
 #   crm_api   `compass-tools-website-api` — an `internal: true` network that carries the CRM app (answering as http://compass-crm:3000)
-#             and nothing else: not PostgreSQL, not the tunnel. It is how the website reaches the CRM's API.
+#             and nothing else: not PostgreSQL, not the tunnel. It is how the website reaches the CRM's API. NOTE: that network and that alias
+#             are the CRM RELEASE layout; neither the CRM pull request nor the live stack is known to define them (docs/DEPLOYMENT_VPS.md, 3).
+#             The default URL below is therefore a default, not a fact: preflight verifies the host that CRM_API_URL actually names.
 #   tunnel    `compass-tools_web` — the network the Cloudflare Tunnel connector (`cloudflared`) is on, so the tunnel's public hostname for
 #             this site can point at http://bft-web:3000. It must NOT be a network that also carries PostgreSQL: deploy/preflight.sh
 #             refuses to continue if any container on either network answers to the name `db`.
