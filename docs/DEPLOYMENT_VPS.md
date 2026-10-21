@@ -63,15 +63,26 @@ runtime-role grants), `src/lib/{prisma,db-tls,db-error,schema-guard,…}.ts`, `s
 
 ## 3. Assumptions and compatibility risks
 
-1. The CRM release that contains the website API (`4d33c29` on `feature/website-lead-api`) **and its migration `20261016000100_lead_ingest_fingerprint`**
-   is deployed by the CRM owner. The production database has 72 migrations and has **not** applied that one; without it the flight endpoint cannot
-   store a lead and every flight request shows the friendly error. The website does not and must not apply migrations.
-2. The CRM container answers to `compass-crm` on the private API network (`compass-tools-website-api`, `internal: true`) on port 3000. The default
-   `CRM_API_URL=http://compass-crm:3000` follows the CRM release documentation; if the live stack uses other names, set `CRM_API_URL` and
-   `CRM_API_NETWORK_NAME` (preflight prints the real network names).
+1. The CRM release that contains the website API **and its migration `20261016000100_lead_ingest_fingerprint`** is deployed by the CRM owner. That is
+   the CRM pull request at commit `01e809d` (branch `work/website-api-minimal-20261021`; **not merged, not deployed**; the website's client was
+   verified against that build, see `docs/CRM_API_INTEGRATION.md`). The production database was last reported with 72 migrations, i.e. **without**
+   that one (re-confirm on the VPS); without it the flight endpoint cannot store a lead and every flight request shows the friendly error. The website
+   does not and must not apply migrations.
+2. **The private network path is NOT verified for the live CRM stack.** The defaults in `compose.yaml` - network `compass-tools-website-api` (the CRM
+   answering as `compass-crm`) and network `compass-tools_web` - describe the CRM *release branch's* Compose layout (`4d33c29`: networks `data`, `web`
+   and `website_api`). The CRM pull request contains **no Compose file**, so it defines no network and no alias at all. The live production CRM stack
+   was last reported with a different layout: **one** network, `compass-tools_internal`, carrying the CRM app, PostgreSQL and `cloudflared`, with the
+   CRM service reachable as `app` (so `http://app:3000`, not `http://compass-crm:3000`). None of that can be read from this repository; confirm it
+   on the VPS with the read-only `docker network ls`, `docker network inspect compass-tools_internal` and `docker inspect` of the CRM container
+   (aliases only). `CRM_API_URL`, `CRM_API_NETWORK_NAME` and `TUNNEL_NETWORK_NAME` exist so the real names can be used, and `deploy/preflight.sh` now
+   verifies the host named by `CRM_API_URL` (not a fixed `compass-crm`).
 3. The CRM's API network is `internal` (no internet), so the website also joins the CRM's tunnel network for the Cloudflare Tunnel (and for
    outbound Gmail / Unsplash through the normal Docker egress). That tunnel network must **not** carry PostgreSQL; preflight refuses a network where a
-   container answers to `db`.
+   container answers to `db`. **On the live single-network layout from item 2 that rule fails by design** (PostgreSQL shares `compass-tools_internal`),
+   so the website cannot be deployed there with this preflight. The owner must choose, outside this repository: (a) give the live CRM stack the
+   release layout - a separate internal API network with the `compass-crm` alias and a tunnel network without PostgreSQL (a CRM Compose change); or
+   (b) accept, knowingly, that the website shares a network with PostgreSQL. The website holds no database credential, but the network route would
+   exist; (b) is not implemented here and would need an explicit, reviewed relaxation of the preflight rule.
 4. `LEAD_INGEST_SECRET` (optional) is identical on both sides, or the CRM ignores the visitor context and records no IP or location.
 5. The contact form and the newsletter use the CRM's **public, unauthenticated** endpoints, because no authenticated equivalent exists
    (`docs/CRM_API_INTEGRATION.md`, "Gaps"). They are rate limited by the CRM and by the website, but anyone who can reach the CRM can call them.
@@ -89,7 +100,7 @@ create an empty one):
 Not joined: the CRM's data network or any network that carries PostgreSQL. The website cannot resolve `db`, and holds no credential that would allow a
 connection if it could. Docker reachability is not authentication: the CRM still requires the bearer key on its API.
 
-`deploy/preflight.sh` (read-only) checks: both networks exist; a container answers to `compass-crm` on the API network; no container answers to `db`
+`deploy/preflight.sh` (read-only) checks: both networks exist; a container answers to the host named by `CRM_API_URL` (default `compass-crm`) on the API network; no container answers to `db`
 on either network; no other container answers to `bft-web`. `deploy/deploy.sh` records the other containers' ids and start times on both networks
 before and after the deploy and refuses to report success if any changed.
 
@@ -153,8 +164,8 @@ the environment during `docker build`. No script prints secrets. Do not paste `d
 deploy/preflight.sh
 ```
 
-Checks the tools, the `.env` (mode, required CRM/Gmail values, key length, **no database variables**), both external networks, the `compass-crm`
-answer on the API network, the absence of any `db` on either network, and the `bft-web` alias. It starts, stops and changes nothing.
+Checks the tools, the `.env` (mode, required CRM/Gmail values, key length, **no database variables**), both external networks, the answer of the
+host named by `CRM_API_URL` (default `compass-crm`) on the API network, the absence of any `db` on either network, and the `bft-web` alias. It starts, stops and changes nothing.
 
 ### 8.2 Owner approval and configuration (before anything is built)
 
@@ -187,7 +198,7 @@ It runs no SQL and no migration. Nothing it issues is `down`, `rm`, `stop`, `res
 real **404**, `/flights?to=GRU` canonical `/flights`. Then owner-run, **before adding tunnel routes**:
 
 ```bash
-docker exec business-flights-travel-bft-web-1 getent hosts compass-crm bft-web    # compass-crm must resolve; `getent hosts db` must print nothing
+docker exec business-flights-travel-bft-web-1 getent hosts compass-crm bft-web    # the host in CRM_API_URL (default compass-crm) must resolve; `getent hosts db` must print nothing
 ```
 
 After the routes exist: `curl -sI https://www.businessflights.travel/`, `curl -s https://www.businessflights.travel/api/health`,

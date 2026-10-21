@@ -11,11 +11,25 @@ migrations; `deploy/preflight.sh` refuses to deploy if a database setting is pre
 any source file, script, dependency or compose setting reintroduces one. There is **no database fallback**: if the CRM cannot be reached the
 visitor is told so and nothing is stored on the website side.
 
-The contract below was read from the CRM repository at commit `4d33c29` (branch `feature/website-lead-api`, the "release" checkout), not
-assumed: `docs/WEBSITE_LEAD_API.md`, `src/app/api/v1/website/flight-inquiries/route.ts`, `src/server/lead-intake.ts`,
-`src/server/lead-ingest-context.ts`, `src/app/api/public/contact-inquiry/route.ts` (+ `src/server/public-inquiry.ts`) and
-`src/app/api/public/subscribe/route.ts`. If the CRM changes, re-read those files; this document and `tests/support/stub-crm.ts` are the
-website's copy of the contract.
+The contract below was read from the CRM repository, not assumed: first at commit `4d33c29` (branch `feature/website-lead-api`, the "release"
+checkout), then re-verified against the **CRM pull-request build `01e809d`** (branch `work/website-api-minimal-20261021`, based on the CRM's
+`main` at `2daf3f6`; this is the commit that is under review and not yet merged): `docs/WEBSITE_LEAD_API.md`,
+`src/app/api/v1/website/flight-inquiries/route.ts`, `src/server/lead-intake.ts`, `src/server/lead-ingest-context.ts`,
+`src/app/api/public/contact-inquiry/route.ts` (+ `src/server/public-inquiry.ts`) and `src/app/api/public/subscribe/route.ts`. If the CRM
+changes, re-read those files; this document and `tests/support/stub-crm.ts` are the website's copy of the contract.
+
+**Verified against a real CRM, not only the stand-in.** The website's own validator, body builder and client were run (fake data, a throwaway
+database, never production) against the CRM pull-request build `01e809d`; 16 of 16 checks agreed with this document: created (`201`) then the
+same key and body answered `200 duplicate:true` with the same lead; the same key with a changed request refused `409 idempotency_key_reused`; a
+wrong key `401`; a request carrying a Cloudflare header `404`; an unexpected field `400 validation_failed` with the field path; one-way, round-trip
+(every optional field) and 3-leg multi-city bodies accepted and stored in one insert (one lead, one `LEAD_CREATED` activity, one history row, one
+fingerprint, the company taken from the credential); and a correctly signed visitor context recorded the visitor's address while one signed with
+the wrong secret recorded none. `tests/crm-contract-live.spec.ts` repeats the HTTP-level part of that run against any CRM URL you give it (it is
+skipped unless `CRM_CONTRACT_URL` is set; see "Staging validation" below).
+
+**What the CRM pull request does not contain.** It adds only the application code, the schema and the migration. It has no Compose file, no
+network and no alias: the private path from the website to the CRM is defined by the CRM's *deployment*, which this repository cannot see.
+See `docs/DEPLOYMENT_VPS.md`, section 3.
 
 ## Which form uses which CRM endpoint
 
@@ -157,8 +171,26 @@ the friendly error, and the page itself keeps working (`next build` and every st
 2. **Behaviour differences from the old direct-database version** (inherent to the CRM's public endpoints): a contact message no longer creates or
    matches a `Contact` row or a `CONTACT_INQUIRY_CREATED` activity from the website (the CRM only links an existing contact for information); a
    repeat newsletter sign-up is confirmed as "subscribed" but can no longer say "you're already on the list".
-3. **Deployment prerequisite on the CRM:** the flight API needs the CRM release that contains it **and** its migration
-   `20261016000100_lead_ingest_fingerprint`, which the production database has not applied (it has 72 migrations). Without it the endpoint cannot
-   store a lead and the website shows the friendly error. This work did not touch production.
+3. **Deployment prerequisite on the CRM:** the flight API needs the CRM release that contains it (the pull request at `01e809d` - **not merged and not
+   deployed**) **and** its migration `20261016000100_lead_ingest_fingerprint`, which the production database had not applied when last reported (72
+   migrations - to be re-confirmed on the VPS). Without it the endpoint cannot store a lead and the website shows the friendly error. This work did not
+   touch production.
 4. **Geolocation label:** the CRM stamps a context's location with its own Vercel label; the website's Cloudflare source label is not carried.
 5. The CRM creates leads for airports it does not know without an airport rather than failing; the website no longer creates Airport rows.
+
+## Staging validation (the website against a CRM that has the pull request's code)
+
+`tests/crm-contract-live.spec.ts` sends real requests, built by the website's own validator, body builder and client, to a CRM you name. It
+**creates leads in that CRM** (fictional names, `@example.test` addresses, clearly marked `CONTRACT-CHECK`), so it is skipped unless both variables
+are set and it refuses anything but a loopback address unless you also confirm the target is a non-production CRM:
+
+```
+CRM_CONTRACT_URL=http://127.0.0.1:3411         # the CRM's origin
+CRM_CONTRACT_KEY=<that CRM's WEBSITE_API_KEY>   # never a production key
+CRM_CONTRACT_ALLOW_REMOTE=staging               # only for a non-loopback, NON-production CRM (a staging stack)
+```
+
+It checks: create, then the same key and body (`duplicate:true`, same lead), then the same key with a changed request (`409`), a wrong key (`401`),
+an unexpected field (`400` with the field path), a multi-city request, and the public-edge refusal (`404`). It never prints a key or a body. Run it
+with `npx playwright test tests/crm-contract-live.spec.ts --project=Infrastructure --no-deps`. It does not replace staging validation of the private
+network path (hostname, alias, firewall), which only the real stack can answer.

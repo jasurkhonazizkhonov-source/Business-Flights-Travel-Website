@@ -252,6 +252,44 @@ test.describe("deploy scripts, dry-run against a stub docker", () => {
     allCalls.push(...s.calls());
   });
 
+  test("preflight verifies the name CRM_API_URL really uses, never a fixed 'compass-crm'", () => {
+    // A CRM stack whose app is reachable only as `app` (no `compass-crm` alias): the URL must name what exists, and that is what is checked.
+    const appOnly = baseState();
+    appOnly.containers["compass-tools-app-1"].aliases = ["app"];
+
+    let s = sandbox(appOnly, { env: `${ENV_OK}CRM_API_URL=http://app:3000\n` });
+    let r = s.run("preflight.sh");
+    expect(r.code, r.out).toBe(0);
+    expect(r.out).toContain("container 'compass-tools-app-1' answers to 'app' on");
+    allCalls.push(...s.calls());
+
+    s = sandbox(appOnly, { env: `${ENV_OK}CRM_API_URL=http://app:3000/\n` }); // a trailing slash does not change the host
+    r = s.run("preflight.sh");
+    expect(r.code, r.out).toBe(0);
+    allCalls.push(...s.calls());
+
+    // The default name is not assumed: with only `app` defined and the default URL, the check fails and says which name it looked for.
+    s = sandbox(appOnly);
+    r = s.run("preflight.sh");
+    expect(r.code).not.toBe(0);
+    expect(r.out).toMatch(/answers to 'compass-crm'/);
+    allCalls.push(...s.calls());
+
+    // A name no container carries fails with that name in the message.
+    s = sandbox(baseState(), { env: `${ENV_OK}CRM_API_URL=http://crm-typo:3000\n` });
+    r = s.run("preflight.sh");
+    expect(r.code).not.toBe(0);
+    expect(r.out).toMatch(/answers to 'crm-typo'/);
+    allCalls.push(...s.calls());
+
+    // Something that cannot be a Docker network name is refused before any docker call is made for it.
+    s = sandbox(baseState(), { env: `${ENV_OK}CRM_API_URL=http://bad_host!:3000\n` });
+    r = s.run("preflight.sh");
+    expect(r.code).not.toBe(0);
+    expect(r.out).toMatch(/host must be a Docker network name/);
+    allCalls.push(...s.calls());
+  });
+
   test("preflight refuses a .env that is missing a required variable, without echoing any value", () => {
     for (const missing of ["CRM_API_KEY", "CRM_COMPANY_ID", "GMAIL_SENDER_EMAIL", "GMAIL_APP_PASSWORD"]) {
       const env = ENV_OK.split("\n").filter((l) => !l.startsWith(`${missing}=`)).join("\n");
