@@ -61,6 +61,8 @@ const standalone = process.env.NEXT_OUTPUT === "standalone";
 
 const nextConfig: NextConfig = {
   ...(standalone ? { output: "standalone" as const, outputFileTracingRoot: process.cwd() } : {}),
+  // Do not advertise the framework in an `X-Powered-By: Next.js` response header: it tells scanners which stack (and advisories) apply.
+  poweredByHeader: false,
   images: {
     // Editorial/destination imagery is sourced from Unsplash as placeholders
     // during development — swap for licensed/company-owned photography via
