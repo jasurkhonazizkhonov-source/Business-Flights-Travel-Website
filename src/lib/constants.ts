@@ -9,6 +9,12 @@ export const SITE_TAGLINE = "Business-class and international flights, arranged 
 // sitemap, Open Graph tags, and structured data all derive from this, so
 // keep it as the one place that changes if the production domain ever does.
 export const SITE_URL = "https://www.businessflights.travel";
+// Stable identifiers for the business entity in structured data (JSON-LD `@id`), so the TravelAgency, WebSite and Article
+// markup all point at ONE organisation instead of describing three unconnected ones. The brand mark is the square logo
+// (src/app/brand-mark.png) the Organization already uses.
+export const ORGANIZATION_ID = `${SITE_URL}/#organization`;
+export const WEBSITE_ID = `${SITE_URL}/#website`;
+export const BRAND_MARK_URL = `${SITE_URL}/brand-mark.png`;
 export const SITE_DESCRIPTION =
   "Business Flights Travel is a premium travel agency specializing in business-class, first-class, and international flights, with dedicated travel specialists handling every request personally.";
 

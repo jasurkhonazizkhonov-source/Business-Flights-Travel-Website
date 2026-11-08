@@ -7,8 +7,9 @@ import { PostCard } from "@/components/blog/PostCard";
 import { RichContent } from "@/components/blog/RichContent";
 import { CTASection } from "@/components/sections/CTASection";
 import { blogPosts, getBlogPostBySlug } from "@/data/blog-posts";
-import { SITE_NAME, SITE_URL } from "@/lib/constants";
+import { SITE_NAME, SITE_URL, ORGANIZATION_ID, BRAND_MARK_URL } from "@/lib/constants";
 import { formatIsoDate } from "@/lib/format-date";
+import { jsonLd } from "@/lib/json-ld";
 
 // Only the slugs in blog-posts.ts exist. Unknown slugs must be a real HTTP 404: with the
 // root loading.tsx (a Suspense boundary) an on-demand render of an unknown slug streams
@@ -66,7 +67,8 @@ export default async function BlogPostPage({ params }: PageProps<"/blog/[slug]">
     description: post.seoDescription,
     image: post.featuredImage,
     author: { "@type": "Organization", name: post.author },
-    publisher: { "@type": "Organization", name: SITE_NAME },
+    // The same business entity as the site-wide TravelAgency block (by @id), with the logo Article markup asks a publisher for.
+    publisher: { "@type": "Organization", "@id": ORGANIZATION_ID, name: SITE_NAME, logo: { "@type": "ImageObject", url: BRAND_MARK_URL } },
     datePublished: post.publishedAt,
     dateModified: post.updatedAt,
     mainEntityOfPage: `${SITE_URL}/blog/${post.slug}`,
@@ -99,9 +101,9 @@ export default async function BlogPostPage({ params }: PageProps<"/blog/[slug]">
 
   return (
     <>
-      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(articleJsonLd) }} />
-      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumbJsonLd) }} />
-      {faqJsonLd && <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(faqJsonLd) }} />}
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLd(articleJsonLd) }} />
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLd(breadcrumbJsonLd) }} />
+      {faqJsonLd && <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLd(faqJsonLd) }} />}
 
       <article className="mx-auto max-w-3xl px-4 py-16 sm:px-6 lg:px-8 lg:py-24">
         <Reveal>
@@ -119,7 +121,7 @@ export default async function BlogPostPage({ params }: PageProps<"/blog/[slug]">
 
         <Reveal delay={0.08}>
           <div className="relative mt-8 aspect-[16/9] w-full overflow-hidden rounded-2xl">
-            <Image src={post.featuredImage} alt={post.title} fill sizes="(min-width: 768px) 768px, 100vw" className="object-cover" priority />
+            <Image src={post.featuredImage} alt={post.title} fill sizes="(min-width: 768px) 768px, 100vw" className="object-cover" priority fetchPriority="high" />
           </div>
         </Reveal>
 

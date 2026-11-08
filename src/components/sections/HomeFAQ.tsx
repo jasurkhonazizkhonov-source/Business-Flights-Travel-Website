@@ -1,5 +1,6 @@
 import { Reveal } from "@/components/Reveal";
 import { SITE_NAME } from "@/lib/constants";
+import { jsonLd } from "@/lib/json-ld";
 
 const faqs = [
   {
@@ -90,7 +91,7 @@ const faqJsonLd = {
 export function HomeFAQ() {
   return (
     <section className="mx-auto max-w-6xl px-4 py-14 sm:px-6 sm:py-20 lg:px-8">
-      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(faqJsonLd) }} />
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLd(faqJsonLd) }} />
       <Reveal className="mx-auto max-w-2xl text-center">
         <p className="text-xs font-semibold tracking-[0.25em] text-[var(--color-gold-600)]">QUESTIONS</p>
         <h2 className="mt-3 font-display text-2xl font-semibold text-[var(--color-navy-950)] sm:text-3xl">

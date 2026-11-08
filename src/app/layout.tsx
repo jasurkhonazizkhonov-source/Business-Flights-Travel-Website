@@ -15,7 +15,11 @@ import {
   CONTACT_EMAIL,
   COMPANY_ADDRESS_PARTS,
   SOCIAL_LINKS,
+  ORGANIZATION_ID,
+  WEBSITE_ID,
+  BRAND_MARK_URL,
 } from "@/lib/constants";
+import { jsonLd } from "@/lib/json-ld";
 import "./globals.css";
 
 // Instrument Sans, not Inter — Inter is the de facto default of every
@@ -100,11 +104,13 @@ export const metadata: Metadata = {
 // (falling back to a bare, unbranded domain in the result instead). This
 // doesn't change the on-page logo anywhere — the header/footer still use
 // the full wordmark (public/brand/logo-navy.png, logo-white.png).
-const brandMarkUrl = `${SITE_URL}/brand-mark.png`;
+const brandMarkUrl = BRAND_MARK_URL;
 
 const organizationJsonLd = {
   "@context": "https://schema.org",
   "@type": "TravelAgency",
+  // The one business entity: WebSite.publisher and every Article.publisher reference this @id.
+  "@id": ORGANIZATION_ID,
   name: SITE_NAME,
   url: SITE_URL,
   description: SITE_DESCRIPTION,
@@ -133,12 +139,15 @@ const organizationJsonLd = {
 const websiteJsonLd = {
   "@context": "https://schema.org",
   "@type": "WebSite",
+  "@id": WEBSITE_ID,
   name: SITE_NAME,
   url: SITE_URL,
-  // Ties the site to the same named Organization above, rather than
-  // leaving WebSite and Organization as two unconnected entities — another
-  // small, legitimate signal for what "businessflights.travel" actually is.
-  publisher: { "@type": "Organization", name: SITE_NAME, logo: brandMarkUrl },
+  // Ties the site to the same Organization above by @id (previously a
+  // separate, unlinked Organization object that merely repeated the name
+  // and logo), so WebSite and TravelAgency are one connected entity —
+  // another small, legitimate signal for what "businessflights.travel"
+  // actually is.
+  publisher: { "@id": ORGANIZATION_ID },
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
@@ -151,8 +160,8 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html lang="en" className={`${sans.variable} ${playfair.variable} h-full antialiased`}>
       <body className="flex min-h-full flex-col bg-[var(--color-cream-50)]">
-        <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(organizationJsonLd) }} />
-        <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(websiteJsonLd) }} />
+        <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLd(organizationJsonLd) }} />
+        <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLd(websiteJsonLd) }} />
         {/* First focusable element on every page — invisible until
             keyboard-focused, then lets a keyboard/screen-reader user jump
             straight past the header/nav to the actual page content instead
