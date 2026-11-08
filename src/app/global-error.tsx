@@ -33,7 +33,7 @@ export default function GlobalError({ error, reset }: { error: Error & { digest?
       >
         <h1 style={{ fontSize: "1.5rem", fontWeight: 600, margin: 0 }}>Business Flights Travel is temporarily unavailable</h1>
         <p style={{ marginTop: "0.75rem", maxWidth: 420, color: "rgba(10,26,48,0.7)", lineHeight: 1.5 }}>
-          Something went wrong loading the site. Please try again, or call us directly at +1 415 777 7788.
+          Something went wrong loading the site. Please try again, or call us directly at +1 415 570 9267.
         </p>
         <button
           type="button"

@@ -24,9 +24,9 @@ export const SITE_DESCRIPTION =
 // against one specific CRM). Flight requests need none: the CRM fixes the
 // company from the API credential. See docs/CRM_API_INTEGRATION.md.
 
-export const CONTACT_PHONE_DISPLAY = "+1 415 777 7788";
-export const CONTACT_PHONE_E164 = "+14157777788";
-export const CONTACT_EMAIL = "requests@businessflights.travel";
+export const CONTACT_PHONE_DISPLAY = "+1 415 570 9267";
+export const CONTACT_PHONE_E164 = "+14155709267";
+export const CONTACT_EMAIL = "info@businessflights.travel";
 
 // Official Business Flights Travel Trustpilot review page. Do not fabricate
 // a rating or review count anywhere on the site — this is a link only.
@@ -35,13 +35,13 @@ export const TRUSTPILOT_URL = "https://www.trustpilot.com/review/businessflights
 // Legal identity used on the Privacy Policy / Terms of Service / Cookie
 // Policy pages (see docs/LEGAL.md for what's still pending attorney review).
 export const COMPANY_LEGAL_NAME = "Business Flights Travel";
-export const COMPANY_ADDRESS = "580 California Street, San Francisco, CA 94104";
+export const COMPANY_ADDRESS = "350 Sansome St, San Francisco, CA 94104, United States";
 
 // Structured form of COMPANY_ADDRESS for schema.org PostalAddress markup
 // (see the Organization JSON-LD in src/app/layout.tsx) — kept alongside the
 // display string above so the two can never drift out of sync.
 export const COMPANY_ADDRESS_PARTS = {
-  streetAddress: "580 California Street",
+  streetAddress: "350 Sansome St",
   addressLocality: "San Francisco",
   addressRegion: "CA",
   postalCode: "94104",

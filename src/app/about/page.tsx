@@ -165,7 +165,7 @@ export default function AboutPage() {
             </h1>
             <p className="mx-auto mt-4 max-w-2xl text-white/75">
               Business Flights Travel researches and arranges business-class, first-class, and international flights — personally,
-              request by request, from our office at 580 California Street.
+              request by request, from our office at 350 Sansome St.
             </p>
           </Reveal>
         </div>

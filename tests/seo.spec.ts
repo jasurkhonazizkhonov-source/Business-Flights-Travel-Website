@@ -79,10 +79,16 @@ test("the Organization structured data states contact details the site itself pu
   const blocks = (await page.locator('script[type="application/ld+json"]').allTextContents()).map((b) => JSON.parse(b));
   const org = blocks.find((b) => b["@type"] === "TravelAgency");
   expect(org.name).toBe("Business Flights Travel");
-  expect(org.telephone).toBe("+14157777788");
-  expect(org.email).toBe("requests@businessflights.travel");
+  expect(org.telephone).toBe("+14155709267");
+  expect(org.email).toBe("info@businessflights.travel");
   expect(org.contactPoint.telephone).toBe(org.telephone);
-  expect(org.address.streetAddress).toBeTruthy();
+  expect(org.address).toMatchObject({
+    streetAddress: "350 Sansome St",
+    addressLocality: "San Francisco",
+    addressRegion: "CA",
+    postalCode: "94104",
+    addressCountry: "US",
+  });
   // Nothing invented: no ratings, awards or reviews.
   expect(JSON.stringify(org)).not.toMatch(/aggregateRating|award|review/i);
 });
