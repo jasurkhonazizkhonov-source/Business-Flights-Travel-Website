@@ -1,9 +1,11 @@
 import { test, expect } from "@playwright/test";
-import { readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { CLOUDFLARE_GEO_SOURCE, GEO_SOURCE, decodeUtf8Header, readCloudflareApproximateLocation } from "../src/lib/ip-geo";
 import { captureSubmissionInfo } from "../src/lib/submission-info";
+import { buildFlightRequestNotificationEmail } from "../src/lib/email/flight-request-notification";
 import { resolveClientIp } from "../src/lib/client-ip";
+import { VISITOR_CONTEXT_HEADER, buildVisitorContextHeaders } from "../src/lib/crm-api/visitor-context";
 import { standaloneBuildPresent, startStandalone, type StandaloneServer } from "./support/standalone-server";
 
 // Self-hosted (OVH VPS + Docker Compose + Cloudflare Tunnel) deployment: visitor IP / location behind Cloudflare, the static properties of
@@ -95,6 +97,133 @@ test.describe("visitor IP and location behind Cloudflare (TRUSTED_PROXY=cloudfla
       expect(info.ip).toBeUndefined();
       expect(info.location).toBeUndefined();
     });
+  });
+
+  test("complete IPv4 and IPv6 addresses are preserved from the header to the signed context sent to the CRM", () => {
+    const decode = (headers: Record<string, string>) => JSON.parse(Buffer.from(headers[VISITOR_CONTEXT_HEADER], "base64url").toString("utf8"));
+    const secret = "s".repeat(40);
+    withEnv({ TRUSTED_PROXY: "cloudflare" }, () => {
+      const samples: Array<[string, string, "v4" | "v6"]> = [
+        ["198.51.100.50", "198.51.100.50", "v4"],
+        ["198.51.100.50:51820", "198.51.100.50", "v4"], // a port is not part of the address
+        ["2606:4700:4700::1111", "2606:4700:4700::1111", "v6"],
+        ["2A00:1450:4001:081D:0000:0000:0000:200E", "2a00:1450:4001:81d::200e", "v6"], // canonical form, nothing truncated or lost
+        ["[2606:4700:4700::1111]:443", "2606:4700:4700::1111", "v6"],
+        ["::ffff:198.51.100.7", "198.51.100.7", "v4"], // IPv4-mapped IPv6 collapses to the IPv4 address
+      ];
+      for (const [raw, expected, version] of samples) {
+        const { info } = captureSubmissionInfo(H({ "cf-connecting-ip": raw }));
+        expect(info.ip, raw).toEqual({ address: expected, version });
+        const sent = buildVisitorContextHeaders(info, secret);
+        expect(decode(sent).ip, raw).toBe(expected);
+      }
+    });
+  });
+
+  test("Cloudflare Pseudo IPv4 'Overwrite Headers': the real IPv6 address is taken from CF-Connecting-IPv6, and only then", () => {
+    withEnv({ TRUSTED_PROXY: "cloudflare" }, () => {
+      // CF-Connecting-IP carries a Class E stand-in (240.0.0.0/4) for an IPv6 visitor; the real address moved to CF-Connecting-IPv6.
+      expect(resolveClientIp(H({ "cf-connecting-ip": "240.12.34.56", "cf-connecting-ipv6": "2606:4700:4700::1111" }))).toEqual({
+        ok: true,
+        address: "2606:4700:4700::1111",
+        version: "v6",
+      });
+      // A usable CF-Connecting-IP always wins: the IPv6 header is never consulted (a forged one changes nothing).
+      expect(resolveClientIp(H({ "cf-connecting-ip": "198.51.100.50", "cf-connecting-ipv6": "2606:4700:4700::1111" }))).toEqual({
+        ok: true,
+        address: "198.51.100.50",
+        version: "v4",
+      });
+      // No IPv6 header, or an unusable one: the stand-in is never stored as if it were a customer address.
+      expect(resolveClientIp(H({ "cf-connecting-ip": "240.12.34.56" }))).toEqual({ ok: false, reason: "private_or_reserved" });
+      expect(resolveClientIp(H({ "cf-connecting-ip": "240.12.34.56", "cf-connecting-ipv6": "fd00::1" }))).toEqual({ ok: false, reason: "private_or_reserved" });
+      expect(resolveClientIp(H({ "cf-connecting-ip": "240.12.34.56", "cf-connecting-ipv6": "not-an-ip" }))).toEqual({ ok: false, reason: "private_or_reserved" });
+    });
+    // Outside cloudflare mode that header is not believed at all.
+    withEnv({ TRUSTED_PROXY: "none" }, () => {
+      expect(resolveClientIp(H({ "cf-connecting-ip": "240.12.34.56", "cf-connecting-ipv6": "2606:4700:4700::1111" }))).toEqual({ ok: false, reason: "no_trusted_proxy" });
+    });
+  });
+
+  test("the signed context carries exactly what the server observed: IP + location, IP only, location only, or nothing", () => {
+    const decode = (headers: Record<string, string>) => JSON.parse(Buffer.from(headers[VISITOR_CONTEXT_HEADER], "base64url").toString("utf8"));
+    const secret = "s".repeat(40);
+    const geo = { "cf-ipcountry": "US", "cf-ipcity": "San Francisco", "cf-region-code": "CA", "cf-timezone": "America/Los_Angeles" };
+    withEnv({ TRUSTED_PROXY: "cloudflare" }, () => {
+      const full = decode(buildVisitorContextHeaders(captureSubmissionInfo(cf({ ...geo })).info, secret));
+      expect(full).toMatchObject({ v: 1, ip: "198.51.100.50", city: "San%20Francisco", region: "CA", country: "US", timezone: "America/Los_Angeles" });
+      // Cloudflare's Managed Transform is off: only cf-ipcountry arrives. Country is sent; no city/region is invented.
+      const countryOnly = decode(buildVisitorContextHeaders(captureSubmissionInfo(cf({ "cf-ipcountry": "AU" })).info, secret));
+      expect(countryOnly.country).toBe("AU");
+      expect(countryOnly).not.toHaveProperty("city");
+      expect(countryOnly).not.toHaveProperty("region");
+      // No geolocation headers at all: IP only.
+      const ipOnly = decode(buildVisitorContextHeaders(captureSubmissionInfo(cf()).info, secret));
+      expect(ipOnly.ip).toBe("198.51.100.50");
+      for (const k of ["city", "region", "country", "timezone"]) expect(ipOnly).not.toHaveProperty(k);
+      // Tor / unknown country codes are not a location.
+      expect(decode(buildVisitorContextHeaders(captureSubmissionInfo(cf({ "cf-ipcountry": "T1" })).info, secret))).not.toHaveProperty("country");
+      // Coordinates / postal code are never sent to the CRM (its context has no such field), even when Cloudflare supplies them.
+      const withCoords = JSON.stringify(decode(buildVisitorContextHeaders(captureSubmissionInfo(cf({ ...geo, "cf-iplatitude": "37.77", "cf-iplongitude": "-122.41", "cf-postal-code": "94104" })).info, secret)));
+      expect(withCoords).not.toMatch(/37\.77|122\.41|94104|lat|lon|postal/i);
+    });
+    // Nothing observed (no trusted proxy): nothing is signed or sent — the CRM then records no IP and no location.
+    withEnv({ TRUSTED_PROXY: "none" }, () => {
+      expect(buildVisitorContextHeaders(captureSubmissionInfo(cf({ ...geo })).info, secret)).toEqual({});
+    });
+    // No secret configured: nothing is sent either.
+    withEnv({ TRUSTED_PROXY: "cloudflare" }, () => {
+      expect(buildVisitorContextHeaders(captureSubmissionInfo(cf({ ...geo })).info, undefined)).toEqual({});
+    });
+  });
+
+  test("approximate coordinates: read only as a valid pair, rounded to ~1 km, never invented, shown in the internal e-mail only", () => {
+    const pair = (lat: string, lon: string) => readCloudflareApproximateLocation(H({ "cf-ipcountry": "US", "cf-iplatitude": lat, "cf-iplongitude": lon }));
+    expect(pair("37.77490", "-122.41940")).toMatchObject({ latitude: 37.77, longitude: -122.42, countryCode: "US" });
+    expect(pair("-33.8688", "151.2093")).toMatchObject({ latitude: -33.87, longitude: 151.21 });
+    // Half a pair, text, out of range, and the 0/0 no-data placeholder are all "unavailable" — the country is still kept.
+    for (const [lat, lon] of [["37.77", ""], ["", "-122.4"], ["north", "west"], ["91", "10"], ["10", "181"], ["0", "0"], ["1e3", "5"]]) {
+      const loc = pair(lat, lon);
+      expect(loc, `${lat}/${lon}`).toEqual({ country: "United States", countryCode: "US" });
+    }
+    // Without the Managed Transform there are no coordinates at all.
+    expect(readCloudflareApproximateLocation(H({ "cf-ipcountry": "AU" }))).toEqual({ country: "Australia", countryCode: "AU" });
+
+    // Internal notification: one extra labelled row, flagged as a network estimate; absent when not obtained.
+    const JFK = { iata: "JFK", city: "New York", country: "United States", name: "John F. Kennedy International Airport" };
+    const CDG = { iata: "CDG", city: "Paris", country: "France", name: "Paris Charles de Gaulle Airport" };
+    const base = {
+      firstName: "Test", lastName: "Visitor", email: "visitor@example.com", phoneE164: "+14155550100", tripType: "ONE_WAY" as const, cabinClass: "BUSINESS" as const,
+      adults: 1, children: 0, infants: 0, flexibleDates: false, segments: [{ from: JFK, to: CDG, departureDate: "2026-12-24" }], submittedAt: new Date("2026-11-08T10:00:00Z"),
+    };
+    const withCoords = buildFlightRequestNotificationEmail({ ...base, submission: { ip: { address: "198.51.100.50", version: "v4" }, location: pair("37.77490", "-122.41940"), locationSource: CLOUDFLARE_GEO_SOURCE } });
+    expect(withCoords.text).toContain("Approximate Coordinates: 37.77, -122.42 (network estimate, about city level)");
+    expect(withCoords.html).toContain("Approximate Coordinates");
+    const without = buildFlightRequestNotificationEmail({ ...base, submission: { ip: { address: "198.51.100.50", version: "v4" }, location: pair("", ""), locationSource: CLOUDFLARE_GEO_SOURCE } });
+    expect(without.text).not.toContain("Coordinates");
+    // The CRM context is built from named fields only, so coordinates never leave in it.
+    const sent = buildVisitorContextHeaders({ ip: { address: "198.51.100.50", version: "v4" }, location: pair("37.77490", "-122.41940"), capturedAt: new Date() }, "s".repeat(40));
+    expect(Buffer.from(sent[VISITOR_CONTEXT_HEADER], "base64url").toString("utf8")).not.toMatch(/latitude|longitude|37\.77|122\.4/);
+  });
+});
+
+test.describe("nothing sensitive is shipped to the browser (needs a production build in .next)", () => {
+  test("client bundles contain no IP/geolocation header names, no secrets' names and no visitor data handling", () => {
+    const staticDir = path.join(root, ".next", "static");
+    test.skip(!existsSync(staticDir), "run `next build` first");
+    const files: string[] = [];
+    const walk = (dir: string) => {
+      for (const e of readdirSync(dir, { withFileTypes: true })) {
+        const p = path.join(dir, e.name);
+        if (e.isDirectory()) walk(p);
+        else if (/\.(js|css|map)$/.test(e.name)) files.push(p);
+      }
+    };
+    walk(staticDir);
+    expect(files.length).toBeGreaterThan(5);
+    const forbidden = /cf-connecting-ip|cf-ipcity|cf-iplatitude|cf-region-code|x-ct-visitor|LEAD_INGEST_SECRET|CRM_API_KEY|GMAIL_APP_PASSWORD|TRUSTED_PROXY/i;
+    const hits = files.filter((f) => forbidden.test(readFileSync(f, "utf8"))).map((f) => path.relative(root, f));
+    expect(hits).toEqual([]);
   });
 });
 

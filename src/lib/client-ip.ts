@@ -126,6 +126,11 @@ function parseForwardedHeader(value: string): string | undefined {
   return match ? stripPort(match[1].trim()) : undefined;
 }
 
+/** A syntactically valid IPv4 address in 240.0.0.0/4 ("Class E") — the range Cloudflare's Pseudo IPv4 feature hands out. */
+function isPseudoIpv4(value: string): boolean {
+  return IPV4_RE.test(value) && Number(value.split(".")[0]) >= 240;
+}
+
 function candidateHeaderValues(mode: Exclude<TrustedProxyMode, "none">, headerList: Headers): string[] {
   const out: string[] = [];
   const push = (v: string | null | undefined) => {
@@ -139,7 +144,13 @@ function candidateHeaderValues(mode: Exclude<TrustedProxyMode, "none">, headerLi
     push(headerList.get("x-real-ip"));
     push(firstOf(headerList.get("x-forwarded-for")));
   } else if (mode === "cloudflare") {
-    push(headerList.get("cf-connecting-ip"));
+    const primary = headerList.get("cf-connecting-ip");
+    push(primary);
+    // Cloudflare's "Pseudo IPv4 > Overwrite Headers" setting replaces CF-Connecting-IP for an IPv6 visitor with a stand-in from the
+    // Class E range (240.0.0.0/4) and moves the real IPv6 address to CF-Connecting-IPv6 (developers.cloudflare.com/network/pseudo-ipv4,
+    // checked 2026-11-08). The stand-in is "reserved" below, so without this the visitor's IP would be dropped. The IPv6 header is
+    // consulted ONLY in that exact case, never when CF-Connecting-IP is itself a usable address.
+    if (primary && isPseudoIpv4(stripPort(primary.trim()))) push(headerList.get("cf-connecting-ipv6"));
   } else {
     const forwarded = headerList.get("forwarded");
     if (forwarded) push(parseForwardedHeader(forwarded));

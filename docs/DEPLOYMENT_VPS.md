@@ -225,14 +225,14 @@ application-side. Probes use the internal name.
 
 ## 10. Visitor IP and location
 
-- `TRUSTED_PROXY=cloudflare` (fixed in compose) reads **only** `CF-Connecting-IP`; `X-Forwarded-For`, `X-Real-IP`, `Forwarded` and Vercel headers are
+- `TRUSTED_PROXY=cloudflare` (fixed in compose) reads `CF-Connecting-IP` (and `CF-Connecting-IPv6` **only** when `CF-Connecting-IP` holds a Class E 240.0.0.0/4 stand-in, which is what Cloudflare's *Pseudo IPv4 > Overwrite Headers* setting sends for IPv6 visitors); `X-Forwarded-For`, `X-Real-IP`, `Forwarded` and Vercel headers are
   ignored. This is safe only because the origin is reachable only through the tunnel (no published port). Anything else on the shared tunnel network
   could forge it; that is the residual risk of a shared network.
 - **Location is optional, untrusted, approximate metadata.** `CF-IPCountry` is present when Cloudflare proxies (`XX` and `T1` are not countries and are
   dropped). City/region/timezone arrive only if the owner enables **Rules → Managed Transforms → "Add visitor location headers"**.
 - **How it reaches the CRM.** The website signs the IP and location with `LEAD_INGEST_SECRET` and sends them as `x-ct-visitor-context` /
   `x-ct-visitor-signature` on the flight request (`docs/CRM_API_INTEGRATION.md`). The CRM validates the signature, stores them in its permission-gated
-  lead section, and labels the location source with its own (Vercel) label. The website stores nothing. The notification e-mail carries them too.
+  lead section, and labels the location source with its own (Vercel) label — **a CRM-side inaccuracy: the values come from Cloudflare headers** (see `docs/IP_AND_LOCATION_CAPTURE.md`). The website stores nothing. The notification e-mail carries them too (labelled "Cloudflare edge geolocation (approximate)").
 - **Privacy:** the full IP address and approximate location are personal data (UK/EU GDPR and similar). The owner must mention the collection in the
   privacy policy and define a retention period and deletion path **in the CRM**, and decide whether the CRM shows the IP unmasked.
 - **Rate limits use the same trusted client IP** (flight request 8, contact message 8, newsletter 6, per 10 minutes). A request with no usable trusted

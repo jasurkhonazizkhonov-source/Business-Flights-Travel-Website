@@ -29,6 +29,13 @@ export type ApproximateLocation = {
   countryCode?: string;
   /** IANA zone, e.g. "America/Los_Angeles". */
   timeZone?: string;
+  /**
+   * Cloudflare only, only when BOTH `cf-iplatitude` and `cf-iplongitude` are valid numbers; rounded to 2 decimals (about 1 km) because the value is
+   * a network's estimated position (often a city centre), never a person's. It goes into the internal notification e-mail only: the CRM's signed
+   * visitor context has no field for it (src/lib/crm-api/visitor-context.ts sends named fields only).
+   */
+  latitude?: number;
+  longitude?: number;
 };
 
 export const GEO_SOURCE = "Vercel edge geolocation (approximate)";
@@ -128,7 +135,8 @@ export function readApproximateLocation(headerList: Headers): ApproximateLocatio
 /**
  * Reads Cloudflare's geolocation request headers. `cf-ipcountry` is present whenever IP Geolocation (or the "Add visitor location
  * headers" Managed Transform) is on; city, region and time zone only with that Managed Transform (cloudflare docs, checked 2026-10-16).
- * `XX` (no data) and `T1` (Tor) mean "unknown", never a country. Coordinates, postal and metro codes are deliberately not read.
+ * `XX` (no data) and `T1` (Tor) mean "unknown", never a country. Latitude and longitude (`cf-iplatitude` / `cf-iplongitude`, same Managed
+ * Transform) are read only as a valid pair, rounded to about 1 km; postal and metro codes are deliberately not read.
  */
 export function readCloudflareApproximateLocation(headerList: Headers): ApproximateLocation | undefined {
   const countryRaw = headerList.get("cf-ipcountry")?.trim().toUpperCase();
@@ -142,10 +150,25 @@ export function readCloudflareApproximateLocation(headerList: Headers): Approxim
     country: countryCode ? countryName(countryCode) : undefined,
     countryCode,
     timeZone: validTimeZone(cleanText(headerList.get("cf-timezone"), 64, decodeUtf8Header)),
+    ...readCoordinates(headerList.get("cf-iplatitude"), headerList.get("cf-iplongitude")),
   };
   const anyValue = Object.values(location).some((v) => v !== undefined);
   if (!anyValue) return undefined;
   return Object.fromEntries(Object.entries(location).filter(([, v]) => v !== undefined)) as ApproximateLocation;
+}
+
+const COORDINATE_RE = /^-?\d{1,3}(\.\d{1,8})?$/;
+
+/** A latitude/longitude pair in range, rounded to 2 decimals; anything else (missing half, text, out of range, "0"/"0" no-data placeholders) is absent. */
+function readCoordinates(latRaw: string | null, lonRaw: string | null): { latitude?: number; longitude?: number } {
+  const lat = latRaw?.trim();
+  const lon = lonRaw?.trim();
+  if (!lat || !lon || !COORDINATE_RE.test(lat) || !COORDINATE_RE.test(lon)) return {};
+  const latitude = Number(lat);
+  const longitude = Number(lon);
+  if (!(latitude >= -90 && latitude <= 90 && longitude >= -180 && longitude <= 180)) return {};
+  if (latitude === 0 && longitude === 0) return {}; // "null island": a no-data placeholder, not a place
+  return { latitude: Math.round(latitude * 100) / 100, longitude: Math.round(longitude * 100) / 100 };
 }
 
 /** "San Francisco, California, United States" — only the parts that exist, comma-joined. */

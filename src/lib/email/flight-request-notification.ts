@@ -306,6 +306,9 @@ function buildSubmissionSection(input: FlightRequestNotificationInput): Section 
     if (location.country ?? location.countryCode) rows.push({ label: "Approximate Country", value: (location.country ?? location.countryCode) as string });
     if (location.country && location.countryCode) rows.push({ label: "Country Code", value: location.countryCode });
     if (location.timeZone) rows.push({ label: "Time Zone", value: location.timeZone });
+    if (location.latitude !== undefined && location.longitude !== undefined) {
+      rows.push({ label: "Approximate Coordinates", value: `${location.latitude.toFixed(2)}, ${location.longitude.toFixed(2)} (network estimate, about city level)` });
+    }
     if (input.submission?.locationSource) rows.push({ label: "Location Source", value: input.submission.locationSource });
   }
   rows.push({ label: "Submitted", value: formatSubmittedAt(input.submittedAt) });
