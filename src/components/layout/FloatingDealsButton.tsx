@@ -18,7 +18,13 @@ export function FloatingDealsButton() {
   // While someone is typing in a field (on a phone the on-screen keyboard raises
   // this fixed pill to sit right over the field being edited) it steps aside too.
   const [fieldFocused, setFieldFocused] = useState(false);
-  const hidden = coversCta || fieldFocused;
+  // While a date / traveler / menu popup is open this fixed pill sat on top of its bottom-right corner: on a phone it
+  // covered two selectable calendar days, so tapping them started a phone call (`tel:`) instead of choosing the date.
+  const [popupOpen, setPopupOpen] = useState(false);
+  // The cookie banner is fixed above this pill (z-50 vs z-40) and is mounted after this component's observer ran, so the pill stayed
+  // focusable while completely hidden underneath it (WCAG 2.4.11 failure, caught at 1280x720). It steps aside until a choice is made.
+  const [cookieBannerOpen, setCookieBannerOpen] = useState(false);
+  const hidden = coversCta || fieldFocused || popupOpen || cookieBannerOpen;
   // Tracks which observed elements are currently intersecting — a Set kept
   // across observer callbacks, since each callback only reports elements
   // whose state just changed, not the full current state of every target.
@@ -34,6 +40,23 @@ export function FloatingDealsButton() {
       document.removeEventListener("focusin", onIn);
       document.removeEventListener("focusout", onOut);
     };
+  }, []);
+
+  useEffect(() => {
+    const root = document.documentElement;
+    const check = () => setCookieBannerOpen(root.dataset.cookieBanner === "open");
+    const observer = new MutationObserver(check);
+    observer.observe(root, { attributes: true, attributeFilter: ["data-cookie-banner"] });
+    check();
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    const check = () => setPopupOpen(document.querySelector('[aria-haspopup][aria-expanded="true"]') !== null);
+    const observer = new MutationObserver(check);
+    observer.observe(document.body, { subtree: true, attributes: true, attributeFilter: ["aria-expanded"] });
+    check();
+    return () => observer.disconnect();
   }, []);
 
   useEffect(() => {
@@ -58,6 +81,9 @@ export function FloatingDealsButton() {
   }, []);
 
   return (
+    // A landmark of its own: this fixed link sits outside <main>/<header>/<footer>, so without one
+    // axe's `region` rule (best practice) reports its text as content outside any landmark.
+    <aside aria-label="Call us">
     <m.a
       href={`tel:${CONTACT_PHONE_E164}`}
       initial={{ opacity: 0, y: 12 }}
@@ -87,5 +113,6 @@ export function FloatingDealsButton() {
         <span className="hidden text-xs font-medium text-[var(--color-navy-950)]/85 sm:inline">{CONTACT_PHONE_DISPLAY}</span>
       </span>
     </m.a>
+    </aside>
   );
 }

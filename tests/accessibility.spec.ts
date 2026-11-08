@@ -17,10 +17,19 @@ const PAGES = [
   { name: "About", path: "/about" },
   { name: "Contact", path: "/contact" },
   { name: "Flights (request form)", path: "/flights" },
+  { name: "Business class", path: "/business-class" },
+  { name: "How it works", path: "/how-it-works" },
+  { name: "Privacy policy", path: "/privacy-policy" },
+  { name: "Terms of service", path: "/terms-of-service" },
+  { name: "Cookie policy", path: "/cookie-policy" },
+  { name: "Not found (404)", path: "/this-page-does-not-exist" },
 ];
 
 for (const { name, path } of PAGES) {
   test(`axe: ${name} has no automatically-detectable a11y violations`, async ({ page }) => {
+    // The scroll-through below walks the whole page (the destinations index is ~49,000 px tall on a phone, 171 cards) and axe then
+    // scans every node: 16-25 s alone, and it hit the 30 s default under load (1 of 1,098 in the 2026-10-25 run; 3/3 pass in isolation).
+    test.setTimeout(90_000);
     await page.goto(path);
     // Let Reveal's whileInView fade-ins (550ms) finish before scanning —
     // axe evaluates the DOM's current computed styles at the instant it
@@ -29,6 +38,19 @@ for (const { name, path } of PAGES) {
     // that has nothing to do with the element's actual, resting-state
     // contrast. Confirmed by hand for the specific case this surfaced
     // (gold-500/navy-950 CTA button, 7.14:1 at rest — comfortably passes).
+    await page.waitForTimeout(900);
+    // Reveal keeps blocks BELOW the fold at opacity 0 until they are scrolled to, and axe skips
+    // invisible content — so without this scroll the scan only ever saw the first screenful. It
+    // is how the 12px gold kickers on cream-100 (4.37:1) and the tiny placeholder text went
+    // unnoticed. Walk the page once so everything has been revealed, then return to the top.
+    await page.evaluate(async () => {
+      const step = Math.max(300, Math.floor(window.innerHeight * 0.8));
+      for (let y = 0; y < document.documentElement.scrollHeight; y += step) {
+        window.scrollTo(0, y);
+        await new Promise((r) => setTimeout(r, 120));
+      }
+      window.scrollTo(0, 0);
+    });
     await page.waitForTimeout(900);
     // The floating call button is mounted late (deferred chunk) and fades in over
     // 250 ms; scanning it mid-fade reads its label at partial opacity and can
@@ -43,7 +65,7 @@ for (const { name, path } of PAGES) {
       // guidance but not WCAG failures on their own — scoring only against
       // the actual WCAG 2.x A/AA rule sets keeps this test meaningful
       // (fails on real conformance issues) rather than noisy.
-      .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
+      .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"])
       .analyze();
 
     if (results.violations.length > 0) {
@@ -136,6 +158,20 @@ test.describe("Floating call button", () => {
     await expect(fab).toHaveAttribute("aria-hidden", "false");
   });
 
+  test("steps aside while a date or traveler popup is open, so it cannot cover (and be tapped instead of) a calendar day", async ({ page }) => {
+    await answeredCookieNotice(page);
+    await page.goto("/flights");
+    const fab = page.locator('a.fixed[href^="tel:"]');
+    await expect(fab).toHaveAttribute("aria-hidden", "false", { timeout: 15000 });
+    await page.getByRole("button", { name: /travelers & cabin/i }).click();
+    await expect(fab).toHaveAttribute("aria-hidden", "true");
+    await page.getByRole("button", { name: /travelers & cabin/i }).click(); // toggle closed
+    // Opening the popup now scrolls the page so the whole popup is on screen (useScrollPopoverIntoView), which can bring the form's own
+    // submit button into view, and the pill deliberately steps aside for that button too. Return to the top so this asserts only the popup rule.
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await expect(fab).toHaveAttribute("aria-hidden", "false");
+  });
+
   test("never covers anything at the end of the page", async ({ page }) => {
     await answeredCookieNotice(page);
     await page.goto(ARTICLE);
@@ -180,5 +216,98 @@ test.describe("Reduced motion", () => {
       return els.map((el) => ms(getComputedStyle(el).transitionDuration));
     });
     for (const d of durations) expect(d).toBeLessThanOrEqual(1);
+  });
+});
+
+// Regressions found by the 2026-10 follow-up audit (each was reproduced before it was fixed).
+test.describe("Form and markup regressions", () => {
+  test("home page has no duplicate element ids (two newsletter forms share the page)", async ({ page }) => {
+    await page.goto("/");
+    const duplicates = await page.evaluate(() => {
+      const counts: Record<string, number> = {};
+      document.querySelectorAll("[id]").forEach((el) => (counts[el.id] = (counts[el.id] ?? 0) + 1));
+      return Object.entries(counts).filter(([, n]) => n > 1).map(([id, n]) => `${id}×${n}`);
+    });
+    expect(duplicates).toEqual([]);
+    // and every newsletter email field is reachable by its own label
+    const emailFields = page.locator('input[type="email"][id$="-email"]');
+    for (let i = 0; i < (await emailFields.count()); i++) {
+      const id = await emailFields.nth(i).getAttribute("id");
+      await expect(page.locator(`label[for="${id}"]`)).toHaveCount(1);
+    }
+  });
+
+  test("placeholder text is at least 65% of the text colour (WCAG 1.4.3 needs ~4.5:1)", async ({ page }) => {
+    await page.goto("/flights");
+    const alphas = await page.evaluate(() =>
+      Array.from(document.querySelectorAll<HTMLInputElement>("input[placeholder], textarea[placeholder]"))
+        .filter((el) => getComputedStyle(el).display !== "none")
+        .map((el) => {
+          const m = /\/\s*([\d.]+)\s*\)/.exec(getComputedStyle(el, "::placeholder").color);
+          return { placeholder: el.placeholder, alpha: m ? Number(m[1]) : 1 };
+        }),
+    );
+    expect(alphas.length).toBeGreaterThan(0);
+    for (const a of alphas) expect(a.alpha, `placeholder "${a.placeholder}"`).toBeGreaterThanOrEqual(0.65);
+  });
+
+  test("date and traveler triggers announce their current value, and their popups are named dialogs", async ({ page }) => {
+    await page.goto("/flights");
+    // aria-labelledby pointed at the label only, so the accessible name was just "Departure Date" and the chosen date was never read out.
+    await expect(page.getByRole("button", { name: /departure date.*select date/i }).first()).toBeVisible();
+    const travelers = page.getByRole("button", { name: /travelers & cabin.*1 traveler.*business/i });
+    await expect(travelers).toBeVisible();
+    await travelers.click();
+    await expect(page.getByRole("dialog", { name: /travelers & cabin/i })).toBeVisible();
+    const results = await new AxeBuilder({ page }).withRules(["aria-dialog-name", "aria-allowed-attr", "aria-valid-attr-value"]).analyze();
+    expect(results.violations.map((v) => v.id)).toEqual([]);
+  });
+
+  test("cookie preferences dialog traps Tab/Shift+Tab inside itself and returns focus to its opener on Escape", async ({ page }) => {
+    await page.goto("/");
+    const opener = page.getByRole("button", { name: /manage preferences/i });
+    await opener.click({ timeout: 20000 }); // the banner is mounted lazily
+    const dialog = page.getByRole("dialog", { name: /cookie preferences/i });
+    await expect(dialog).toBeVisible();
+    const insideModal = () => page.evaluate(() => !!document.activeElement?.closest('[aria-modal="true"]'));
+    // Focus used to leave the aria-modal dialog after six Tab presses and land on <body>.
+    for (let i = 0; i < 12; i++) {
+      await page.keyboard.press("Tab");
+      expect(await insideModal(), `Tab #${i + 1}`).toBe(true);
+    }
+    for (let i = 0; i < 12; i++) {
+      await page.keyboard.press("Shift+Tab");
+      expect(await insideModal(), `Shift+Tab #${i + 1}`).toBe(true);
+    }
+    await page.keyboard.press("Escape");
+    await expect(dialog).toBeHidden();
+    await expect(opener).toBeFocused();
+  });
+
+  test("a failed submit moves keyboard focus to the first invalid field (flight form)", async ({ page }) => {
+    await page.addInitScript(() => {
+      window.localStorage.setItem("bft-cookie-consent", JSON.stringify({ version: 1, decidedAt: new Date().toISOString(), preferences: { necessary: true, analytics: false, marketing: false } }));
+    });
+    await page.goto("/flights");
+    await page.getByRole("button", { name: /get a free flight quote/i }).last().click();
+    // Focus used to stay on the submit button at the bottom of the long form.
+    await expect(page.locator('[id="field-segments.0.from"] input')).toBeFocused();
+  });
+
+  test("the whole airport field is a tap target, not just the 20px text line", async ({ page }) => {
+    await page.addInitScript(() => {
+      window.localStorage.setItem("bft-cookie-consent", JSON.stringify({ version: 1, decidedAt: new Date().toISOString(), preferences: { necessary: true, analytics: false, marketing: false } }));
+    });
+    await page.goto("/flights");
+    const input = page.getByPlaceholder("City or airport code").first();
+    const box = await input.evaluate((el) => {
+      let wrap = el.parentElement as HTMLElement;
+      while (wrap && getComputedStyle(wrap).borderTopWidth === "0px") wrap = wrap.parentElement as HTMLElement;
+      const r = wrap.getBoundingClientRect();
+      return { x: r.x, y: r.y, w: r.width, h: r.height };
+    });
+    // 3px inside the visible field's top edge, horizontally in the middle
+    await page.mouse.click(box.x + box.w / 2, box.y + 3);
+    await expect(input).toBeFocused();
   });
 });

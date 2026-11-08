@@ -8,7 +8,8 @@ const COUNT_WORDS = ["Zero", "One", "Two", "Three", "Four", "Five", "Six", "Seve
 export function PopularRegions() {
   // The heading counts the regions actually listed below, so it can never drift
   // from the data (it said "Six" while seven cards were shown).
-  const listed = REGIONS.filter((region) => getDestinationsByRegion(region.slug).length > 0).length;
+  const shown = REGIONS.filter((region) => getDestinationsByRegion(region.slug).length > 0);
+  const listed = shown.length;
   const countWord = COUNT_WORDS[listed] ?? String(listed);
   return (
     <section className="mx-auto max-w-7xl px-4 py-16 sm:px-6 sm:py-20 lg:px-8">
@@ -23,8 +24,10 @@ export function PopularRegions() {
           const cities = getDestinationsByRegion(region.slug);
           if (cities.length === 0) return null;
           const cityNames = cities.slice(0, 4).map((c) => c.city);
+          // With an odd number of cards the last one would sit alone in a half-empty two-column row; let it span the row below `lg`.
+          const lonely = listed % 2 === 1 && region.slug === shown[listed - 1].slug;
           return (
-            <Reveal key={region.slug} delay={i * 0.05}>
+            <Reveal key={region.slug} delay={i * 0.05} className={lonely ? "col-span-2 lg:col-span-1" : undefined}>
               <Link
                 href={`/destinations#${region.slug}`}
                 className="group block h-full rounded-2xl border border-[var(--color-navy-950)]/8 bg-white p-5 transition-colors hover:border-[var(--color-gold-500)]/50"

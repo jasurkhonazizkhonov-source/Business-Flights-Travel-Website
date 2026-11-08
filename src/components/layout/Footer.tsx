@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Star } from "lucide-react";
+import { MessageSquareText } from "lucide-react";
 import { Logo } from "@/components/brand/Logo";
 import { PaymentIcons } from "@/components/brand/PaymentIcons";
 import { AirlineStrip } from "@/components/layout/AirlineStrip";
@@ -91,7 +91,7 @@ export function Footer() {
                 </li>
               ))}
               <li>
-                <Link href="/destinations" className="inline-block py-0.5 text-[var(--color-gold-400)] hover:text-[var(--color-gold-300)]">
+                <Link href="/destinations" className="inline-block py-0.5 text-[var(--color-gold-400)] hover:text-white">
                   View all destinations →
                 </Link>
               </li>
@@ -150,12 +150,10 @@ export function Footer() {
             rel="noopener noreferrer nofollow"
             className="inline-flex items-center gap-2 rounded-full border border-white/15 px-4 py-2 text-xs font-semibold text-[var(--color-cream-100)]/80 transition-colors hover:border-[var(--color-gold-500)]/60 hover:text-[var(--color-gold-400)]"
           >
-            <span className="flex items-center gap-0.5 text-[#00b67a]" aria-hidden="true">
-              {Array.from({ length: 5 }).map((_, i) => (
-                <Star key={i} size={12} fill="currentColor" strokeWidth={0} />
-              ))}
-            </span>
+            {/* Not a row of filled stars: no rating has been verified, and five green stars beside "Trustpilot" reads as a 5-star score. */}
+            <MessageSquareText size={14} className="text-[var(--color-gold-400)]" aria-hidden="true" />
             Read Our Reviews on Trustpilot
+            <span className="sr-only"> (opens in a new tab)</span>
           </a>
           {TRUST_BADGES.map((badge) => (
             <span

@@ -12,10 +12,14 @@ export function Hero() {
           alt=""
           fill
           priority
-          className="object-cover opacity-70"
+          fetchPriority="high"
+          className="object-cover opacity-60"
           sizes="100vw"
         />
-        <div className="absolute inset-0 bg-gradient-to-b from-[var(--color-navy-950)]/35 via-[var(--color-navy-950)]/55 to-[var(--color-navy-950)]" />
+        {/* Text sits directly on the photo, so the overlay is sized from measured contrast (the pixels behind each
+            text block, text alpha included): at the previous 35%/55%/70%-image values the 12px kicker was 2.2:1 and the
+            mobile intro paragraph 3.3:1 (4.5:1 needed); at these values the worst pixel behind any hero text is 5.2:1. */}
+        <div className="absolute inset-0 bg-gradient-to-b from-[var(--color-navy-950)]/65 via-[var(--color-navy-950)]/76 to-[var(--color-navy-950)]" />
       </div>
 
       <div className="relative mx-auto max-w-7xl px-4 pb-16 pt-16 sm:px-6 sm:pt-20 lg:px-8 lg:pt-28">

@@ -14,7 +14,7 @@ export function NewsletterSection() {
             Destination guides and practical business-class travel tips, sent occasionally — nothing else.
           </p>
           <div className="mx-auto mt-6 max-w-md">
-            <NewsletterForm variant="light" />
+            <NewsletterForm variant="light" idPrefix="newsletter-band" />
           </div>
         </Reveal>
       </div>

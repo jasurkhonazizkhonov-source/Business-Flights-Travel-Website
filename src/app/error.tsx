@@ -27,7 +27,7 @@ export default function Error({ error, reset }: { error: Error & { digest?: stri
 
   return (
     <section className="mx-auto flex min-h-[70vh] max-w-2xl flex-col items-center px-4 py-20 text-center sm:px-6 sm:py-28 lg:px-8">
-      <p className="font-display text-[clamp(2.5rem,10vw,4rem)] font-semibold leading-none text-[var(--color-gold-500)]">
+      <p className="font-display text-[clamp(2.5rem,10vw,4rem)] font-semibold leading-none text-[var(--color-gold-600)]">
         Something went wrong
       </p>
       <h1 className="mt-4 text-[clamp(1.4rem,4vw,1.9rem)] font-display font-semibold leading-tight text-[var(--color-navy-950)]">

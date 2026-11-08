@@ -18,6 +18,7 @@ import { TRIP_TYPES, BUDGET_CURRENCIES, DEFAULT_BUDGET_CURRENCY, type BudgetCurr
 import { cn } from "@/lib/cn";
 import { PRIMARY_CTA_LABEL } from "@/lib/constants";
 import { isValidEmail } from "@/lib/validate";
+import { focusFieldError } from "@/lib/focus-field-error";
 import { isValidPhoneNumber } from "@/lib/phone";
 
 const TRIP_TYPE_LABELS: Record<(typeof TRIP_TYPES)[number], string> = {
@@ -94,6 +95,9 @@ export function FlightRequestForm({
 
   function updateSegment(index: number, next: SegmentState) {
     setSegments((prev) => prev.map((s, i) => (i === index ? next : s)));
+    // Round trip: moving the departure past an already chosen return date would leave a return BEFORE the departure
+    // (the calendar cannot offer one, and validation would reject it), so the stale return date is cleared and re-asked.
+    if (index === 0 && next.departureDate && returnDate && returnDate < next.departureDate) setReturnDate("");
   }
 
   function addSegment() {
@@ -154,7 +158,7 @@ export function FlightRequestForm({
     if (Object.keys(clientErrors).length > 0) {
       setErrors(clientErrors);
       const firstKey = Object.keys(clientErrors)[0];
-      document.getElementById(`field-${firstKey}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+      focusFieldError(firstKey);
       return;
     }
     setErrors({});
@@ -203,7 +207,7 @@ export function FlightRequestForm({
         // treatment so a field error below the fold isn't silently missed.
         const firstServerKey = Object.keys(res.fieldErrors ?? {})[0];
         if (firstServerKey) {
-          document.getElementById(`field-${firstServerKey}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+          focusFieldError(firstServerKey);
         }
         setResult({ status: "error", message: res.error });
       }
@@ -248,7 +252,7 @@ export function FlightRequestForm({
       {/* Segments */}
       <div className="space-y-3">
         {segments.map((segment, i) => (
-          <div id={i === 0 ? "field-segments.0.from" : undefined} key={i}>
+          <div key={i}>
             <SegmentRow
               index={i}
               segment={segment}
@@ -256,6 +260,7 @@ export function FlightRequestForm({
               onChange={(s) => updateSegment(i, s)}
               onRemove={() => removeSegment(i)}
               showRemove={tripType === "MULTI_CITY" && segments.length > 2}
+              returnDate={i === 0 && tripType === "ROUND_TRIP" ? returnDate : undefined}
               errors={{
                 from: errors[`segments.${i}.from`],
                 to: errors[`segments.${i}.to`],
@@ -280,7 +285,14 @@ export function FlightRequestForm({
       <div className={cn("mt-3 grid grid-cols-1 gap-3", tripType === "ROUND_TRIP" ? "sm:grid-cols-2" : "sm:grid-cols-1 sm:max-w-xs")}>
         {tripType === "ROUND_TRIP" && (
           <div id="field-returnDate">
-            <DateField label="Return Date" value={returnDate} onChange={setReturnDate} minDate={firstDeparture} error={errors.returnDate} />
+            <DateField
+              label="Return Date"
+              value={returnDate}
+              onChange={setReturnDate}
+              minDate={firstDeparture}
+              rangeStart={segments[0]?.departureDate || undefined}
+              error={errors.returnDate}
+            />
           </div>
         )}
         <PassengerCabinField
@@ -505,7 +517,7 @@ function SuccessPanel({
       transition={{ duration: 0.3 }}
       className="w-full rounded-3xl border border-[var(--color-navy-950)]/8 bg-white p-5 text-center shadow-[0_20px_60px_-24px_rgba(10,26,48,0.35)] sm:p-10"
     >
-      <CheckCircle2 className="mx-auto h-14 w-14 text-[var(--color-gold-500)]" />
+      <CheckCircle2 className="mx-auto h-14 w-14 text-[var(--color-gold-600)]" aria-hidden="true" />
       <h3 className="mt-4 font-display text-2xl font-semibold text-[var(--color-navy-950)]">Your Flight Request Has Been Received</h3>
       <p className="mx-auto mt-2 max-w-md text-sm text-[var(--color-navy-950)]/70">
         Thank you for your request. One of our travel specialists will review your travel details and follow up with suitable flight

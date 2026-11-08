@@ -53,7 +53,7 @@ function PlainPhoneInputFallback({
       aria-required={ariaRequired}
       aria-invalid={ariaInvalid}
       aria-describedby={ariaDescribedBy}
-      className="w-full bg-transparent text-sm text-[var(--color-navy-950)] outline-none placeholder:text-[var(--color-navy-950)]/40"
+      className="w-full bg-transparent py-3 text-sm text-[var(--color-navy-950)] outline-none"
     />
   );
 }
@@ -111,7 +111,9 @@ export function PhoneNumberField({
       </label>
       <div
         className={cn(
-          "rounded-xl border bg-white px-3.5 py-3 text-sm focus-within:border-[var(--color-navy-700)] focus-within:ring-2 focus-within:ring-[var(--color-gold-400)]/55",
+          // No vertical padding here: the (fallback or rich) input carries `py-3` itself, so the
+          // whole 46px field — not just a 20px strip in its middle — is the tap/focus target.
+          "rounded-xl border bg-white px-3.5 text-sm focus-within:border-[var(--color-navy-700)] focus-within:ring-2 focus-within:ring-[var(--color-gold-400)]/55",
           error ? "border-red-500" : "border-[var(--color-navy-950)]/12",
         )}
       >

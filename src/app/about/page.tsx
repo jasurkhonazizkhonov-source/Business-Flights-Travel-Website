@@ -6,6 +6,7 @@ import { Reveal } from "@/components/Reveal";
 import { CTASection } from "@/components/sections/CTASection";
 import { COMPANY_ADDRESS, CONTACT_PHONE_DISPLAY, CONTACT_PHONE_E164, SITE_NAME, SITE_URL } from "@/lib/constants";
 import { pageMetadata } from "@/lib/seo";
+import { jsonLd } from "@/lib/json-ld";
 
 export const metadata: Metadata = pageMetadata({
   title: "About Our San Francisco Travel Agency",
@@ -141,7 +142,7 @@ export default function AboutPage() {
 
   return (
     <>
-      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumbJsonLd) }} />
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLd(breadcrumbJsonLd) }} />
 
       {/* Hero */}
       <section className="relative overflow-hidden bg-[var(--color-navy-950)] py-20 sm:py-28">
@@ -151,10 +152,10 @@ export default function AboutPage() {
             alt=""
             fill
             priority
-            className="object-cover opacity-30"
+            className="object-cover opacity-60"
             sizes="100vw"
           />
-          <div className="absolute inset-0 bg-gradient-to-b from-[var(--color-navy-950)]/55 via-[var(--color-navy-950)]/85 to-[var(--color-navy-950)]" />
+          <div className="absolute inset-0 bg-gradient-to-b from-[var(--color-navy-950)]/45 via-[var(--color-navy-950)]/72 to-[var(--color-navy-950)]" />
         </div>
         <div className="relative mx-auto max-w-4xl px-4 text-center sm:px-6 lg:px-8">
           <Reveal>
@@ -228,7 +229,9 @@ export default function AboutPage() {
               <div className="relative aspect-[4/3] w-full overflow-hidden rounded-2xl">
                 <Image
                   src="https://images.unsplash.com/photo-1517048676732-d65bc937f952?q=80&w=1400&auto=format&fit=crop"
-                  alt="Travel specialists reviewing an itinerary and comparing flight options"
+                  // A stock photograph (see next.config.ts), not a picture of this company's staff, so the text must not say who
+                  // the people are. Replace the photo with real team or office photography when it exists.
+                  alt="Illustrative photograph: people reviewing notes together around a table"
                   fill
                   sizes="(min-width: 1024px) 40vw, 90vw"
                   className="object-cover"

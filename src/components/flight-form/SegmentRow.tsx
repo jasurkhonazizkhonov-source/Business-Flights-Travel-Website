@@ -19,6 +19,7 @@ export function SegmentRow({
   onRemove,
   errors,
   showRemove,
+  returnDate,
 }: {
   index: number;
   segment: SegmentState;
@@ -27,6 +28,8 @@ export function SegmentRow({
   onRemove?: () => void;
   errors?: { from?: string; to?: string; departureDate?: string };
   showRemove?: boolean;
+  /** Round trip, first leg only: the chosen return date (ISO), shown as a highlighted range when the departure calendar is opened. */
+  returnDate?: string;
 }) {
   return (
     <div className="relative grid grid-cols-1 gap-3 rounded-2xl border border-[var(--color-navy-950)]/8 bg-[var(--color-cream-50)]/60 p-3 sm:grid-cols-[1fr_1fr_1fr] sm:p-3.5">
@@ -40,27 +43,37 @@ export function SegmentRow({
           <X size={14} />
         </button>
       )}
-      <AirportAutocomplete
-        label={`Flight ${index + 1} — From`}
-        value={segment.from}
-        onChange={(a) => onChange({ ...segment, from: a })}
-        icon="from"
-        error={errors?.from}
-      />
-      <AirportAutocomplete
-        label="To"
-        value={segment.to}
-        onChange={(a) => onChange({ ...segment, to: a })}
-        icon="to"
-        error={errors?.to}
-      />
-      <DateField
-        label="Departure Date"
-        value={segment.departureDate}
-        onChange={(iso) => onChange({ ...segment, departureDate: iso })}
-        minDate={minDate}
-        error={errors?.departureDate}
-      />
+      {/* The `field-<error key>` wrappers are what the submit handler scrolls to / focuses (focusFieldError) when
+          this segment has an error. Only the FIRST segment's origin had one (on the row in FlightRequestForm), so a
+          missing destination or date — and any error on a multi-city leg — never scrolled into view. */}
+      <div id={`field-segments.${index}.from`}>
+        <AirportAutocomplete
+          label={`Flight ${index + 1} — From`}
+          value={segment.from}
+          onChange={(a) => onChange({ ...segment, from: a })}
+          icon="from"
+          error={errors?.from}
+        />
+      </div>
+      <div id={`field-segments.${index}.to`}>
+        <AirportAutocomplete
+          label="To"
+          value={segment.to}
+          onChange={(a) => onChange({ ...segment, to: a })}
+          icon="to"
+          error={errors?.to}
+        />
+      </div>
+      <div id={`field-segments.${index}.departureDate`}>
+        <DateField
+          label="Departure Date"
+          value={segment.departureDate}
+          onChange={(iso) => onChange({ ...segment, departureDate: iso })}
+          minDate={minDate}
+          rangeEnd={returnDate || undefined}
+          error={errors?.departureDate}
+        />
+      </div>
     </div>
   );
 }

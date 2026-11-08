@@ -63,7 +63,25 @@ export function CookieConsent() {
   });
 
   const dialogRef = useRef<HTMLDivElement>(null);
+  const bannerRef = useRef<HTMLDivElement>(null);
   const titleId = useId();
+
+  // Tell the page how much room the fixed banner takes so keyboard focus never lands underneath it (see globals.css, WCAG 2.4.11).
+  useEffect(() => {
+    const el = bannerRef.current;
+    if (!bannerVisible || !el) return;
+    const root = document.documentElement;
+    const publish = () => root.style.setProperty("--cookie-banner-h", `${el.offsetHeight}px`);
+    publish();
+    root.dataset.cookieBanner = "open"; // the floating call button steps aside while this is set (it would sit hidden under the banner)
+    const observer = new ResizeObserver(publish);
+    observer.observe(el);
+    return () => {
+      observer.disconnect();
+      root.style.removeProperty("--cookie-banner-h");
+      delete root.dataset.cookieBanner;
+    };
+  }, [bannerVisible]);
 
   useEffect(() => {
     return onOpenPreferencesRequest(() => {
@@ -78,10 +96,33 @@ export function CookieConsent() {
   // Return focus to a sensible place once the dialog closes, and move it
   // into the dialog when it opens — standard modal focus management.
   useEffect(() => {
-    if (preferencesOpen) {
-      dialogRef.current?.querySelector<HTMLElement>("[data-autofocus]")?.focus();
-    }
+    if (!preferencesOpen) return;
+    // Whatever opened the dialog (the banner's "Manage Preferences", or the footer's "Cookie Settings") has focus right now.
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    dialogRef.current?.querySelector<HTMLElement>("[data-autofocus]")?.focus();
+    return () => {
+      if (opener?.isConnected) opener.focus();
+    };
   }, [preferencesOpen]);
+
+  // The dialog is aria-modal, so Tab must not walk out into the page behind it (it used to: after six Tab presses focus
+  // reached the end of the document). Keep it cycling between the dialog's own controls.
+  function keepFocusInDialog(e: React.KeyboardEvent<HTMLDivElement>) {
+    if (e.key !== "Tab") return;
+    const items = Array.from(
+      e.currentTarget.querySelectorAll<HTMLElement>('a[href], button:not([disabled]), input:not([disabled]), select, textarea, [tabindex]:not([tabindex="-1"])'),
+    );
+    if (items.length === 0) return;
+    const first = items[0];
+    const last = items[items.length - 1];
+    if (e.shiftKey && document.activeElement === first) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && document.activeElement === last) {
+      e.preventDefault();
+      first.focus();
+    }
+  }
 
   function acceptAll() {
     saveConsent({ analytics: true, marketing: true });
@@ -103,6 +144,7 @@ export function CookieConsent() {
     <>
       {bannerVisible && (
         <div
+          ref={bannerRef}
           data-hide-floating-cta
           role="region"
           aria-label="Cookie notice"
@@ -131,10 +173,11 @@ export function CookieConsent() {
               <button
                 type="button"
                 onClick={rejectNonEssential}
-                className="min-h-11 rounded-full border border-[var(--color-navy-950)]/15 px-4 text-sm font-semibold text-[var(--color-navy-950)] transition-colors hover:border-[var(--color-navy-950)]/30"
+                className="min-h-11 rounded-full bg-[var(--color-navy-950)] px-5 text-sm font-semibold text-white transition-colors hover:bg-[var(--color-gold-600)]"
               >
                 Reject Non-Essential
               </button>
+              {/* Same weight as Reject: declining must be as easy and as visible as accepting (no dark pattern). */}
               <button
                 type="button"
                 onClick={acceptAll}
@@ -154,6 +197,7 @@ export function CookieConsent() {
             role="dialog"
             aria-modal="true"
             aria-labelledby={titleId}
+            onKeyDown={keepFocusInDialog}
             className="max-h-[90dvh] w-full max-w-lg overflow-y-auto rounded-t-2xl bg-white p-6 shadow-2xl sm:rounded-2xl sm:p-7"
           >
             <div className="flex items-start justify-between gap-4">

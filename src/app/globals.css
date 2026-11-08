@@ -19,8 +19,13 @@
      darker than the new gold-600 to still read as a hover state.
      Unaffected: every use of gold as a filled BUTTON background
      (gold-400/gold-500) with dark/white text on top — a different contrast
-     pair, already compliant. */
-  --color-gold-600: #946824;
+     pair, already compliant.
+     2026-10: #946824 is 4.68:1 on cream-50 but only 4.37:1 on cream-100,
+     which is the band behind most section kickers (12px text, so 4.5:1
+     applies) — axe flagged them on /, /flights, /business-class and /about.
+     #8e6423 is the same hue ~4% darker: 4.67:1 on cream-100, 5.00:1 on
+     cream-50, 5.26:1 on white and as a white-text button background. */
+  --color-gold-600: #8e6423;
   --color-gold-700: #76531d;
 
   --color-cream-50: #fbf9f5;
@@ -91,6 +96,16 @@ h1, h2, h3, h4, .font-display {
   box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.85);
 }
 
+/* Placeholder text is text for WCAG 1.4.3 (4.5:1). Tailwind's preflight default
+   is currentColor at 50% (3.35:1 on a white field) and a few fields used 40%
+   (2.5:1). 65% clears 4.5:1 on white (5.5:1), cream and the dark footer field
+   alike, while still reading lighter than typed text. Unlayered on purpose:
+   it also takes precedence over any per-field `placeholder:` utility. */
+::placeholder {
+  color: color-mix(in oklab, currentColor 65%, transparent);
+  opacity: 1;
+}
+
 /* Touch: no 300 ms tap delay / double-tap zoom on controls, and a deliberate
    (subtle navy) tap highlight instead of the browser's default grey flash. */
 a, button, summary, select, label, [role="button"], [role="tab"] {
@@ -111,6 +126,20 @@ a, button, summary, select, label, [role="button"], [role="tab"] {
    instead of underneath it. */
 [id] {
   scroll-margin-top: 5.5rem;
+}
+
+/* WCAG 2.2 SC 2.4.11 Focus Not Obscured: keyboard focus scrolls a control into the VIEWPORT, which is not the same as clearing the
+   sticky header or the fixed cookie banner. Measured on /flights at 375x812 with the banner showing: 27 of 69 Tab stops (every field
+   in the lower half of the form) sat completely behind the banner; 0 once consent had been given. The banner publishes its own
+   height while it is on screen (CookieConsent.tsx), and focus scrolling now leaves that much room. */
+html {
+  scroll-padding-top: 5.5rem;
+  scroll-padding-bottom: var(--cookie-banner-h, 0px);
+}
+/* ...and the end of the page needs the same room, or the footer links could never be scrolled clear of the banner (at 320 px they
+   stayed behind it). Only the document's bottom edge moves; nothing already on screen shifts. */
+body {
+  padding-bottom: var(--cookie-banner-h, 0px);
 }
 
 /* Balanced headings and no single-word last lines in running copy. The
@@ -136,7 +165,7 @@ li:not(.truncate, .whitespace-nowrap) {
    chrome instead of the library's default plain-browser look. */
 .PhoneInput {
   display: flex;
-  align-items: center;
+  align-items: stretch;
   gap: 0.5rem;
 }
 .PhoneInputInput {
@@ -147,6 +176,10 @@ li:not(.truncate, .whitespace-nowrap) {
   font-family: inherit;
   color: inherit;
   width: 100%;
+  /* The field's vertical padding lives here (not on the bordered wrapper) so the
+     whole field, including the invisible country <select> that overlays
+     .PhoneInputCountry, is one full-height tap target. */
+  padding-block: 0.75rem;
 }
 .PhoneInputCountry {
   display: flex;
@@ -183,6 +216,88 @@ li:not(.truncate, .whitespace-nowrap) {
   background-color: var(--color-navy-900);
   color: white;
   border-color: var(--color-navy-900);
+}
+
+/* Round-trip date range (DateField): the strip between the departure and the return date. It is previewed while the visitor
+   hovers (mouse), moves focus (keyboard) or taps (touch) and stays once the return date is chosen. The strip is a pseudo-element
+   behind the day buttons so neighbouring cells join into one band; the two ends are filled day buttons (departure navy, return /
+   previewed return gold) so the range never relies on the tint alone. */
+.bfw-daypicker .rdp-day {
+  position: relative;
+}
+.bfw-daypicker .bfw-range-middle::before,
+.bfw-daypicker .bfw-range-start-band::before,
+.bfw-daypicker .bfw-range-end::before {
+  content: "";
+  position: absolute;
+  inset: 3px 0;
+  background: color-mix(in srgb, var(--color-gold-400) 26%, white);
+  transform-origin: left center;
+  animation: bfw-range-in 160ms ease-out both;
+}
+.bfw-daypicker .bfw-range-start-band::before {
+  left: 50%;
+}
+.bfw-daypicker .bfw-range-end::before {
+  right: 50%;
+  transform-origin: right center;
+}
+.bfw-daypicker .bfw-range-middle:first-child::before {
+  border-top-left-radius: 9999px;
+  border-bottom-left-radius: 9999px;
+}
+.bfw-daypicker .bfw-range-middle:last-child::before {
+  border-top-right-radius: 9999px;
+  border-bottom-right-radius: 9999px;
+}
+.bfw-daypicker .bfw-range-start .rdp-day_button,
+.bfw-daypicker .bfw-range-end .rdp-day_button,
+.bfw-daypicker .bfw-range-middle .rdp-day_button {
+  position: relative;
+  z-index: 1;
+}
+.bfw-daypicker .bfw-range-middle .rdp-day_button {
+  color: var(--color-navy-950);
+}
+.bfw-daypicker .bfw-range-middle .rdp-day_button:hover:not([disabled]) {
+  background-color: color-mix(in srgb, var(--color-gold-400) 45%, white);
+}
+.bfw-daypicker .bfw-range-start .rdp-day_button {
+  background-color: var(--color-navy-900);
+  color: white;
+  border-color: var(--color-navy-900);
+}
+.bfw-daypicker .bfw-range-end .rdp-day_button {
+  background-color: var(--color-gold-600);
+  color: white;
+  border-color: var(--color-gold-600);
+  animation: bfw-range-pop 160ms ease-out;
+}
+@keyframes bfw-range-in {
+  from {
+    opacity: 0;
+    transform: scaleX(0.55);
+  }
+  to {
+    opacity: 1;
+    transform: scaleX(1);
+  }
+}
+@keyframes bfw-range-pop {
+  from {
+    transform: scale(0.88);
+  }
+  to {
+    transform: scale(1);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .bfw-daypicker .bfw-range-middle::before,
+  .bfw-daypicker .bfw-range-start-band::before,
+  .bfw-daypicker .bfw-range-end::before,
+  .bfw-daypicker .bfw-range-end .rdp-day_button {
+    animation: none;
+  }
 }
 
 /* Narrow phones (≤380px, e.g. iPhone SE / small Android): the default

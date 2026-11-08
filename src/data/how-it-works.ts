@@ -9,7 +9,7 @@ export const howItWorksSteps = [
     title: "Our travel specialists review your requirements",
     description: "A dedicated specialist reviews your request personally and reaches out to confirm any details before searching.",
     image: "https://images.unsplash.com/photo-1758876020300-76a782ca51c6?q=80&w=1600&auto=format&fit=crop",
-    imageAlt: "A travel specialist reviewing trip details and fare data at a desk",
+    imageAlt: "Illustrative photograph: a person at a desk studying a printed map next to a laptop",
   },
   {
     title: "We search available flight options and fares",

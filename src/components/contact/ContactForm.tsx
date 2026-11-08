@@ -12,6 +12,7 @@ import { submitContactMessage } from "@/server/actions/submit-contact-message";
 // contact-options.ts.
 import { CONTACT_SUBJECT_OPTIONS, type ContactSubject } from "@/lib/validations/contact-options";
 import { isValidEmail } from "@/lib/validate";
+import { focusFieldError } from "@/lib/focus-field-error";
 import { isValidPhoneNumber } from "@/lib/phone";
 import { cn } from "@/lib/cn";
 
@@ -19,10 +20,7 @@ type FormErrors = Record<string, string>;
 
 function focusFirstError(errors: FormErrors) {
   const firstKey = Object.keys(errors)[0];
-  if (!firstKey) return;
-  const wrapper = document.getElementById(`field-${firstKey}`);
-  wrapper?.scrollIntoView({ behavior: "smooth", block: "center" });
-  wrapper?.querySelector<HTMLElement>("input, select, textarea")?.focus();
+  if (firstKey) focusFieldError(firstKey);
 }
 
 export function ContactForm() {
@@ -96,7 +94,7 @@ export function ContactForm() {
         animate={{ opacity: 1, y: 0 }}
         className="rounded-2xl border border-[var(--color-navy-950)]/8 bg-white p-8 text-center"
       >
-        <CheckCircle2 className="mx-auto h-12 w-12 text-[var(--color-gold-500)]" />
+        <CheckCircle2 className="mx-auto h-12 w-12 text-[var(--color-gold-600)]" aria-hidden="true" />
         <h3 className="mt-4 font-display text-xl font-semibold text-[var(--color-navy-950)]">Message received</h3>
         <p className="mt-2 text-sm text-[var(--color-navy-950)]/65">
           Thank you for reaching out. A member of our team will get back to you shortly.

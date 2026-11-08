@@ -28,7 +28,9 @@ export function DestinationCard({
       <div className="relative aspect-[3/2] w-full overflow-hidden">
         <Image
           src={destination.heroImage}
-          alt={`${destination.city} skyline, ${destination.country} — business-class flight destination`}
+          // Names the place only. The previous "<city> skyline … business-class flight destination" text asserted what the photo
+          // shows, which is untrue for many destination photos (an aurora over Tromsø, the Giza Sphinx for Cairo, an arch in Faro).
+          alt={`${destination.city}, ${destination.country}`}
           fill
           sizes={sizes}
           className="object-cover transition-transform duration-700 ease-out group-hover:scale-110"

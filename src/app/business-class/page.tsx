@@ -74,10 +74,12 @@ export default function BusinessClassPage() {
             alt=""
             fill
             priority
-            className="object-cover opacity-35"
+            className="object-cover opacity-60"
             sizes="100vw"
           />
-          <div className="absolute inset-0 bg-gradient-to-b from-[var(--color-navy-950)]/50 via-[var(--color-navy-950)]/85 to-[var(--color-navy-950)]" />
+          {/* The photo used to sit at ~5-10% visibility (opacity 35 under an 85% overlay) while still being loaded as the priority image;
+              it now reads as a photograph, with the overlay doing the contrast work (measured over the pixels, see the audit report). */}
+          <div className="absolute inset-0 bg-gradient-to-b from-[var(--color-navy-950)]/65 via-[var(--color-navy-950)]/75 to-[var(--color-navy-950)]" />
         </div>
         <div className="relative mx-auto max-w-4xl px-4 text-center sm:px-6 lg:px-8">
           <Reveal>
@@ -106,12 +108,14 @@ export default function BusinessClassPage() {
         </Reveal>
         <ul className="mt-8 grid grid-cols-1 gap-4 sm:grid-cols-2">
           {capabilities.map((c, i) => (
-            <Reveal key={c} delay={i * 0.05}>
-              <li className="flex items-start gap-3 rounded-xl bg-[var(--color-cream-100)] p-4">
+            // <li> must be the <ul>'s direct child (a <div> wrapper around each <li> fails list semantics, axe "list"/"listitem") -
+            // so Reveal goes inside it, as on /flights.
+            <li key={c} className="rounded-xl bg-[var(--color-cream-100)]">
+              <Reveal delay={i * 0.05} className="flex items-start gap-3 p-4">
                 <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-[var(--color-gold-600)]" />
                 <span className="text-sm text-[var(--color-navy-900)]">{c}</span>
-              </li>
-            </Reveal>
+              </Reveal>
+            </li>
           ))}
         </ul>
       </section>

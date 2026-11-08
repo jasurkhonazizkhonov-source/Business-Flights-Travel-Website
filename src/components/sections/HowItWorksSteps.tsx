@@ -28,10 +28,12 @@ export function HowItWorksSteps() {
               />
             </Reveal>
             <Reveal delay={0.08}>
-              <span className="font-display text-4xl font-semibold text-[var(--color-gold-500)]">
+              {/* gold-500 on this cream background is 2.3:1 (axe color-contrast, large text needs 3:1); gold-600 is the darker shade the site already uses for its labels. */}
+              <span className="font-display text-4xl font-semibold text-[var(--color-gold-600)]">
                 {String(i + 1).padStart(2, "0")}
               </span>
-              <h3 className="mt-3 font-display text-2xl font-semibold text-[var(--color-navy-950)] sm:text-3xl">{step.title}</h3>
+              {/* h2, not h3: this component is used only on /how-it-works, where the step titles sit directly under the page's h1 (heading levels must not skip). */}
+              <h2 className="mt-3 font-display text-2xl font-semibold text-[var(--color-navy-950)] sm:text-3xl">{step.title}</h2>
               <p className="mt-3 max-w-md text-[15px] leading-relaxed text-[var(--color-navy-950)]/70">{step.description}</p>
             </Reveal>
           </div>

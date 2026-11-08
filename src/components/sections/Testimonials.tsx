@@ -1,4 +1,4 @@
-import { Star, ExternalLink } from "lucide-react";
+import { MessageSquareText, ExternalLink } from "lucide-react";
 import { Reveal } from "@/components/Reveal";
 import { testimonials } from "@/data/testimonials";
 import { TRUSTPILOT_URL } from "@/lib/constants";
@@ -44,13 +44,11 @@ export function Testimonials() {
             rel="noopener noreferrer nofollow"
             className="mt-8 inline-flex items-center gap-2 rounded-full border border-[var(--color-navy-950)]/15 bg-white px-5 py-3 text-sm font-semibold text-[var(--color-navy-900)] transition-colors hover:border-[var(--color-gold-500)] hover:text-[var(--color-gold-600)]"
           >
-            <span className="flex items-center gap-0.5 text-[#00b67a]" aria-hidden="true">
-              {Array.from({ length: 5 }).map((_, i) => (
-                <Star key={i} size={14} fill="currentColor" strokeWidth={0} />
-              ))}
-            </span>
+            {/* Not a row of filled stars: no rating has been verified, and five green stars beside "Trustpilot" reads as a 5-star score. */}
+            <MessageSquareText size={16} className="text-[var(--color-gold-600)]" aria-hidden="true" />
             See Our Reviews on Trustpilot
-            <ExternalLink size={14} className="text-[var(--color-navy-950)]/40" />
+            <ExternalLink size={14} className="text-[var(--color-navy-950)]/40" aria-hidden="true" />
+            <span className="sr-only">(opens in a new tab)</span>
           </a>
         </Reveal>
       </div>

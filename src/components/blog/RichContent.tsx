@@ -41,7 +41,7 @@ export function RichContent({ blocks }: { blocks: BlogBlock[] }) {
         }
         if (block.type === "ul") {
           return (
-            <ul key={i} className="list-disc space-y-2 pl-5 leading-relaxed marker:text-[var(--color-gold-500)]">
+            <ul key={i} className="list-disc space-y-2 pl-5 leading-relaxed marker:text-[var(--color-gold-600)]">
               {block.items.map((item, j) => (
                 <li key={j}>{linkify(item, `${i}-${j}`)}</li>
               ))}

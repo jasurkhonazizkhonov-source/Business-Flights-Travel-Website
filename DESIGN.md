@@ -26,7 +26,7 @@ Three-family palette, one accent — deliberately not more:
 | `--color-navy-900`–`700` | `#0d2340`–`#1b4269` | Headings on light, secondary dark surfaces |
 | `--color-navy-600`/`500` | `#2a5686`/`#3d6da3` | Rarely used — lighter navy accents |
 | `--color-gold-400`/`500` | `#e3b876`/`#d29c4a` | The one accent — CTAs, kickers, highlights |
-| `--color-gold-600`/`700` | `#946824`/`#76531d` | Gold used as *text* (WCAG AA-adjusted — see the comment in globals.css) |
+| `--color-gold-600`/`700` | `#8e6423`/`#76531d` | Gold used as *text* (WCAG AA-adjusted — see the comment in globals.css). gold-600 is 4.67:1 on cream-100, 5.00:1 on cream-50, 5.26:1 on white |
 | `--color-cream-50`/`100` | `#fbf9f5`/`#f5f1e8` | Page background, light section fills |
 
 No pure black, no pure white background. No second accent color. Every
@@ -42,6 +42,15 @@ dark section uses the same navy-950, never a different "brand dark."
   `tracking-[0.3em]` uppercase, in gold-600.
 - Headline sizing uses `clamp()` for fluid scaling (e.g.
   `text-[clamp(2rem,6vw,3.75rem)]`) rather than fixed breakpoint jumps.
+
+### Contrast rules that are easy to get wrong (measured, 2026-10)
+
+- Text drawn directly on a photograph is judged against the *brightest pixels behind it*, not the page colour:
+  the home hero overlay is `from-navy-950/65 via-/76` over a 60%-opacity photo so that the 12px gold kicker and the
+  intro paragraph stay above 4.5:1. If a hero photo is replaced, re-measure before keeping those numbers.
+- Placeholder text is text: `::placeholder` is `currentColor` at 65% (globals.css), never lighter. Do not add a
+  per-field `placeholder:text-…/40`.
+- Gold *icons and bullets* on light backgrounds use gold-600, not gold-500 (2.3:1).
 
 ## Spacing & layout
 

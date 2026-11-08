@@ -20,7 +20,7 @@ const helpfulLinks = [
 export default function NotFound() {
   return (
     <section className="mx-auto flex min-h-[70vh] max-w-3xl flex-col items-center px-4 py-20 text-center sm:px-6 sm:py-28 lg:px-8">
-      <p className="font-display text-[clamp(3.5rem,14vw,6rem)] font-semibold leading-none text-[var(--color-gold-500)]">404</p>
+      <p className="font-display text-[clamp(3.5rem,14vw,6rem)] font-semibold leading-none text-[var(--color-gold-600)]">404</p>
       <h1 className="mt-4 text-[clamp(1.6rem,4.5vw,2.25rem)] font-display font-semibold leading-tight text-[var(--color-navy-950)]">
         We couldn&apos;t find that page
       </h1>
@@ -35,6 +35,8 @@ export default function NotFound() {
         Back to Home
       </Link>
 
+      {/* Without an h2 here the footer's h3 column headings jump straight from the h1 (axe: heading-order). */}
+      <h2 className="sr-only">Where to go next</h2>
       <div className="mt-14 grid w-full grid-cols-1 gap-3 sm:grid-cols-2">
         {helpfulLinks.map(({ href, label, description, Icon }) => (
           <Link

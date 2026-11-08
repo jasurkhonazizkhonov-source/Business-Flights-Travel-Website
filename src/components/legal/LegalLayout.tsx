@@ -26,7 +26,8 @@ export function LegalLayout({
       <section className="border-b border-[var(--color-navy-950)]/8 bg-[var(--color-cream-100)] py-12 sm:py-16">
         <div className="mx-auto max-w-3xl px-4 sm:px-6 lg:px-8">
           <Reveal>
-            <p className="text-xs font-semibold tracking-[0.25em] text-[var(--color-gold-600)]">LEGAL</p>
+            {/* gold-600 on this cream-100 band is 4.36:1 (small text needs 4.5:1); gold-700 passes. */}
+            <p className="text-xs font-semibold tracking-[0.25em] text-[var(--color-gold-700)]">LEGAL</p>
             <h1 className="mt-3 text-[clamp(1.9rem,4.5vw,2.75rem)] font-display font-semibold leading-tight text-[var(--color-navy-950)]">
               {title}
             </h1>

@@ -5,6 +5,7 @@ import { m } from "framer-motion";
 import { Users, Minus, Plus } from "lucide-react";
 import { useClickOutside } from "@/hooks/useClickOutside";
 import { usePopoverAlign } from "@/hooks/usePopoverAlign";
+import { useScrollPopoverIntoView } from "@/hooks/useScrollPopoverIntoView";
 // Imported from the zod-free options module, not from
 // @/lib/validations/flight-request, so this client component's bundle
 // doesn't pull in zod and the full validation schema — see the comment in
@@ -81,8 +82,10 @@ export function PassengerCabinField({
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const labelId = useId();
+  const valueId = useId();
   useClickOutside(ref, () => setOpen(false), open);
   const align = usePopoverAlign(ref, open, 320);
+  useScrollPopoverIntoView(ref, open);
 
   const total = passengers.adults + passengers.children + passengers.infants;
 
@@ -96,7 +99,8 @@ export function PassengerCabinField({
         onClick={() => setOpen((v) => !v)}
         aria-haspopup="dialog"
         aria-expanded={open}
-        aria-labelledby={labelId}
+        // Label + current value, so the selection ("2 Travelers · Business") is announced (see DateField.tsx).
+        aria-labelledby={`${labelId} ${valueId}`}
         className={cn(
           "flex w-full items-center gap-2.5 rounded-xl border bg-white px-3.5 py-3 text-left text-sm text-[var(--color-navy-950)] transition-colors",
           "border-[var(--color-navy-950)]/12 hover:border-[var(--color-navy-950)]/25",
@@ -104,7 +108,7 @@ export function PassengerCabinField({
         )}
       >
         <Users size={17} className="shrink-0 text-[var(--color-navy-600)]" aria-hidden="true" />
-        <span className="truncate">
+        <span id={valueId} className="truncate">
           {total} {total === 1 ? "Traveler" : "Travelers"} · {CABIN_LABELS[cabinClass]}
         </span>
       </button>
@@ -124,6 +128,7 @@ export function PassengerCabinField({
         initial={false}
         transition={{ duration: 0.16, ease: "easeOut" }}
         role="dialog"
+        aria-labelledby={labelId}
         inert={!open}
         className={cn(
           "absolute z-30 mt-2 w-80 max-w-[calc(100vw-2.5rem)] rounded-2xl border border-[var(--color-navy-950)]/10 bg-white p-4 shadow-xl",

@@ -4,9 +4,10 @@ import { useId, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { m } from "framer-motion";
 import { CalendarDays } from "lucide-react";
-import { format } from "date-fns";
+import { differenceInCalendarDays, format } from "date-fns";
 import { useClickOutside } from "@/hooks/useClickOutside";
 import { usePopoverAlign } from "@/hooks/usePopoverAlign";
+import { useScrollPopoverIntoView } from "@/hooks/useScrollPopoverIntoView";
 import { cn } from "@/lib/cn";
 import { FieldError } from "@/components/forms/FieldError";
 
@@ -32,6 +33,9 @@ function toIso(date: Date): string {
   return format(date, "yyyy-MM-dd");
 }
 
+/** How the visitor last interacted with the calendar: decides whether a tap selects at once or first previews the range. */
+type PointerKind = "mouse" | "touch" | "keyboard";
+
 export function DateField({
   label,
   value,
@@ -39,6 +43,8 @@ export function DateField({
   minDate,
   error,
   placeholder = "Select date",
+  rangeStart,
+  rangeEnd,
 }: {
   label: string;
   value: string;
@@ -46,17 +52,60 @@ export function DateField({
   minDate?: Date;
   error?: string;
   placeholder?: string;
+  /**
+   * Round-trip RETURN field: the departure date (ISO). The calendar then shows the departure → return range and previews it
+   * while the visitor hovers (mouse), moves focus (keyboard) or taps (touch: tap previews, a second tap or the button confirms).
+   * The caller already passes the departure date as `minDate`, so no earlier return date can be chosen.
+   */
+  rangeStart?: string;
+  /** Round-trip DEPARTURE field: the chosen return date (ISO) — shown as a highlighted range when the calendar is reopened. */
+  rangeEnd?: string;
 }) {
   const [open, setOpen] = useState(false);
+  // Range preview state. `preview` follows the mouse / keyboard focus; `pending` is a touch tap that is not confirmed yet.
+  const [preview, setPreview] = useState<Date | undefined>();
+  const [pending, setPending] = useState<Date | undefined>();
+  const pointerRef = useRef<PointerKind>("mouse");
   const containerRef = useRef<HTMLDivElement>(null);
   const labelId = useId();
-  useClickOutside(containerRef, () => setOpen(false), open);
+  const valueId = useId();
+  const errorId = useId();
+  const summaryId = useId();
+
+  function close() {
+    setOpen(false);
+    setPreview(undefined);
+    setPending(undefined);
+  }
+  useClickOutside(containerRef, close, open);
   const align = usePopoverAlign(containerRef, open, 320);
+  useScrollPopoverIntoView(containerRef, open);
 
   const selected = parseIso(value);
   const floor = minDate ?? new Date(new Date().setHours(0, 0, 0, 0));
   const maxDate = new Date();
   maxDate.setFullYear(maxDate.getFullYear() + 1);
+
+  // --- date-range display -------------------------------------------------------------------------------------------------
+  const start = rangeStart ? parseIso(rangeStart) : undefined;
+  const previewing = Boolean(start); // return field of a round trip
+  const rangeFrom = previewing ? start : rangeEnd ? selected : undefined;
+  const rangeTo = previewing ? (pending ?? preview ?? selected) : rangeEnd ? parseIso(rangeEnd) : undefined;
+  const hasRange = Boolean(rangeFrom && rangeTo && rangeTo.getTime() > rangeFrom.getTime());
+  const nights = hasRange ? differenceInCalendarDays(rangeTo!, rangeFrom!) : 0;
+  const summary =
+    previewing && rangeFrom && rangeTo
+      ? hasRange
+        ? `${format(rangeFrom, "EEE, MMM d")} → ${format(rangeTo, "EEE, MMM d")} · ${nights} ${nights === 1 ? "night" : "nights"}`
+        : `${format(rangeTo, "EEE, MMM d")} · same-day return`
+      : previewing && rangeFrom
+        ? `Departing ${format(rangeFrom, "EEE, MMM d")} — choose a return date`
+        : "";
+
+  function commit(date: Date) {
+    onChange(toIso(date));
+    close();
+  }
 
   return (
     <div className="relative" ref={containerRef}>
@@ -65,10 +114,14 @@ export function DateField({
       </label>
       <button
         type="button"
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => (open ? close() : setOpen(true))}
         aria-haspopup="dialog"
         aria-expanded={open}
-        aria-labelledby={labelId}
+        // Name = the label PLUS the current value ("Departure Date Tue, Nov 3, 2026" / "… Select date"). With the
+        // label alone, aria-labelledby replaced the button's own text, so a screen reader never announced which
+        // date was chosen (WCAG 4.1.2 Name, Role, Value).
+        aria-labelledby={`${labelId} ${valueId}`}
+        aria-describedby={error ? errorId : undefined}
         className={cn(
           "flex w-full items-center gap-2.5 rounded-xl border bg-white px-3.5 py-3 text-left text-sm text-[var(--color-navy-950)] transition-colors",
           error ? "border-red-400" : "border-[var(--color-navy-950)]/12 hover:border-[var(--color-navy-950)]/25",
@@ -76,11 +129,11 @@ export function DateField({
         )}
       >
         <CalendarDays size={17} className="shrink-0 text-[var(--color-navy-600)]" aria-hidden="true" />
-        <span className={cn(!selected && "text-[var(--color-navy-950)]/65")}>
+        <span id={valueId} className={cn(!selected && "text-[var(--color-navy-950)]/65")}>
           {selected ? format(selected, "EEE, MMM d, yyyy") : placeholder}
         </span>
       </button>
-      {error && <FieldError>{error}</FieldError>}
+      {error && <FieldError id={errorId}>{error}</FieldError>}
 
       {/* Always mounted (not conditionally rendered via AnimatePresence) —
           visibility/interactivity are driven reactively by `animate` and
@@ -105,26 +158,87 @@ export function DateField({
         initial={false}
         transition={{ duration: 0.16, ease: "easeOut" }}
         role="dialog"
+        aria-labelledby={labelId}
         inert={!open}
+        // Records HOW the visitor interacts, so a touch tap can preview the range first while a mouse click or the keyboard
+        // selects at once (hover does not exist on touch screens).
+        onPointerDownCapture={(e) => {
+          pointerRef.current = e.pointerType === "mouse" ? "mouse" : "touch";
+        }}
+        onKeyDownCapture={() => {
+          pointerRef.current = "keyboard";
+        }}
+        onMouseLeave={() => setPreview(undefined)}
         className={cn(
           "absolute z-30 mt-2 w-max max-w-[calc(100vw-2.5rem)] overflow-x-auto rounded-2xl border border-[var(--color-navy-950)]/10 bg-white p-2.5 shadow-xl sm:p-3",
           align === "right" ? "right-0" : "left-0",
         )}
       >
         <DayPickerCalendar
+          // react-day-picker keeps the month it is showing and only reads `defaultMonth` once. The calendars stay mounted, so a
+          // return calendar created while today's month was the floor kept showing that month after the departure moved to a
+          // later one — an empty month with every day before the floor, so the visitor had to page forward to find any date.
+          // A new key whenever the calendar opens (or the month it should open on changes) restores `defaultMonth`.
+          key={`${open ? "open" : "closed"}-${format(selected ?? floor, "yyyy-MM")}`}
           mode="single"
           selected={selected}
           defaultMonth={selected ?? floor}
           startMonth={floor}
           endMonth={maxDate}
           disabled={{ before: floor, after: maxDate }}
+          // Custom modifier names (not react-day-picker's own range_* names, which belong to its range mode).
+          modifiers={{
+            bfw_range_start: rangeFrom,
+            bfw_range_start_band: hasRange ? rangeFrom : undefined,
+            bfw_range_end: hasRange ? rangeTo : undefined,
+            bfw_range_middle: hasRange ? { after: rangeFrom!, before: rangeTo! } : undefined,
+            bfw_range_preview: previewing && hasRange && (pending ?? preview) ? (pending ?? preview) : undefined,
+          }}
+          modifiersClassNames={{
+            bfw_range_start: "bfw-range-start",
+            bfw_range_start_band: "bfw-range-start-band",
+            bfw_range_end: "bfw-range-end",
+            bfw_range_middle: "bfw-range-middle",
+            bfw_range_preview: "bfw-range-preview",
+          }}
+          // Mouse hover and keyboard focus preview the range; the preview is only a preview — nothing is selected until a
+          // click / Enter / (touch) confirmation.
+          onDayMouseEnter={(date, modifiers) => {
+            if (previewing && pointerRef.current === "mouse" && !modifiers.disabled) setPreview(date);
+          }}
+          onDayFocus={(date, modifiers) => {
+            if (previewing && pointerRef.current !== "touch" && !modifiers.disabled) setPreview(date);
+          }}
+          onDayBlur={() => setPreview(undefined)}
           onSelect={(date) => {
             if (!date) return;
-            onChange(toIso(date));
-            setOpen(false);
+            if (previewing && pointerRef.current === "touch") {
+              // Touch: the first tap shows the range, tapping the same day again (or the button below) confirms it.
+              if (!pending || pending.getTime() !== date.getTime()) {
+                setPending(date);
+                return;
+              }
+            }
+            commit(date);
           }}
           className="bfw-daypicker"
         />
+        {previewing && (
+          <div className="mt-1 border-t border-[var(--color-navy-950)]/8 px-1 pt-2 text-center">
+            <p id={summaryId} aria-live="polite" className="min-h-5 text-xs font-medium text-[var(--color-navy-800)]">
+              {summary}
+            </p>
+            {pending && (
+              <button
+                type="button"
+                onClick={() => commit(pending)}
+                className="mt-2 min-h-11 w-full rounded-full bg-[var(--color-navy-950)] px-4 py-2 text-sm font-semibold text-white hover:bg-[var(--color-gold-600)]"
+              >
+                Select {format(pending, "EEE, MMM d")} as return date
+              </button>
+            )}
+          </div>
+        )}
       </m.div>
     </div>
   );

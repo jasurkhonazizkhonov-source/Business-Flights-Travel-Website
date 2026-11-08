@@ -1,17 +1,24 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import Link from "next/link";
 import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
 import { subscribeToNewsletter } from "@/server/actions/subscribe-newsletter";
 import { cn } from "@/lib/cn";
 import { isValidEmail } from "@/lib/validate";
 
-export function NewsletterForm({ variant = "dark" }: { variant?: "dark" | "light" }) {
+// `idPrefix` must be unique per instance on a page: the home page renders this form twice (the
+// newsletter band and the footer), and fixed ids made the second email field's <label for> point at the
+// first field and duplicated the honeypot id. The footer keeps the original `newsletter-*` ids.
+export function NewsletterForm({ variant = "dark", idPrefix = "newsletter" }: { variant?: "dark" | "light"; idPrefix?: string }) {
   const [email, setEmail] = useState("");
   const [website, setWebsite] = useState("");
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState("");
+  const emailId = `${idPrefix}-email`;
+  const websiteId = `${idPrefix}-website`;
+  const errorId = `${idPrefix}-error`;
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -48,26 +55,29 @@ export function NewsletterForm({ variant = "dark" }: { variant?: "dark" | "light
   return (
     <form onSubmit={handleSubmit} noValidate>
       <div className="flex flex-col gap-2.5 sm:flex-row">
-        <label htmlFor="newsletter-email" className="sr-only">
+        <label htmlFor={emailId} className="sr-only">
           Email address
         </label>
         <input
-          id="newsletter-email"
+          id={emailId}
           type="email"
+          autoComplete="email"
           required
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           placeholder="Your email address"
+          aria-invalid={error ? true : undefined}
+          aria-describedby={error ? errorId : undefined}
           className={cn(
             "min-h-11 w-full rounded-full border px-4 py-2.5 text-sm outline-none focus:ring-2 focus:ring-[var(--color-gold-400)]/40 sm:max-w-xs",
             isDark
-              ? "border-white/20 bg-white/5 text-white placeholder:text-white/40 focus:border-[var(--color-gold-400)]"
-              : "border-[var(--color-navy-950)]/15 bg-white text-[var(--color-navy-950)] placeholder:text-[var(--color-navy-950)]/40 focus:border-[var(--color-gold-400)]",
+              ? "border-white/20 bg-white/5 text-white focus:border-[var(--color-gold-400)]"
+              : "border-[var(--color-navy-950)]/15 bg-white text-[var(--color-navy-950)] focus:border-[var(--color-gold-400)]",
           )}
         />
         <div className="hidden" aria-hidden="true">
-          <label htmlFor="newsletter-website">Website</label>
-          <input id="newsletter-website" tabIndex={-1} autoComplete="off" value={website} onChange={(e) => setWebsite(e.target.value)} />
+          <label htmlFor={websiteId}>Website</label>
+          <input id={websiteId} tabIndex={-1} autoComplete="off" value={website} onChange={(e) => setWebsite(e.target.value)} />
         </div>
         <button
           type="submit"
@@ -77,16 +87,21 @@ export function NewsletterForm({ variant = "dark" }: { variant?: "dark" | "light
           {pending ? <Loader2 size={16} className="animate-spin" /> : "Subscribe"}
         </button>
       </div>
-      {error && <p className="mt-2 text-xs text-red-400">{error}</p>}
-      <p className={cn("mt-3 text-xs leading-relaxed", isDark ? "text-white/50" : "text-[var(--color-navy-950)]/65")}>
+      {/* red-400 is 2.8:1 on the light variant's cream band; red-300 on navy (9:1) and red-700 on cream (6:1) both pass. */}
+      {error && (
+        <p id={errorId} role="alert" className={cn("mt-2 text-xs", isDark ? "text-red-300" : "text-red-700")}>
+          {error}
+        </p>
+      )}
+      <p className={cn("mt-3 text-xs leading-relaxed", isDark ? "text-white/60" : "text-[var(--color-navy-950)]/65")}>
         By subscribing, you agree to our{" "}
-        <a href="/terms-of-service" className="underline decoration-dotted underline-offset-2 hover:text-[var(--color-gold-400)]">
+        <Link href="/terms-of-service" className="underline decoration-dotted underline-offset-2 hover:text-[var(--color-gold-400)]">
           Terms of Service
-        </a>{" "}
+        </Link>{" "}
         and{" "}
-        <a href="/privacy-policy" className="underline decoration-dotted underline-offset-2 hover:text-[var(--color-gold-400)]">
+        <Link href="/privacy-policy" className="underline decoration-dotted underline-offset-2 hover:text-[var(--color-gold-400)]">
           Privacy Policy
-        </a>
+        </Link>
         .
       </p>
     </form>

@@ -11,6 +11,7 @@ import { SITE_NAME, SITE_URL } from "@/lib/constants";
 import { pickRelatedDestinations } from "@/lib/related-destinations";
 import { FARE_DISCLAIMER, formatFareUSD } from "@/lib/fares";
 import { formatIsoDate } from "@/lib/format-date";
+import { jsonLd } from "@/lib/json-ld";
 import { SHARED_ROUTING_NOTE, isGenericFlyingFromUS, isGenericWhatToExpect, overviewIsRedundant } from "@/lib/destination-content";
 
 // A small, fixed set of guides genuinely relevant to planning ANY
@@ -126,13 +127,15 @@ export default async function DestinationPage({ params }: PageProps<"/destinatio
 
   return (
     <>
-      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumbJsonLd) }} />
-      {faqJsonLd && <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(faqJsonLd) }} />}
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLd(breadcrumbJsonLd) }} />
+      {faqJsonLd && <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLd(faqJsonLd) }} />}
 
       <section className="relative overflow-hidden bg-[var(--color-navy-950)]">
         <div className="absolute inset-0">
-          <Image src={destination.heroImage} alt={`${destination.city}, ${destination.country}`} fill priority className="object-cover opacity-45" sizes="100vw" />
-          <div className="absolute inset-0 bg-gradient-to-b from-[var(--color-navy-950)]/40 via-[var(--color-navy-950)]/80 to-[var(--color-navy-950)]" />
+          <Image src={destination.heroImage} alt={`${destination.city}, ${destination.country}`} fill priority fetchPriority="high" className="object-cover opacity-45" sizes="100vw" />
+          {/* from-/55 (was /40): over a bright photo such as Cairo the 12px breadcrumb at the top of the hero measured
+              4.3:1 (4.5:1 needed); the text block lower down already cleared 4.8:1. */}
+          <div className="absolute inset-0 bg-gradient-to-b from-[var(--color-navy-950)]/55 via-[var(--color-navy-950)]/80 to-[var(--color-navy-950)]" />
         </div>
         <div className="relative mx-auto max-w-5xl px-4 py-16 sm:px-6 sm:py-24 lg:px-8 lg:py-32">
           <Reveal>

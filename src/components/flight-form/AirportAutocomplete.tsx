@@ -40,6 +40,7 @@ export function AirportAutocomplete({
   const containerRef = useRef<HTMLDivElement>(null);
   const listboxId = useId();
   const labelId = useId();
+  const errorId = useId();
 
   function selectOption(option: AirportOption) {
     onChange(option);
@@ -180,7 +181,10 @@ export function AirportAutocomplete({
       </label>
       <div
         className={cn(
-          "flex items-center gap-2.5 rounded-xl border bg-white px-3.5 py-3 transition-colors",
+          // Vertical padding lives on the <input> (below), not on this box: with `py-3` here the
+          // input was only 20px tall inside a 46px field, so a tap on the top/bottom of the visible
+          // field did nothing. Same 46px height, but the whole field is now the focus target.
+          "flex items-center gap-2.5 rounded-xl border bg-white px-3.5 transition-colors",
           error ? "border-red-500" : "border-[var(--color-navy-950)]/12 focus-within:border-[var(--color-navy-700)] focus-within:ring-2 focus-within:ring-[var(--color-gold-400)]/30",
         )}
       >
@@ -195,7 +199,7 @@ export function AirportAutocomplete({
             setOpen(true);
           }}
           onKeyDown={handleKeyDown}
-          className="w-full bg-transparent text-sm text-[var(--color-navy-950)] outline-none placeholder:text-[var(--color-navy-950)]/40"
+          className="w-full bg-transparent py-3 text-sm text-[var(--color-navy-950)] outline-none"
           autoComplete="off"
           role="combobox"
           aria-labelledby={labelId}
@@ -203,10 +207,13 @@ export function AirportAutocomplete({
           aria-controls={listboxId}
           aria-autocomplete="list"
           aria-activedescendant={highlightedIndex >= 0 ? `${listboxId}-option-${highlightedIndex}` : undefined}
+          // The error text was announced when it appeared but never tied to the field: the focused input said nothing about being invalid.
+          aria-invalid={error ? true : undefined}
+          aria-describedby={error ? errorId : undefined}
         />
-        {loading && <Loader2 size={15} className="animate-spin text-[var(--color-navy-950)]/40" aria-hidden="true" />}
+        {loading && <Loader2 size={15} className="animate-spin text-[var(--color-navy-950)]/60" aria-hidden="true" />}
       </div>
-      {error && <FieldError>{error}</FieldError>}
+      {error && <FieldError id={errorId}>{error}</FieldError>}
 
       {/* Mounted whenever there are results at all, independent of `open` —
           visibility/interactivity are driven reactively by `animate` and
