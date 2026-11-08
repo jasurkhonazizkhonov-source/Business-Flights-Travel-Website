@@ -33,7 +33,7 @@ export function DestinationsPreview() {
                 (tuned for the /destinations page's 1-column mobile grid)
                 would over-claim 100vw here and make next/image fetch a
                 source width roughly 2x what's ever displayed. */}
-            <DestinationCard destination={d} priority={i < 4} sizes="(min-width: 640px) 25vw, 50vw" />
+            <DestinationCard destination={d} sizes="(min-width: 640px) 25vw, 50vw" />
           </Reveal>
         ))}
       </div>
