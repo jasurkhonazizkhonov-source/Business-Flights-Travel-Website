@@ -39,15 +39,32 @@ case "${CRM_HOST}" in *[!A-Za-z0-9._-]*) die "CRM_API_URL's host must be a Docke
 
 say "The website must have NO database configuration"
 # The architecture is website -> authenticated CRM API -> CRM database. Database credentials in the website's .env would be unused AND a risk.
+# Default: a hard failure, because credentials the website does not need have no business in its .env. ONE explicit, loud, per-run exception
+# exists for the first redeploy over the previous (database-backed) release: that release's compose file REQUIRES DATABASE_URL, so the live .env
+# still holds it, and removing it would also break the rollback to the previous image. The exception is read from the operator's shell, never
+# from .env, so it cannot be left behind in the file; it still refuses if the rendered compose configuration would forward a database variable
+# to the container (checked below). The values are never printed, only the names.
+legacy=""
 for key in DATABASE_URL DIRECT_URL DATABASE_SSL_MODE DATABASE_SSL_CA DATABASE_SSL_VERIFY DATABASE_AUTO_INIT; do
-  [ -z "$(env_value "${key}")" ] || die "${key} is set in .env. The website does not use a database: remove it (and never give the website the CRM database's credentials)."
+  if [ -n "$(env_value "${key}")" ]; then
+    if [ "${PREFLIGHT_ALLOW_LEGACY_DATABASE_VARS:-}" = "yes" ]; then
+      legacy="${legacy} ${key}"
+    else
+      die "${key} is set in .env. The website does not use a database: remove it (and never give the website the CRM database's credentials). If this .env is shared with the previous database-backed release and must keep it for a rollback, run this once as: PREFLIGHT_ALLOW_LEGACY_DATABASE_VARS=yes deploy/preflight.sh (compose does not forward these to the website container; remove them from .env after the rollback window)."
+    fi
+  fi
 done
-ok "no database variables in .env"
+if [ -n "${legacy}" ]; then
+  warn "legacy database variable(s) present in .env, tolerated for this run only:${legacy}. The website ignores them; keep the file mode 600 and remove them once a rollback to the database-backed release is no longer needed."
+else
+  ok "no database variables in .env"
+fi
 
 say "Rendered compose configuration"
 compose config -q || die "compose configuration is invalid"
 if compose config | grep -qE '^\s+(ports|published):'; then die "the rendered configuration publishes a host port - it must not"; fi
 ok "valid; no published host ports"
+if [ -n "${legacy}" ] && compose config | grep -qE 'DATABASE_|DIRECT_URL'; then die "the rendered configuration forwards a database variable to the website container. Tolerating legacy variables in .env is only allowed while compose.yaml does not pass them on."; fi
 compose config --services | grep -qx "${SERVICE}" || die "service '${SERVICE}' not found"
 [ "$(compose config --services | wc -l)" = "1" ] || die "this project must define exactly one service"
 ok "exactly one service: ${SERVICE}"

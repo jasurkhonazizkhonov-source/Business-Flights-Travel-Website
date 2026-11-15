@@ -27,6 +27,31 @@ async function expectClosed(dialog: Locator) {
 function enabledDays(dialog: Locator) {
   return dialog.locator(".rdp-day_button:not([disabled])");
 }
+/**
+ * Opening a calendar near the bottom of the screen makes the page scroll itself, smoothly, until the popover is fully in view
+ * (src/hooks/useScrollPopoverIntoView.ts - intended behaviour). Playwright's own clicks wait for the target to stop moving, but
+ * `{ force: true }` (needed to act on a disabled day) skips that wait and uses the coordinates measured at that instant - so during the
+ * scroll the pointer could land on a neighbouring ENABLED day and legitimately select it. Waiting for the scroll to finish removes that
+ * race; no assertion is weakened (the calling test still asserts everything it asserted before). It resolves anyway after 4 s so a page
+ * that never stops scrolling shows up as the assertion failures that follow, not as a hang.
+ */
+async function waitForPageScrollToSettle(page: Page) {
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) => {
+        const deadline = performance.now() + 4000;
+        let last = window.scrollY;
+        let still = 0;
+        const tick = () => {
+          still = window.scrollY === last ? still + 1 : 0;
+          last = window.scrollY;
+          if (still >= 10 || performance.now() > deadline) resolve();
+          else requestAnimationFrame(tick);
+        };
+        requestAnimationFrame(tick);
+      }),
+  );
+}
 
 /** Opens the departure calendar, moves to next month and chooses the 5th (plenty of later days in the same month remain). */
 async function chooseDeparture(page: Page, tap = false) {
@@ -88,6 +113,8 @@ test.describe("round-trip date range — mouse and keyboard", () => {
     await chooseDeparture(page);
     await trigger(page, "Return Date").click();
     const dialog = calendar(page, "Return Date");
+    await expectOpen(dialog);
+    await waitForPageScrollToSettle(page); // the forced actions below must not run while the page is still scrolling
     // The 5th of the month was chosen: days 1–4 are shown but disabled.
     const disabled = dialog.locator(".rdp-day_button[disabled]");
     expect(await disabled.count()).toBeGreaterThanOrEqual(4);

@@ -255,6 +255,88 @@ test.describe("the forms against a configured website and a stand-in CRM (produc
     for (const forbidden of ["website", "renderedAt"]) expect(r.json).not.toHaveProperty(forbidden);
   });
 
+  // ---- contact inquiry: the visitor's IP and approximate location, signed, from Cloudflare's headers only -----------------------------------
+  // The server under test runs with TRUSTED_PROXY=cloudflare and LEAD_INGEST_SECRET; the stub CRM verifies the HMAC with its own code.
+  const contactVisitor = async (headers: Record<string, string>, over: Record<string, unknown> = {}) => {
+    crm.reset();
+    const text = await call("submitContactMessage", [contactInput(over)], headers);
+    expect(text, "the inquiry itself must still succeed").toMatch(/"ok":true/);
+    const r = crm.requests.find((x) => x.path === "/api/public/contact-inquiry")!;
+    return { r, v: r.visitor! };
+  };
+  const cf = (extra: Record<string, string>) => ({ ...extra });
+
+  test("contact: an IPv4 visitor with Cloudflare's country, city, region and time zone -> one signed context with exactly those values and the Cloudflare source", async () => {
+    const { r, v } = await contactVisitor(
+      cf({ "CF-Connecting-IP": "203.0.113.77", "CF-IPCountry": "AU", "CF-IPCity": "Sydney", "CF-Region-Code": "NSW", "CF-Timezone": "Australia/Sydney", "X-Forwarded-For": "8.8.8.8" }),
+    );
+    expect(v).toMatchObject({ state: "verified", ip: "203.0.113.77", country: "AU", city: "Sydney", region: "NSW", timezone: "Australia/Sydney", source: "cloudflare" });
+    // never forwarded: the forged header, any cf-* header, the raw IP outside the signed context, or an IP in the body
+    expect(r.headers["x-forwarded-for"]).toBeUndefined();
+    for (const h of Object.keys(r.headers)) expect(h.startsWith("cf-"), h).toBe(false);
+    expect(r.bodyText).not.toMatch(/203\.0\.113\.77|8\.8\.8\.8/);
+    expect(JSON.stringify(r.json)).not.toMatch(/"ip|ipAddress|city|country|timezone/i);
+  });
+
+  test("contact: IPv6 in full and compressed notation is preserved (canonical form), IPv4-mapped collapses to IPv4, Cloudflare's Pseudo-IPv4 stand-in is replaced by the real IPv6", async () => {
+    expect((await contactVisitor(cf({ "CF-Connecting-IP": "2001:4860:4860:0:0:0:0:8888", "CF-IPCountry": "US" }))).v.ip).toBe("2001:4860:4860::8888");
+    expect((await contactVisitor(cf({ "CF-Connecting-IP": "2001:4860:4860::8888" }))).v.ip).toBe("2001:4860:4860::8888");
+    expect((await contactVisitor(cf({ "CF-Connecting-IP": "2A00:1450:4001:081B:0000:0000:0000:200E" }))).v.ip).toBe("2a00:1450:4001:81b::200e");
+    expect((await contactVisitor(cf({ "CF-Connecting-IP": "::ffff:203.0.113.9" }))).v.ip).toBe("203.0.113.9");
+    expect((await contactVisitor(cf({ "CF-Connecting-IP": "240.0.0.7", "CF-Connecting-IPv6": "2606:4700:4700::1111" }))).v.ip).toBe("2606:4700:4700::1111");
+    const { v } = await contactVisitor(cf({ "CF-Connecting-IP": "2001:4860:4860::8888", "CF-IPCountry": "US", "CF-IPCity": "Mountain View", "CF-Region-Code": "CA" }));
+    expect(v).toMatchObject({ ip: "2001:4860:4860::8888", country: "US", city: "Mountain View", region: "CA", source: "cloudflare" });
+  });
+
+  test("contact: incomplete geolocation keeps what exists (nothing invented); no geolocation keeps the IP; unknown country markers are dropped", async () => {
+    const partial = (await contactVisitor(cf({ "CF-Connecting-IP": "203.0.113.20", "CF-IPCountry": "GB" }))).v;
+    expect(partial).toMatchObject({ state: "verified", ip: "203.0.113.20", country: "GB", source: "cloudflare" });
+    expect(partial.city).toBeUndefined();
+    expect(partial.region).toBeUndefined();
+    const none = (await contactVisitor(cf({ "CF-Connecting-IP": "203.0.113.21" }))).v;
+    expect(none).toMatchObject({ state: "verified", ip: "203.0.113.21" });
+    expect([none.city, none.region, none.country, none.timezone, none.source]).toEqual([undefined, undefined, undefined, undefined, undefined]);
+    for (const marker of ["XX", "T1"]) {
+      const v = (await contactVisitor(cf({ "CF-Connecting-IP": "203.0.113.22", "CF-IPCountry": marker }))).v;
+      expect(v.country, marker).toBeUndefined();
+      expect(v.source, marker).toBeUndefined();
+    }
+    const nonAscii = (await contactVisitor(cf({ "CF-Connecting-IP": "203.0.113.23", "CF-IPCountry": "BR", "CF-IPCity": Buffer.from("São Paulo", "utf8").toString("latin1") }))).v;
+    expect(nonAscii.city).toBe("São Paulo");
+  });
+
+  test("contact: no trusted client IP (only forged forwarding headers, an invalid or a private value) -> the inquiry succeeds, with NO IP in the context and nothing substituted", async () => {
+    const forged = await contactVisitor({ "X-Forwarded-For": "8.8.8.8", "X-Real-IP": "8.8.4.4", Forwarded: "for=1.1.1.1" });
+    expect(forged.v.state).toBe("absent"); // nothing at all to sign: no IP, no location
+    expect(JSON.stringify(forged.r)).not.toMatch(/8\.8\.8\.8|8\.8\.4\.4|1\.1\.1\.1/);
+    for (const bad of ["not-an-ip", "10.0.0.5", "127.0.0.1", "fe80::1", "999.1.1.1"]) {
+      const v = (await contactVisitor(cf({ "CF-Connecting-IP": bad, "CF-IPCountry": "DE" }), {})).v;
+      expect(v.ip, bad).toBeUndefined(); // an invalid / private value is "unavailable", never stored or replaced
+      expect(v.country, bad).toBe("DE"); // the location Cloudflare supplied is still sent
+    }
+  });
+
+  test("contact: a visitor-supplied ip/location field in the submitted data is ignored: it never reaches the CRM body or context", async () => {
+    const { r, v } = await contactVisitor(cf({ "CF-Connecting-IP": "203.0.113.31" }), { ipAddress: "6.6.6.6", ip: "6.6.6.7", city: "Atlantis", country: "Mars", location: { city: "Nowhere" } });
+    expect(v.ip).toBe("203.0.113.31");
+    expect(v.city).toBeUndefined();
+    expect(JSON.stringify(r)).not.toMatch(/6\.6\.6\.|Atlantis|Mars|Nowhere/);
+  });
+
+  test("contact: a resend of the same message from another network is still ONE inquiry; a CRM failure gives the visitor the generic message with no IP in it", async () => {
+    const formId = randomUUID();
+    crm.reset();
+    await call("submitContactMessage", [contactInput({ submissionId: formId })], cf({ "CF-Connecting-IP": "203.0.113.41" }));
+    await call("submitContactMessage", [contactInput({ submissionId: formId })], cf({ "CF-Connecting-IP": "203.0.113.42" }));
+    expect(crm.inquiryCount()).toBe(1);
+    crm.reset();
+    crm.script({ status: 500, body: { ok: false } });
+    const failed = await call("submitContactMessage", [contactInput()], cf({ "CF-Connecting-IP": "203.0.113.43" }));
+    expect(failed).toMatch(GENERIC_CONTACT_ERROR);
+    expect(failed).not.toMatch(/"ok":true|203\.0\.113\.43/);
+    expect(crm.requests).toHaveLength(1); // one attempt
+  });
+
   test("contact message: validation and spam checks run before the CRM; a CRM refusal or error gives the generic message and is NOT retried", async () => {
     expect(await call("submitContactMessage", [contactInput({ message: "short" })])).toContain("Please add a few more details");
     expect(await call("submitContactMessage", [contactInput({ website: "x" })])).toMatch(/"ok":false/); // honeypot: the field must be empty
@@ -278,10 +360,48 @@ test.describe("the forms against a configured website and a stand-in CRM (produc
     expect(crm.requests[0].json).toEqual({ companyId: COMPANY, email: "news@example.org", source: "website" });
     expect(crm.requests[0].headers.authorization).toBeUndefined();
     crm.reset();
-    // (A filled honeypot already fails the schema - the field must be empty - so a bot is stopped before the CRM either way.)
-    await call("subscribeToNewsletter", [{ email: "bot@example.org", website: "http://spam.example" }]);
+    // A filled honeypot is discarded SILENTLY on the server: the bot gets exactly the reply a real success gets, and nothing reaches the CRM -
+    // including when the bot also typed a junk address (a validation error there would tell it apart from success).
+    const botReply = await call("subscribeToNewsletter", [{ email: "bot@example.org", website: "http://spam.example" }]);
+    expect(botReply).toBe(text);
+    expect(await call("subscribeToNewsletter", [{ email: "not-an-email", website: "http://spam.example" }])).toBe(text);
+    expect(await call("subscribeToNewsletter", [{ email: "bot@example.org", website: " " }])).toBe(text);
     expect(crm.requests).toHaveLength(0);
+    // A missing honeypot field is a normal submission: validation still applies, and nothing reaches the CRM for a malformed address.
     expect(await call("subscribeToNewsletter", [{ email: "not-an-email" }])).toContain("Please enter a valid email address.");
+    expect(await call("subscribeToNewsletter", [{ email: "", website: "" }])).toContain("Please enter a valid email address.");
+    expect(await call("subscribeToNewsletter", [{ email: "not-an-email", website: "" }])).toContain("Please enter a valid email address.");
+    expect(crm.requests).toHaveLength(0);
+    // Malformed argument shapes never reach the CRM either, and never throw the visitor a stack trace.
+    for (const bad of [{}, { email: 5 }, { email: "a@example.org", website: 5 }, null]) {
+      const out = await call("subscribeToNewsletter", [bad]);
+      expect(out, JSON.stringify(bad)).not.toMatch(/at \w+ \(|node_modules|\.ts:\d+/);
+    }
+    expect(crm.requests).toHaveLength(0);
+    // Repeated honeypot submissions behave the same every time.
+    for (let i = 0; i < 3; i++) expect(await call("subscribeToNewsletter", [{ email: "bot@example.org", website: "http://spam.example" }])).toBe(text);
+    expect(crm.requests).toHaveLength(0);
+  });
+
+  test("contact: the form's submissionId reaches the CRM as an idempotency key, so a visitor's resend stores ONE inquiry; a corrected message is a new one", async () => {
+    const formId = randomUUID();
+    expect(await call("submitContactMessage", [contactInput({ submissionId: formId })])).toMatch(/"ok":true/);
+    expect(await call("submitContactMessage", [contactInput({ submissionId: formId })])).toMatch(/"ok":true/); // the visitor pressed Send again
+    expect(crm.inquiryCount()).toBe(1);
+    const sentKey = (crm.requests[0].json as { submissionId?: string }).submissionId;
+    expect(sentKey).toMatch(new RegExp(`^${formId}\\.[0-9a-f]{16}$`)); // form id + a hash of what was typed
+    expect(crm.requests.every((r) => (r.json as { submissionId?: string }).submissionId === sentKey)).toBe(true);
+    // Editing the message after a failure is a different submission: stored on its own, never merged into the first.
+    expect(await call("submitContactMessage", [contactInput({ submissionId: formId, message: "Actually, a different and corrected question about my booking." })])).toMatch(/"ok":true/);
+    expect(crm.inquiryCount()).toBe(2);
+    // No form id (an insecure context without randomUUID): no key is sent and the message is still delivered.
+    crm.reset();
+    expect(await call("submitContactMessage", [contactInput()])).toMatch(/"ok":true/);
+    expect(crm.requests[0].json).not.toHaveProperty("submissionId");
+    expect(crm.inquiryCount()).toBe(1);
+    // A malformed form id is a validation failure, not a CRM call.
+    crm.reset();
+    expect(await call("submitContactMessage", [contactInput({ submissionId: "bad id!" })])).toMatch(/"ok":false/);
     expect(crm.requests).toHaveLength(0);
   });
 

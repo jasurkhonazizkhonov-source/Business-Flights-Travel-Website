@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import dynamic from "next/dynamic";
 import { cn } from "@/lib/cn";
 import { FieldError } from "@/components/forms/FieldError";
+import { loadPhoneValidator } from "@/lib/phone-validator";
 
 // react-phone-number-input + country-flag-icons' full ~245-flag SVG set +
 // libphonenumber-js metadata are, together, the single largest client
@@ -104,8 +105,16 @@ export function PhoneNumberField({
     };
   }, []);
 
+  // The phone-number validator (libphonenumber, ~120 KB) is not part of the page's initial JavaScript: it is fetched the first time the visitor
+  // touches, focuses or fills this field (a capture handler, so it never interferes with the input's own events), and again at submit if needed.
+  // See src/lib/phone-validator.ts.
+  useEffect(() => {
+    if (value) void loadPhoneValidator();
+  }, [value]);
+  const warmValidator = () => void loadPhoneValidator();
+
   return (
-    <div id={`field-${fieldKey}`}>
+    <div id={`field-${fieldKey}`} onFocusCapture={warmValidator} onPointerDownCapture={warmValidator} onTouchStartCapture={warmValidator}>
       <label htmlFor={id} className="mb-1.5 block text-xs font-semibold tracking-wide text-[var(--color-navy-700)]">
         {label} {required && <span className="text-[var(--color-gold-600)]">*</span>}
       </label>

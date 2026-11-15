@@ -24,13 +24,19 @@ export async function subscribeToNewsletter(input: NewsletterInput): Promise<Sub
     return { ok: false, error: "Too many attempts. Please try again in a few minutes." };
   }
 
+  // Honeypot: a real visitor never sees the hidden `website` field, so anything in it is a bot filling every field blind. Answer EXACTLY as a
+  // genuine success would (same shape, same status, no error) and call nothing - no CRM request, no subscriber, no log line that distinguishes
+  // it - so the bot learns nothing and nobody is subscribed. This runs before email validation on purpose: a bot that also sent a junk address
+  // must not get a different reply (the validation error) from the one a human gets for success. A missing or empty field is a normal
+  // submission and goes through the validation below unchanged.
+  const honeypot = (input as { website?: unknown } | null | undefined)?.website;
+  if (typeof honeypot === "string" && honeypot.length > 0) {
+    return { ok: true, alreadySubscribed: false };
+  }
+
   const parsed = newsletterSchema.safeParse(input);
   if (!parsed.success) {
     return { ok: false, error: "Please enter a valid email address." };
-  }
-  if (parsed.data.website) {
-    // Honeypot tripped - behave as if it worked, don't tip off the bot.
-    return { ok: true, alreadySubscribed: false };
   }
 
   const api = crmApiConfig("public-inquiry", "newsletter");

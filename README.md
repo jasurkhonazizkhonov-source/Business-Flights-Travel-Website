@@ -35,8 +35,8 @@ npm install
 npm run dev
 ```
 
-Open [http://localhost:3100](http://localhost:3100) (see `.claude/launch.json`
-for the configured dev port) to see the site. Every page works with no
+Open [http://localhost:3101](http://localhost:3101) (this checkout, `Travel Agency Website-updated`, uses port 3101;
+the original website checkout uses 3100) to see the site. Every page works with no
 configuration; submitting a form needs the CRM variables.
 
 Copy `.env.example` to `.env` and fill in `CRM_API_URL`, `CRM_API_KEY`,

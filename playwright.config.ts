@@ -3,7 +3,7 @@ import { defineConfig, devices } from "@playwright/test";
 // Local-only test config for manually verifying the redesign against the
 // dev server (see docs comment in tests/redesign.spec.ts for what this
 // covers). Not wired into CI/build — run with `npx playwright test`
-// against an already-running `npm run dev` on port 3100.
+// against an already-running `npm run dev` on port 3101 (this checkout's port; the original website uses 3100).
 // Specs that are NOT about a viewport: the CRM-API specs run a local stand-in CRM, the self-hosted and rate-limit specs start a whole standalone
 // server, and the deploy-script spec runs bash. Running them once per viewport project (4x) would multiply that work, and together with browsers and a
 // Next server on an 8 GB machine it produced "worker process exited unexpectedly" crashes. They live in their own "Infrastructure" project, which runs
@@ -16,6 +16,8 @@ const INFRASTRUCTURE_SPECS = [
   /self-hosted-e2e\.spec\.ts$/,
   /deploy-scripts\.spec\.ts$/,
   /rate-limit-actions-e2e\.spec\.ts$/,
+  /form-failure-recovery-e2e\.spec\.ts$/, // standalone server + browser, stub CRM
+  /server-action-body-limit-e2e\.spec\.ts$/, // standalone server, raw HTTP
   /vps-deployment\.spec\.ts$/,
 ];
 const VIEWPORT_PROJECTS = ["Desktop Chrome", "Mobile 320", "Mobile 375", "Mobile 390"];
@@ -59,7 +61,7 @@ export default defineConfig({
     // TEST_BASE_URL lets the status-code/indexing specs (tests/seo.spec.ts) run against a production
     // build (`next build && next start -p 3200`), where unknown-URL status codes are exactly what
     // Google sees; the default is the dev server the rest of the suite uses.
-    baseURL: process.env.TEST_BASE_URL ?? "http://localhost:3100",
+    baseURL: process.env.TEST_BASE_URL ?? "http://localhost:3101",
     trace: "retain-on-failure",
   },
   projects: [

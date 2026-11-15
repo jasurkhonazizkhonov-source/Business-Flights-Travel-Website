@@ -63,6 +63,13 @@ const nextConfig: NextConfig = {
   ...(standalone ? { output: "standalone" as const, outputFileTracingRoot: process.cwd() } : {}),
   // Do not advertise the framework in an `X-Powered-By: Next.js` response header: it tells scanners which stack (and advisories) apply.
   poweredByHeader: false,
+  // Server Action request bodies (the flight request, contact and newsletter forms - the only actions here) are capped at 64 KB instead of Next's
+  // 1 MB default. The largest legitimate body is a six-segment multi-city request (about 6 KB of airport data) plus a 2,000-character note and the
+  // contact details - roughly 10 KB, or 25 KB if every character were non-ASCII - so 64 KB leaves a wide margin for real visitors while a client
+  // can no longer make the server buffer and parse a megabyte per request. An oversized request is refused before the action runs (HTTP 413);
+  // the forms show their inline "try again" message for it. tests/server-action-body-limit-e2e.spec.ts pins the boundary. If a form ever needs
+  // a bigger payload (a file upload), raise this deliberately, together with that spec.
+  experimental: { serverActions: { bodySizeLimit: "64kb" } },
   images: {
     // Editorial/destination imagery is sourced from Unsplash as placeholders
     // during development — swap for licensed/company-owned photography via

@@ -1,11 +1,13 @@
 import { createHmac } from "node:crypto";
 import type { SubmissionInfo } from "@/lib/submission-info";
+import { CLOUDFLARE_GEO_SOURCE, GEO_SOURCE } from "@/lib/ip-geo";
 
 // The CRM records a visitor's IP and approximate location for a website lead ONLY from a signed "visitor context" (the connection it sees is
 // this website's server, never the visitor). Contract: the CRM's docs/WEBSITE_LEAD_API.md ("Visitor IP and approximate location") and its
 // src/server/lead-ingest-context.ts:
 //
-//   x-ct-visitor-context:   base64url( JSON { v: 1, ts: <unix seconds>, ip?, city?, region?, country?, timezone? } )
+//   x-ct-visitor-context:   base64url( JSON { v: 1, ts: <unix seconds>, ip?, city?, region?, country?, timezone?, source? } )
+//                           (source: "cloudflare" | "vercel" - which trusted edge supplied the location; only sent with a location)
 //   x-ct-visitor-signature: hex( HMAC-SHA256( LEAD_INGEST_SECRET, <the context header value exactly as sent> ) )
 //
 // The CRM accepts it for 5 minutes, rejects a bad signature or a private/reserved IP, and then treats the location fields exactly like
@@ -18,7 +20,9 @@ import type { SubmissionInfo } from "@/lib/submission-info";
 export const VISITOR_CONTEXT_HEADER = "x-ct-visitor-context";
 export const VISITOR_SIGNATURE_HEADER = "x-ct-visitor-signature";
 
-type VisitorContextPayload = { v: 1; ts: number; ip?: string; city?: string; region?: string; country?: string; timezone?: string };
+/** Which edge produced the location fields, so the CRM can label them accurately instead of assuming its own platform. Sent only with a location. */
+type LocationSource = "cloudflare" | "vercel";
+type VisitorContextPayload = { v: 1; ts: number; ip?: string; city?: string; region?: string; country?: string; timezone?: string; source?: LocationSource };
 
 /** Signs a payload. Exported for the contract tests (the CRM's own signVisitorContext computes the same two values). */
 export function signVisitorContext(payload: VisitorContextPayload, secret: string): { context: string; signature: string } {
@@ -42,6 +46,10 @@ export function buildVisitorContextHeaders(info: SubmissionInfo | undefined, sec
     const country = location.countryCode ?? location.country;
     if (country) payload.country = country;
     if (location.timeZone) payload.timezone = location.timeZone;
+    // The website knows which trusted edge supplied these values (src/lib/submission-info.ts). A CRM that predates this field ignores it and keeps
+    // its own label; a CRM that knows it records "Cloudflare edge geolocation (approximate)" instead of mislabelling the data as Vercel's.
+    if (info.locationSource === CLOUDFLARE_GEO_SOURCE) payload.source = "cloudflare";
+    else if (info.locationSource === GEO_SOURCE) payload.source = "vercel";
   }
   if (payload.ip === undefined && payload.city === undefined && payload.region === undefined && payload.country === undefined && payload.timezone === undefined) return {};
   const { context, signature } = signVisitorContext(payload, secret);

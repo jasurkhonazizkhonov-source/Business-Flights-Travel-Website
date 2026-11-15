@@ -83,7 +83,14 @@ runtime-role grants), `src/lib/{prisma,db-tls,db-error,schema-guard,…}.ts`, `s
    release layout - a separate internal API network with the `compass-crm` alias and a tunnel network without PostgreSQL (a CRM Compose change); or
    (b) accept, knowingly, that the website shares a network with PostgreSQL. The website holds no database credential, but the network route would
    exist; (b) is not implemented here and would need an explicit, reviewed relaxation of the preflight rule.
-4. `LEAD_INGEST_SECRET` (optional) is identical on both sides, or the CRM ignores the visitor context and records no IP or location.
+4. `LEAD_INGEST_SECRET` (optional) is identical on both sides, or the CRM ignores the visitor context and records no IP or location. It signs the
+   visitor context for the flight request **and** the contact form (the contact form did not send it before 2026-11-13).
+   Redeploying over the previous, database-backed release: that release's `.env` holds `DATABASE_URL` (its compose file requires it), and
+   `deploy/preflight.sh` refuses any `DATABASE_*` variable by default. Removing it from the shared `.env` would also break a rollback to the previous
+   image. The one supported exception is explicit and per run: `PREFLIGHT_ALLOW_LEGACY_DATABASE_VARS=yes deploy/preflight.sh` (also for `deploy.sh`,
+   which runs preflight). It only downgrades the refusal to a warning naming the variables, is read from the operator's shell and never from `.env`,
+   and preflight still refuses if the rendered compose file would pass a database variable to the website container. Remove the legacy variables once
+   a rollback to the previous release is no longer needed.
 5. The contact form and the newsletter use the CRM's **public, unauthenticated** endpoints, because no authenticated equivalent exists
    (`docs/CRM_API_INTEGRATION.md`, "Gaps"). They are rate limited by the CRM and by the website, but anyone who can reach the CRM can call them.
 

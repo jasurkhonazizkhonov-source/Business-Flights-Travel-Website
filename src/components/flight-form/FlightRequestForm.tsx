@@ -8,7 +8,9 @@ import { FieldError } from "@/components/forms/FieldError";
 import { SegmentRow, type SegmentState } from "./SegmentRow";
 import { DateField } from "./DateField";
 import { PassengerCabinField } from "./PassengerCabinField";
+import { QuoteConsentNotice } from "./QuoteConsentNotice";
 import { submitFlightRequest } from "@/server/actions/submit-flight-request";
+import { ACTION_FAILURE_MESSAGES, ACTION_TIMEOUT_MS, callAction, isFlightResult } from "@/lib/safe-action";
 import type { AirportOption, FlightRequestInput } from "@/lib/validations/flight-request";
 // Imported from the zod-free options module, not from
 // @/lib/validations/flight-request, so this client component's bundle
@@ -19,7 +21,7 @@ import { cn } from "@/lib/cn";
 import { PRIMARY_CTA_LABEL } from "@/lib/constants";
 import { isValidEmail } from "@/lib/validate";
 import { focusFieldError } from "@/lib/focus-field-error";
-import { isValidPhoneNumber } from "@/lib/phone";
+import { getPhoneValidatorState, loadPhoneValidator, type PhoneValidator } from "@/lib/phone-validator";
 
 const TRIP_TYPE_LABELS: Record<(typeof TRIP_TYPES)[number], string> = {
   ONE_WAY: "One Way",
@@ -76,8 +78,14 @@ export function FlightRequestForm({
   const [showMore, setShowMore] = useState(false);
 
   const [errors, setErrors] = useState<FormErrors>({});
-  const [pending, startTransition] = useTransition();
+  const [, startTransition] = useTransition();
+  // Our own "a request is in flight" flag. React keeps `useTransition`'s pending flag true until the Server Action itself settles, which after a
+  // time-out (callAction) can be much later, so the button must not be driven by it: it is released as soon as the outcome is known.
+  const [busy, setBusy] = useState(false);
   const submittingRef = useRef(false);
+  // The phone validator is loaded on demand, not with the page (see handleSubmit and src/lib/phone-validator.ts).
+  const waitingForPhoneRef = useRef(false);
+  const skipPhoneFormatCheckRef = useRef(false);
   const [result, setResult] = useState<
     | { status: "idle" }
     | { status: "success"; summary: NonNullable<Extract<Awaited<ReturnType<typeof submitFlightRequest>>, { ok: true }>["summary"]> }
@@ -111,7 +119,7 @@ export function FlightRequestForm({
 
   const firstDeparture = segments[0]?.departureDate ? new Date(`${segments[0].departureDate}T00:00:00`) : todayFloor();
 
-  function validateClientSide(): FormErrors {
+  function validateClientSide(isValidPhone: PhoneValidator | null): FormErrors {
     const e: FormErrors = {};
     segments.forEach((s, i) => {
       if (!s.from) e[`segments.${i}.from`] = "Select an origin";
@@ -138,14 +146,15 @@ export function FlightRequestForm({
     }
     if (!phone) {
       e.phone = "Phone number is required";
-    } else if (!isValidPhoneNumber(phone)) {
+    } else if (isValidPhone && !isValidPhone(phone)) {
       e.phone = "Please enter a valid phone number, including the complete number, so our travel specialist can reach you.";
     }
     return e;
   }
 
-  function handleSubmit(formEvent: React.FormEvent) {
+  function handleSubmit(formEvent: React.FormEvent<HTMLFormElement>) {
     formEvent.preventDefault();
+    const formEventTarget = formEvent.currentTarget;
     // Next.js queues Server Actions rather than dropping a second one — so
     // a double-click/double-Enter that fires two submit events in a row
     // would run the second action as soon as the first finishes, creating a
@@ -154,7 +163,29 @@ export function FlightRequestForm({
     // state would read a value captured by this render's closure. A ref
     // updates synchronously, so the very next submit event already sees it.
     if (submittingRef.current) return;
-    const clientErrors = validateClientSide();
+    // The phone validator (libphonenumber) is loaded on demand - see src/lib/phone-validator.ts. Normally it is ready long before a submit
+    // (the phone field loads it on first touch). If it is not (autofill, a very fast submit) wait for it, then submit again so the very same
+    // checks run against the latest field values. If it cannot be loaded the client-side format check is skipped and the server decides.
+    const phoneState = getPhoneValidatorState();
+    let isValidPhone: PhoneValidator | null;
+    if (phoneState.state === "ready") {
+      isValidPhone = phoneState.isValid;
+    } else if (skipPhoneFormatCheckRef.current) {
+      skipPhoneFormatCheckRef.current = false;
+      isValidPhone = null;
+    } else {
+      if (waitingForPhoneRef.current) return;
+      waitingForPhoneRef.current = true;
+      const form = formEventTarget;
+      void loadPhoneValidator().then((loaded) => {
+        waitingForPhoneRef.current = false;
+        if (!loaded) skipPhoneFormatCheckRef.current = true;
+        if (typeof form.requestSubmit === "function") form.requestSubmit();
+        else form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+      });
+      return;
+    }
+    const clientErrors = validateClientSide(isValidPhone);
     if (Object.keys(clientErrors).length > 0) {
       setErrors(clientErrors);
       const firstKey = Object.keys(clientErrors)[0];
@@ -190,13 +221,24 @@ export function FlightRequestForm({
     };
 
     submittingRef.current = true;
+    setBusy(true);
     startTransition(async () => {
-      let res: Awaited<ReturnType<typeof submitFlightRequest>>;
+      // A call that fails as a whole (dropped connection, timeout, thrown action, unexpected reply) becomes an inline message: the form and every
+      // field stay as they are and the visitor can try again. Nothing is retried automatically; pressing the button again re-sends the SAME
+      // submissionId, which the server turns into one CRM lead (Idempotency-Key), so an attempt whose answer was lost cannot create a second one.
+      let outcome: Awaited<ReturnType<typeof callAction<Awaited<ReturnType<typeof submitFlightRequest>>>>>;
       try {
-        res = await submitFlightRequest(payload);
+        outcome = await callAction(() => submitFlightRequest(payload), isFlightResult, ACTION_TIMEOUT_MS.flightRequest);
       } finally {
         submittingRef.current = false;
+        setBusy(false);
       }
+      if (!outcome.ok) {
+        setErrors({});
+        setResult({ status: "error", message: ACTION_FAILURE_MESSAGES.flightRequest });
+        return;
+      }
+      const res = outcome.value;
       if (res.ok) {
         setResult({ status: "success", summary: res.summary });
       } else {
@@ -467,7 +509,7 @@ export function FlightRequestForm({
       </div>
 
       {result.status === "error" && (
-        <div className="mt-5 flex items-start gap-2.5 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">
+        <div role="alert" className="mt-5 flex items-start gap-2.5 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">
           <AlertTriangle size={18} className="mt-0.5 shrink-0" />
           <p>{result.message}</p>
         </div>
@@ -475,7 +517,7 @@ export function FlightRequestForm({
 
       <button
         type="submit"
-        disabled={pending}
+        disabled={busy}
         // Opts this button into FloatingDealsButton's own visibility check —
         // that button is fixed bottom-right and would otherwise sit on top
         // of this full-width CTA (and intercept taps meant for it) while
@@ -483,7 +525,7 @@ export function FlightRequestForm({
         data-hide-floating-cta
         className="mt-6 flex w-full items-center justify-center gap-2 rounded-full bg-[var(--color-navy-950)] px-6 py-4 text-base font-semibold text-white shadow-lg transition-colors hover:bg-[var(--color-gold-600)] disabled:opacity-70"
       >
-        {pending ? (
+        {busy ? (
           <>
             <Loader2 size={18} className="animate-spin" /> Submitting your request…
           </>
@@ -494,6 +536,7 @@ export function FlightRequestForm({
       <p className="mt-3 text-center text-xs text-[var(--color-navy-950)]/65">
         No payment required. A travel specialist will contact you with options.
       </p>
+      <QuoteConsentNotice />
     </form>
   );
 }

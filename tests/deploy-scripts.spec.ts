@@ -351,6 +351,31 @@ test.describe("deploy scripts, dry-run against a stub docker", () => {
     }
   });
 
+  test("the legacy-variable exception exists only as an explicit per-run opt-in from the shell: loud, value-free, and never read from .env", () => {
+    const line = "DATABASE_URL=postgresql://x:y@db:5432/z";
+    // Opt-in from the operator's shell: passes, but warns with the NAME only.
+    let s = sandbox(baseState(), { env: `${ENV_OK}${line}\n` });
+    let r = s.run("preflight.sh", [], { PREFLIGHT_ALLOW_LEGACY_DATABASE_VARS: "yes" });
+    expect(r.code, r.out).toBe(0);
+    expect(r.out).toMatch(/WARN: legacy database variable\(s\) present in \.env, tolerated for this run only: DATABASE_URL/);
+    expect(r.out).not.toContain("postgresql://x:y");
+    allCalls.push(...s.calls());
+    // Anything but the exact value "yes" does not count.
+    s = sandbox(baseState(), { env: `${ENV_OK}${line}\n` });
+    r = s.run("preflight.sh", [], { PREFLIGHT_ALLOW_LEGACY_DATABASE_VARS: "true" });
+    expect(r.code).not.toBe(0);
+    allCalls.push(...s.calls());
+    // Putting the opt-in INTO .env does not work: it must come from the shell, so it cannot be left behind in the file.
+    s = sandbox(baseState(), { env: `${ENV_OK}${line}\nPREFLIGHT_ALLOW_LEGACY_DATABASE_VARS=yes\n` });
+    r = s.run("preflight.sh");
+    expect(r.code).not.toBe(0);
+    expect(r.out).toContain("DATABASE_URL is set in .env. The website does not use a database");
+    allCalls.push(...s.calls());
+    // The default hint tells the operator about the exception without printing a value.
+    expect(r.out).toContain("PREFLIGHT_ALLOW_LEGACY_DATABASE_VARS=yes deploy/preflight.sh");
+    expect(r.out).not.toContain("postgresql://x:y");
+  });
+
   test("preflight warns (does not fail) when no cloudflared is on the tunnel network; the network names are overridable", () => {
     const st = baseState();
     delete st.containers["compass-tools-cloudflared-1"];

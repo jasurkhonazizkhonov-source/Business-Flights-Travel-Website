@@ -24,7 +24,7 @@ const TRIP_TYPES = ["ONE_WAY", "ROUND_TRIP", "MULTI_CITY"];
 const CABINS = ["ECONOMY", "PREMIUM_ECONOMY", "BUSINESS", "FIRST"];
 const SUBJECTS = ["GENERAL_INQUIRY", "FLIGHT_REQUEST_HELP", "EXISTING_BOOKING", "CORPORATE_TRAVEL", "OTHER"];
 
-export type VisitorContext = { state: "absent" | "invalid" | "verified"; ip?: string; city?: string; region?: string; country?: string; timezone?: string };
+export type VisitorContext = { state: "absent" | "invalid" | "verified"; ip?: string; city?: string; region?: string; country?: string; timezone?: string; source?: string };
 
 export type RecordedRequest = {
   method: string;
@@ -34,7 +34,7 @@ export type RecordedRequest = {
   json?: Record<string, unknown>;
   /** What the stub answered with. */
   status: number;
-  /** v1 flight inquiries only. */
+  /** The verified signed visitor context: v1 flight inquiries and contact inquiries. */
   visitor?: VisitorContext;
 };
 
@@ -53,6 +53,8 @@ export type StubCrm = {
   requests: RecordedRequest[];
   /** Number of distinct leads created through the v1 endpoint. */
   leadCount: () => number;
+  /** Number of distinct contact inquiries stored through /api/public/contact-inquiry (a repeat of the same submissionId is not a new one). */
+  inquiryCount: () => number;
   /** Answer the next `count` requests to `path` (any path when omitted) with `response` instead of the real behaviour. */
   script: (response: Scripted, options?: { count?: number; path?: string }) => void;
   clearScripts: () => void;
@@ -91,7 +93,7 @@ function verifyVisitor(headers: Record<string, string>, secret: string | undefin
   if (payload.v !== 1 || typeof payload.ts !== "number" || Math.abs(nowMs / 1000 - payload.ts) > 300) return { state: "invalid" };
   const str = (v: unknown) => (typeof v === "string" ? v : undefined);
   const city = str(payload.city);
-  return { state: "verified", ip: str(payload.ip), city: city === undefined ? undefined : decodeURIComponent(city), region: str(payload.region), country: str(payload.country), timezone: str(payload.timezone) };
+  return { state: "verified", ip: str(payload.ip), city: city === undefined ? undefined : decodeURIComponent(city), region: str(payload.region), country: str(payload.country), timezone: str(payload.timezone), source: str(payload.source) };
 }
 
 type Issue = { path: string; message: string };
@@ -140,6 +142,9 @@ function validateFlightBody(body: Record<string, unknown>): Issue[] {
 export async function startStubCrm(options: { apiKey: string; companyId?: string; ingestSecret?: string }): Promise<StubCrm> {
   const requests: RecordedRequest[] = [];
   const leads = new Map<string, { hash: string; leadId: string }>();
+  // Contact inquiries keyed like the CRM's contact route: by the optional `submissionId`, with the same message required for a repeat.
+  const inquiries = new Map<string, { fingerprint: string; id: string }>();
+  let unkeyedInquiries = 0;
   const scripts: Array<{ response: Scripted; remaining: number; path?: string }> = [];
   const sockets = new Set<import("node:net").Socket>();
 
@@ -216,6 +221,8 @@ export async function startStubCrm(options: { apiKey: string; companyId?: string
       }
       record.json = json;
       if (path === "/api/public/contact-inquiry") {
+        // The CRM's contact route reads the visitor's IP/location ONLY from a verified signed context (its connection is this website's server).
+        record.visitor = verifyVisitor(headers, options.ingestSecret, Date.now());
         const ok =
           json?.companyId === (options.companyId ?? "test-company") &&
           typeof json.firstName === "string" && json.firstName.length > 0 &&
@@ -224,7 +231,21 @@ export async function startStubCrm(options: { apiKey: string; companyId?: string
           SUBJECTS.includes(json.subject as string) &&
           typeof json.message === "string" && json.message.length >= 1 && json.message.length <= 5000;
         if (!ok) return send(400, { ok: false, error: "Invalid submission" });
-        return send(200, { ok: true, id: "inq_" + createHash("sha256").update(bodyText).digest("hex").slice(0, 12) });
+        const key = json?.submissionId;
+        if (key === undefined) {
+          unkeyedInquiries++;
+          return send(200, { ok: true, id: "inq_" + createHash("sha256").update(bodyText).digest("hex").slice(0, 12) });
+        }
+        if (typeof key !== "string" || !/^[A-Za-z0-9._-]{8,200}$/.test(key)) return send(400, { ok: false, error: "Invalid submission" });
+        const fingerprint = createHash("sha256").update(JSON.stringify([String(json?.email).toLowerCase(), json?.message])).digest("hex");
+        const existing = inquiries.get(key);
+        if (!existing) {
+          const id = "inq_" + createHash("sha256").update(key).digest("hex").slice(0, 12);
+          inquiries.set(key, { fingerprint, id });
+          return send(200, { ok: true, id });
+        }
+        if (existing.fingerprint !== fingerprint) return send(409, { ok: false, error: "This submission key was already used for a different message." });
+        return send(200, { ok: true, id: existing.id, duplicate: true });
       }
       if (path === "/api/public/subscribe") {
         const ok = json?.companyId === (options.companyId ?? "test-company") && typeof json.email === "string" && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(json.email);
@@ -245,11 +266,14 @@ export async function startStubCrm(options: { apiKey: string; companyId?: string
     url: `http://127.0.0.1:${port}`,
     requests,
     leadCount: () => leads.size,
+    inquiryCount: () => inquiries.size + unkeyedInquiries,
     script: (response, o = {}) => void scripts.push({ response, remaining: o.count ?? 1, path: o.path }),
     clearScripts: () => void (scripts.length = 0),
     reset: () => {
       requests.length = 0;
       leads.clear();
+      inquiries.clear();
+      unkeyedInquiries = 0;
       scripts.length = 0;
     },
     close: () =>

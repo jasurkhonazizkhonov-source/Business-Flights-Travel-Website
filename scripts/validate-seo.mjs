@@ -4,13 +4,13 @@
 // description/H1 presence, and cross-checks against the actual generated
 // sitemap.xml. Run against a running server (local prod build or
 // production) via `node scripts/validate-seo.mjs [baseUrl]`, default
-// http://localhost:3100. This is what section 24 of the SEO/indexing pass
+// http://localhost:3101. This is what section 24 of the SEO/indexing pass
 // asked for as a standing regression check, not a one-off script — rerun
 // it whenever destinations.ts/blog-posts.ts/route metadata changes.
 import { destinations, destinationPath } from "../src/data/destinations.ts";
 import { blogPosts } from "../src/data/blog-posts.ts";
 
-const BASE = process.argv[2] || "http://localhost:3100";
+const BASE = process.argv[2] || "http://localhost:3101";
 const SITE_URL = "https://www.businessflights.travel";
 
 const STATIC_ROUTES = [

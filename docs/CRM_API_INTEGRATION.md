@@ -36,7 +36,7 @@ See `docs/DEPLOYMENT_VPS.md`, section 3.
 | Form | Server action | CRM endpoint | Authentication | Idempotent | Status |
 |---|---|---|---|---|---|
 | Flight request | `src/server/actions/submit-flight-request.ts` | `POST /api/v1/website/flight-inquiries` | **Bearer key** (`CRM_API_KEY` = the CRM's `WEBSITE_API_KEY`), company fixed by the CRM from the credential | **Yes** — required `Idempotency-Key` header | **Integrated** (authenticated) |
-| Contact message | `src/server/actions/submit-contact-message.ts` | `POST /api/public/contact-inquiry` | **None** (the CRM's browser-facing endpoint; `companyId` in the body) | **No** | **Integrated, but NOT authenticated** — see "Gaps" |
+| Contact message | `src/server/actions/submit-contact-message.ts` | `POST /api/public/contact-inquiry` | **None** (the CRM's browser-facing endpoint; `companyId` in the body) | **Per optional `submissionId`** (once per press, never auto-retried) | **Integrated, but NOT authenticated** — see "Gaps" |
 | Newsletter sign-up | `src/server/actions/subscribe-newsletter.ts` | `POST /api/public/subscribe` | **None** (same kind of endpoint) | Server-side upsert; no key | **Integrated, but NOT authenticated** — see "Gaps" |
 
 All three go through one server-only client, `src/lib/crm-api/client.ts`. The only module that reads the environment is
@@ -127,11 +127,27 @@ the website drops its own.
 
 ## Contact message: `POST /api/public/contact-inquiry`
 
-Body: `{ companyId, firstName, lastName, email, phone, subject, message }` with `companyId` = `CRM_COMPANY_ID` and `phone` in E.164. `subject` is
-one of `GENERAL_INQUIRY`, `FLIGHT_REQUEST_HELP`, `EXISTING_BOOKING`, `CORPORATE_TRAVEL`, `OTHER` (identical to the website's values). The CRM
-files it in its "Get In Touch" inbox with source `BUSINESS_FLIGHTS_WEBSITE`, matches an existing contact for information, and notifies staff.
-**Attempted exactly once**: the CRM route has no duplicate guard, so a retry after a timeout could store the message twice. A timeout therefore
-shows the friendly error even though the message may have been stored.
+Body: `{ companyId, firstName, lastName, email, phone, subject, message, submissionId? }` with `companyId` = `CRM_COMPANY_ID` and `phone` in E.164.
+`subject` is one of `GENERAL_INQUIRY`, `FLIGHT_REQUEST_HELP`, `EXISTING_BOOKING`, `CORPORATE_TRAVEL`, `OTHER` (identical to the website's values).
+The CRM files it in its "Get In Touch" inbox with source `BUSINESS_FLIGHTS_WEBSITE`, matches an existing contact for information, and notifies staff.
+
+**Idempotency (added 2026-11-13, backward compatible).** `submissionId` is an optional string, 8-200 characters of `A-Z a-z 0-9 . _ -`.
+The website sends `<form id>.<first 16 hex of a SHA-256 of the typed fields>`: the form id is minted once per mounted form (`crypto.randomUUID`),
+the hash covers first name, last name, e-mail (lower-cased), phone (E.164), subject and message. Consequences:
+
+| Situation | Result |
+|---|---|
+| Visitor presses Send twice, or resends after a timeout / lost answer (same form, same text) | same key -> the CRM stores **one** inquiry and answers `200 { ok: true, id, duplicate: true }` for every repeat; staff are notified once |
+| Visitor edits the message and sends again | different hash -> a new inquiry |
+| Two simultaneous identical requests | serialised by an advisory lock on the key; one row, the others answered `duplicate: true` |
+| Different messages from the same address (different forms or text) | stored separately |
+| Same key, different message / e-mail / company / inbox | `409 { ok: false }`, nothing stored, the stored inquiry is never overwritten and its id is not revealed |
+| No `submissionId` (an older website build, or a browser without `randomUUID`) | exactly the previous behaviour: stored once per request, no de-duplication, response unchanged |
+
+The CRM derives the inquiry's primary key from (company, inbox, key) - the same technique as the flight API's lead id - so no schema change is
+involved. The `duplicate` flag is additive and only present on a repeat. The website still attempts the call **once per press**: it never retries
+automatically; the idempotency makes the *visitor's* retry safe. A CRM that predates the key ignores the field, so the two projects can be deployed
+in either order (until the CRM is updated a resent message may still be stored twice, exactly as before).
 
 ## Newsletter: `POST /api/public/subscribe`
 

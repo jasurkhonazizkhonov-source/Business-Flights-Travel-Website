@@ -180,6 +180,7 @@ test.describe("signed visitor context (src/lib/crm-api/visitor-context.ts)", () 
       region: "SP",
       country: "BR",
       timezone: "America/Sao_Paulo",
+      source: "cloudflare", // names which edge produced the location; an older CRM ignores it, a newer one stores the matching label
     });
     expect(Object.values(h).join("")).not.toContain(INGEST);
   });
@@ -430,7 +431,36 @@ test.describe("the CRM's public endpoints (contact inquiry, newsletter): ONE att
     expect(crm.requests).toHaveLength(2);
   });
 
-  test("the contact message is NOT idempotent, so a server error or a timeout is attempted exactly once and reported as unavailable", async () => {
+  test("contact idempotency: the same submissionId twice is ONE stored inquiry and the repeat is reported as a duplicate; the key travels in the body", async () => {
+    const body = { ...contact, submissionId: "9b1f0c52-6f0e-4d1e-8a41-2c3d4e5f6a7b.0123456789abcdef" };
+    expect(await postContactInquiry({ config: config(), body, timeoutMs: 1_000 })).toEqual({ status: "ok" });
+    expect(await postContactInquiry({ config: config(), body, timeoutMs: 1_000 })).toEqual({ status: "ok", duplicate: true });
+    expect(crm.inquiryCount()).toBe(1);
+    expect(crm.requests[0].json).toMatchObject({ submissionId: body.submissionId });
+    expect(crm.requests[0].headers.authorization).toBeUndefined(); // no credential was added for the key
+  });
+
+  test("contact idempotency: a different message under a different key is its own inquiry; the same key with another message is refused (409) and not retried", async () => {
+    const key = "9b1f0c52-6f0e-4d1e-8a41-2c3d4e5f6a7b.0123456789abcdef";
+    await postContactInquiry({ config: config(), body: { ...contact, submissionId: key }, timeoutMs: 1_000 });
+    await postContactInquiry({ config: config(), body: { ...contact, message: "A second and different question.", submissionId: "another-form-id.fedcba9876543210" }, timeoutMs: 1_000 });
+    expect(crm.inquiryCount()).toBe(2);
+    expect(await postContactInquiry({ config: config(), body: { ...contact, message: "Different text, reused key.", submissionId: key }, timeoutMs: 1_000 })).toEqual({ status: "rejected", httpStatus: 409 });
+    expect(crm.inquiryCount()).toBe(2);
+    expect(crm.requests).toHaveLength(3); // one attempt each, nothing retried
+  });
+
+  test("contact idempotency: a lost answer (the CRM stored it, the website timed out) followed by the visitor's resend stores ONE inquiry", async () => {
+    const body = { ...contact, submissionId: "lost-reply-form.0011223344556677" };
+    // The first attempt reaches the CRM (stored) but the website gives up waiting: simulate by letting it complete against the stub, then
+    // reporting a timeout to the caller via a tiny timeout on an identical request that arrives second.
+    await postContactInquiry({ config: config(), body, timeoutMs: 1_000 });
+    const resend = await postContactInquiry({ config: config(), body, timeoutMs: 1_000 });
+    expect(resend).toEqual({ status: "ok", duplicate: true });
+    expect(crm.inquiryCount()).toBe(1);
+  });
+
+  test("the contact message without a key still works against this CRM, and a server error or a timeout is attempted exactly once", async () => {
     crm.script({ status: 500, body: { ok: false, error: "Could not submit your request." } });
     expect(await postContactInquiry({ config: config(), body: contact, timeoutMs: 1_000 })).toEqual({ status: "unavailable", reason: "server_error", httpStatus: 500 });
     expect(crm.requests).toHaveLength(1);

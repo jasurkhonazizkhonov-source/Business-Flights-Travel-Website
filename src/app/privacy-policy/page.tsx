@@ -15,7 +15,7 @@ export const metadata: Metadata = pageMetadata({
   path: "/privacy-policy",
 });
 
-const LAST_UPDATED = "September 7, 2026";
+const LAST_UPDATED = "November 8, 2026";
 
 export default function PrivacyPolicyPage() {
   return (
@@ -52,9 +52,21 @@ export default function PrivacyPolicyPage() {
         </p>
         <h3>Information collected automatically</h3>
         <p>
-          Like most websites, we automatically collect some technical information when you visit — for example, your IP address,
-          browser and device type, general location inferred from your IP address, the pages you view, and how you arrived at the
-          Site. See our <a href="/cookie-policy">Cookie Policy</a> for details on how this is collected and how you can control it.
+          Like most websites, the servers that deliver this Site — including our network and security provider, Cloudflare —
+          process technical information when you visit and typically log it: for example your IP address, browser and device
+          type, the page requested, and the page you came from. See our <a href="/cookie-policy">Cookie Policy</a> for how
+          cookies and similar technologies are used and how you can control them.
+        </p>
+        <p>
+          When you submit a flight request, our server also records the IP address your request came from and an approximate
+          location (such as city, region, country and time zone) derived from that address by Cloudflare. They are stored with your
+          request in our CRM and included in the internal notification email about it, which may also show approximate map
+          coordinates; they are visible to authorized staff. When you send a message through the contact form, our server likewise
+          records the IP address and the same approximate location (city, region, country and time zone, but not map coordinates)
+          and sends them to our CRM with your message, where they are visible to authorized staff. The location is only an estimate
+          of where your network connection appears to be — it is not your address or your GPS position, and it can be wrong or
+          missing (for example when you use a VPN or a privacy relay). If the information is unavailable, nothing is recorded in its
+          place.
         </p>
       </LegalSection>
 
@@ -62,7 +74,7 @@ export default function PrivacyPolicyPage() {
         <p>We use the information described above to:</p>
         <ul>
           <li>Respond to your flight request and search for suitable business-class, first-class, or international fare options</li>
-          <li>Contact you by phone, email, or the details you provided, to discuss your trip and present options</li>
+          <li>Contact you by phone, email, or text message, using the details you provided, to discuss your trip and present options</li>
           <li>Create and maintain a record of your request so a travel specialist can follow up and assist you through booking</li>
           <li>Send periodic fare deals, destination guides, and travel updates to the email address you provide if you subscribe to our newsletter</li>
           <li>Improve the Site, our forms, and the overall experience of requesting a quote</li>
@@ -74,9 +86,10 @@ export default function PrivacyPolicyPage() {
 
       <LegalSection heading="4. How Your Information Is Stored and Processed (Our CRM)">
         <p>
-          When you submit the flight request or contact form, your details are stored in our internal customer relationship
-          management (CRM) system. This is the same system our travel specialists use to track every customer request from initial
-          submission through to booking, so that:
+          When you submit the flight request or contact form, or subscribe to the newsletter, your details are sent to and stored in
+          our customer relationship management (CRM) system. This website itself does not keep a database of them. The CRM is the
+          same system our travel specialists use to track every customer request from initial submission through to booking, so
+          that:
         </p>
         <ul>
           <li>Your request is visible to an available travel specialist promptly after you submit it</li>
@@ -92,24 +105,28 @@ export default function PrivacyPolicyPage() {
 
       <LegalSection heading="5. Communicating With You">
         <p>
-          By submitting a flight request or contact form, you agree that a travel specialist may contact you by phone, email, or
-          text message about your request, using the contact details you provided. This is how we deliver flight options and
-          coordinate booking — it is a core part of the service, not a marketing opt-in.
+          <strong>About your request.</strong> By submitting a flight request or contact form, you agree that a travel specialist
+          may contact you by phone, email, or text message about your request, using the contact details you provided. This is how
+          we deliver flight options and coordinate booking.
         </p>
         <p>
-          If you subscribe to our newsletter, that is a separate, opt-in mailing list for fare deals and travel updates — every
-          email includes an unsubscribe link, and unsubscribing only affects the newsletter, not communications about an active
-          flight request or booking.
+          <strong>Newsletter.</strong> If you subscribe to our newsletter, that is a separate, opt-in mailing list for fare deals
+          and travel updates. Unsubscribing only affects the newsletter, not communications about an active flight request or
+          booking.
         </p>
       </LegalSection>
 
       <LegalSection heading="6. Service Providers and Third Parties">
         <p>We work with a limited number of service providers to operate the Site and deliver our service, which may include:</p>
         <ul>
-          <li>Hosting and infrastructure providers that run the Site and our database</li>
+          <li>Hosting, network and security providers that run and protect the Site (for example Cloudflare)</li>
+          <li>The CRM system described above</li>
           <li>Communication tools we use to call, email, or message you about your request</li>
-          <li>Analytics providers that help us understand how the Site is used (see our <a href="/cookie-policy">Cookie Policy</a>)</li>
         </ul>
+        <p>
+          We do not currently use an analytics provider; see our <a href="/cookie-policy">Cookie Policy</a>, which will be updated
+          before any is added.
+        </p>
         <p>
           These providers only receive the information necessary to perform their function for us, and are expected to protect it
           accordingly. We do not permit them to use your information for their own independent purposes.
@@ -124,9 +141,9 @@ export default function PrivacyPolicyPage() {
       <LegalSection heading="7. Data Security">
         <p>
           We use reasonable administrative, technical, and organizational safeguards designed to protect the information you
-          provide — including restricting database access to authorized personnel and transmitting data over encrypted
-          connections. No method of transmission or storage is completely secure, however, and we cannot guarantee absolute
-          security.
+          provide — including serving this Site over an encrypted (HTTPS) connection and restricting access to our CRM to
+          authorized personnel. No method of transmission or storage is completely secure, however, and we cannot guarantee
+          absolute security.
         </p>
       </LegalSection>
 
@@ -187,7 +204,10 @@ export default function PrivacyPolicyPage() {
       </LegalSection>
 
       <LegalSection heading="14. Contact Us">
-        <p>If you have questions about this Privacy Policy or how your information is handled, contact us:</p>
+        <p>
+          If you have questions about this Privacy Policy, how your information is handled, or want to exercise a right described
+          above, contact us:
+        </p>
         <ul>
           <li>
             Email: <a href={`mailto:${CONTACT_EMAIL}`}>{CONTACT_EMAIL}</a>

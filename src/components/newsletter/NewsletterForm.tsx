@@ -5,6 +5,7 @@ import Link from "next/link";
 import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
 import { subscribeToNewsletter } from "@/server/actions/subscribe-newsletter";
+import { ACTION_FAILURE_MESSAGES, ACTION_TIMEOUT_MS, callAction, isNewsletterResult } from "@/lib/safe-action";
 import { cn } from "@/lib/cn";
 import { isValidEmail } from "@/lib/validate";
 
@@ -14,7 +15,10 @@ import { isValidEmail } from "@/lib/validate";
 export function NewsletterForm({ variant = "dark", idPrefix = "newsletter" }: { variant?: "dark" | "light"; idPrefix?: string }) {
   const [email, setEmail] = useState("");
   const [website, setWebsite] = useState("");
-  const [pending, startTransition] = useTransition();
+  const [, startTransition] = useTransition();
+  // Our own "a request is in flight" flag. React keeps `useTransition`'s pending flag true until the Server Action itself settles, which after a
+  // time-out (callAction) can be much later, so the button must not be driven by it: it is released as soon as the outcome is known.
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const emailId = `${idPrefix}-email`;
   const websiteId = `${idPrefix}-website`;
@@ -31,8 +35,19 @@ export function NewsletterForm({ variant = "dark", idPrefix = "newsletter" }: { 
       return;
     }
     setError("");
+    setBusy(true);
     startTransition(async () => {
-      const res = await subscribeToNewsletter({ email, website });
+      // A call that fails as a whole (dropped connection, timeout, thrown action, unexpected reply) is an inline message, never the route error
+      // page, and the typed address stays in the field. Nothing is retried automatically, and no "subscribed" message is shown unless the server
+      // confirmed it.
+      const outcome = await callAction(() => subscribeToNewsletter({ email, website }), isNewsletterResult, ACTION_TIMEOUT_MS.newsletter);
+      setBusy(false);
+      if (!outcome.ok) {
+        setError(ACTION_FAILURE_MESSAGES.newsletter);
+        toast.error("Subscription failed", { description: ACTION_FAILURE_MESSAGES.newsletter });
+        return;
+      }
+      const res = outcome.value;
       if (res.ok) {
         // A toast, not an inline swap that replaces this compact footer
         // widget — the form (and its input) stays put, so a visitor who
@@ -81,10 +96,10 @@ export function NewsletterForm({ variant = "dark", idPrefix = "newsletter" }: { 
         </div>
         <button
           type="submit"
-          disabled={pending}
+          disabled={busy}
           className="inline-flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-full bg-[var(--color-gold-500)] px-6 py-2.5 text-sm font-semibold text-[var(--color-navy-950)] transition-colors hover:bg-[var(--color-gold-400)] disabled:opacity-70"
         >
-          {pending ? <Loader2 size={16} className="animate-spin" /> : "Subscribe"}
+          {busy ? <Loader2 size={16} className="animate-spin" /> : "Subscribe"}
         </button>
       </div>
       {/* red-400 is 2.8:1 on the light variant's cream band; red-300 on navy (9:1) and red-700 on cream (6:1) both pass. */}

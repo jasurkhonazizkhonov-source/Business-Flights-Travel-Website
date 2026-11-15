@@ -30,6 +30,12 @@ export const contactMessageSchema = z.object({
   message: z.string().trim().min(10, "Please add a few more details (at least 10 characters).").max(3000),
   website: z.string().max(0, "").optional().or(z.literal("")), // honeypot
   renderedAt: z.number().optional(),
+  // Minted once per mounted form (crypto.randomUUID) so a repeat press of Send is recognised as the same submission. Absent where randomUUID is
+  // unavailable; the server then simply sends no key.
+  submissionId: z
+    .string()
+    .regex(/^[A-Za-z0-9-]{8,64}$/)
+    .optional(),
 });
 
 export type ContactMessageInput = z.infer<typeof contactMessageSchema>;

@@ -1,5 +1,6 @@
 "use server";
 
+import { createHash } from "node:crypto";
 import { headers } from "next/headers";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { rateLimitClientKey } from "@/lib/rate-limit-client";
@@ -7,6 +8,8 @@ import { isSpamSubmission } from "@/lib/anti-spam";
 import { normalizePhoneNumber } from "@/lib/phone";
 import { contactMessageSchema, type ContactMessageInput } from "@/lib/validations/contact";
 import { postContactInquiry } from "@/lib/crm-api/client";
+import { captureSubmissionInfo } from "@/lib/submission-info";
+import { buildVisitorContextHeaders } from "@/lib/crm-api/visitor-context";
 import { crmApiConfig } from "@/server/crm-api";
 
 export type SubmitContactMessageResult = { ok: true } | { ok: false; error: string; fieldErrors?: Record<string, string> };
@@ -24,9 +27,16 @@ function friendlyError(
 // ONLY endpoint for this form today, and an UNAUTHENTICATED one (docs/CRM_API_INTEGRATION.md explains the gap and the contract the CRM should
 // add). The CRM owns the inquiry, the matching of an existing contact and the staff notification.
 //
-// That endpoint has no idempotency or duplicate guard, so the call is attempted exactly ONCE: a timeout leaves the outcome unknown and the
-// visitor sees the friendly error (a second submit could store the message twice, which is the lesser harm than losing it silently).
-// There is NO database fallback.
+// The call is attempted exactly ONCE per submit (never retried automatically). The submission carries a `submissionId` - the form's per-mount id
+// joined with a hash of what the visitor typed - and the CRM stores one inquiry per id, so when a timeout or a lost answer leaves the outcome unknown
+// the VISITOR can press Send again safely: the CRM answers `duplicate: true` instead of storing the message twice. Editing the message changes the
+// hash, so a corrected message is a new submission. A CRM that predates the key ignores it and behaves as before. There is NO database fallback.
+function contactSubmissionKey(formId: string | undefined, fields: Record<string, string>): string | undefined {
+  if (!formId) return undefined;
+  const digest = createHash("sha256").update(JSON.stringify(Object.entries(fields).sort(([a], [b]) => (a < b ? -1 : 1)))).digest("hex").slice(0, 16);
+  return `${formId}.${digest}`;
+}
+
 export async function submitContactMessage(input: ContactMessageInput): Promise<SubmitContactMessageResult> {
   const headerList = await headers();
   const ip = rateLimitClientKey(headerList);
@@ -62,12 +72,43 @@ export async function submitContactMessage(input: ContactMessageInput): Promise<
   const api = crmApiConfig("public-inquiry", "contact message");
   if (!api.ok) return friendlyError();
 
-  const outcome = await postContactInquiry({
-    config: api.config,
-    body: { firstName: data.firstName, lastName: data.lastName, email: data.email, phone: phone.e164, subject: data.subject, message: data.message },
+  const submissionId = contactSubmissionKey(data.submissionId, {
+    firstName: data.firstName,
+    lastName: data.lastName,
+    email: data.email.toLowerCase(),
+    phone: phone.e164,
+    subject: data.subject,
+    message: data.message,
   });
 
-  if (outcome.status === "ok") return { ok: true };
+  // What THIS server observed about the request (trusted proxy headers only - never a form field), signed with LEAD_INGEST_SECRET. The CRM sees only this
+  // website's server, so without the signed context it records no IP and no location for the inquiry. Nothing is fabricated: no trusted IP or no
+  // geolocation simply means those parts are absent, and the inquiry is still sent.
+  const { info: submissionInfo, ipUnavailable } = captureSubmissionInfo(headerList);
+  const visitorHeaders = buildVisitorContextHeaders(submissionInfo, api.config.ingestSecret);
+
+  const outcome = await postContactInquiry({
+    config: api.config,
+    visitorHeaders,
+    body: {
+      firstName: data.firstName,
+      lastName: data.lastName,
+      email: data.email,
+      phone: phone.e164,
+      subject: data.subject,
+      message: data.message,
+      ...(submissionId ? { submissionId } : {}),
+    },
+  });
+
+  if (outcome.status === "ok") {
+    // Value-free: whether an IP/location was available and sent, never the address or the place.
+    const ipStatus = submissionInfo.ip ? "captured" : `unavailable (${ipUnavailable ?? "unknown"})`;
+    console.info(
+      `[submitContactMessage] accepted by the CRM (visitor context ${Object.keys(visitorHeaders).length ? "signed" : api.config.ingestSecret ? "nothing to send" : "not configured"}; ip ${ipStatus}; location ${submissionInfo.location ? "captured" : "unavailable"})`,
+    );
+    return { ok: true };
+  }
 
   // Fixed tags only - never the message, the visitor's details or the CRM's reply text.
   switch (outcome.status) {

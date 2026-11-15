@@ -8,7 +8,8 @@ import type { CrmApiConfig } from "./config";
 // Contracts (verified against the CRM at commit 4d33c29 and against the CRM pull-request build 01e809d, which this client was run against
 // with fake data; see docs/CRM_API_INTEGRATION.md):
 //   * POST /api/v1/website/flight-inquiries   authenticated (Bearer), REQUIRED Idempotency-Key, strict JSON body. Safe to retry with the SAME key.
-//   * POST /api/public/contact-inquiry        the CRM's browser-facing, UNauthenticated endpoint (companyId in the body). NOT idempotent.
+//   * POST /api/public/contact-inquiry        the CRM's browser-facing, UNauthenticated endpoint (companyId in the body). Idempotent per optional
+//                                             `submissionId` (the CRM answers a repeat `{ ok: true, duplicate: true }`); one attempt per call.
 //   * POST /api/public/subscribe              the same kind of endpoint. Server-side an upsert, but the CRM notifies on a new subscriber.
 //
 // Rules this module enforces:
@@ -138,22 +139,23 @@ export async function postFlightInquiry(
 // ---- the public (unauthenticated) endpoints: contact inquiry and newsletter -------------------------------------------------------------------
 
 export type PublicOutcome =
-  | { status: "ok" }
-  /** 400: the CRM refused this submission (invalid, or an unknown company). Not retried. */
+  /** `duplicate` is true when the CRM recognised a repeat of an earlier submission (same submission key) and stored nothing new. Absent from older CRMs. */
+  | { status: "ok"; duplicate?: boolean }
+  /** 400: the CRM refused this submission (invalid, or an unknown company). 409: the submission key was already used for a different message. Not retried. */
   | { status: "rejected"; httpStatus: number }
   | { status: "rate_limited" }
   /** A single attempt failed (timeout, network, 5xx, unreadable reply). For a write that is not idempotent the outcome at the CRM is unknown. */
   | { status: "unavailable"; reason: "timeout" | "network" | "server_error" | "bad_response" | "unexpected_status"; httpStatus?: number };
 
-const publicOkSchema = z.object({ ok: z.literal(true) });
+const publicOkSchema = z.object({ ok: z.literal(true), duplicate: z.boolean().optional() });
 
-async function postPublic(options: Common & { config: CrmApiConfig; path: string; body: unknown }): Promise<PublicOutcome> {
+async function postPublic(options: Common & { config: CrmApiConfig; path: string; body: unknown; visitorHeaders?: Record<string, string> }): Promise<PublicOutcome> {
   const fetchImpl: FetchLike = options.fetchImpl ?? ((input, init) => fetch(input, init));
   let res: Response;
   try {
     res = await fetchImpl(`${options.config.baseUrl}${options.path}`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      headers: { "Content-Type": "application/json", Accept: "application/json", ...(options.visitorHeaders ?? {}) },
       body: JSON.stringify(options.body),
       signal: AbortSignal.timeout(options.timeoutMs ?? DEFAULT_TIMEOUT_MS),
       redirect: "error",
@@ -165,16 +167,29 @@ async function postPublic(options: Common & { config: CrmApiConfig; path: string
   }
   const json = await readJson(res).catch(() => undefined);
   if (res.status >= 200 && res.status < 300) {
-    return publicOkSchema.safeParse(json).success ? { status: "ok" } : { status: "unavailable", reason: "bad_response", httpStatus: res.status };
+    const parsed = publicOkSchema.safeParse(json);
+    if (!parsed.success) return { status: "unavailable", reason: "bad_response", httpStatus: res.status };
+    return parsed.data.duplicate ? { status: "ok", duplicate: true } : { status: "ok" };
   }
   if (res.status === 429) return { status: "rate_limited" };
-  if (res.status === 400) return { status: "rejected", httpStatus: 400 };
+  if (res.status === 400 || res.status === 409) return { status: "rejected", httpStatus: res.status };
   if (res.status >= 500) return { status: "unavailable", reason: "server_error", httpStatus: res.status };
   return { status: "unavailable", reason: "unexpected_status", httpStatus: res.status };
 }
 
-/** POST /api/public/contact-inquiry. Exactly ONE attempt: the CRM has no duplicate guard on this route, so a retry could store the message twice. */
-export function postContactInquiry(options: Common & { config: CrmApiConfig; body: { firstName: string; lastName: string; email: string; phone: string; subject: string; message: string } }): Promise<PublicOutcome> {
+/**
+ * POST /api/public/contact-inquiry. Exactly ONE attempt per call - never retried automatically. With a `submissionId` the CRM stores one message per
+ * key, so the VISITOR pressing Send again after a timeout or a lost answer is safe (the CRM answers `duplicate: true`); a CRM that predates the key
+ * ignores the field and behaves as before.
+ */
+export function postContactInquiry(
+  options: Common & {
+    config: CrmApiConfig;
+    body: { firstName: string; lastName: string; email: string; phone: string; subject: string; message: string; submissionId?: string };
+    /** x-ct-visitor-context / x-ct-visitor-signature (src/lib/crm-api/visitor-context.ts), or {}: the visitor's IP and approximate location, signed. */
+    visitorHeaders?: Record<string, string>;
+  },
+): Promise<PublicOutcome> {
   return postPublic({ ...options, path: "/api/public/contact-inquiry", body: { companyId: options.config.companyId, ...options.body } });
 }
 

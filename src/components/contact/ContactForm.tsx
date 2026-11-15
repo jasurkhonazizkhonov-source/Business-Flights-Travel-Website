@@ -1,11 +1,12 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useRef, useState, useTransition } from "react";
 import { m } from "framer-motion";
 import { CheckCircle2, AlertTriangle, Loader2 } from "lucide-react";
 import { PhoneNumberField } from "@/components/forms/PhoneNumberField";
 import { FieldError } from "@/components/forms/FieldError";
 import { submitContactMessage } from "@/server/actions/submit-contact-message";
+import { ACTION_FAILURE_MESSAGES, ACTION_TIMEOUT_MS, callAction, isContactResult } from "@/lib/safe-action";
 // Imported from the zod-free options module, not from
 // @/lib/validations/contact, so this client component's bundle doesn't
 // pull in zod and the full validation schema — see the comment in
@@ -13,7 +14,7 @@ import { submitContactMessage } from "@/server/actions/submit-contact-message";
 import { CONTACT_SUBJECT_OPTIONS, type ContactSubject } from "@/lib/validations/contact-options";
 import { isValidEmail } from "@/lib/validate";
 import { focusFieldError } from "@/lib/focus-field-error";
-import { isValidPhoneNumber } from "@/lib/phone";
+import { getPhoneValidatorState, loadPhoneValidator, type PhoneValidator } from "@/lib/phone-validator";
 import { cn } from "@/lib/cn";
 
 type FormErrors = Record<string, string>;
@@ -35,19 +36,29 @@ export function ContactForm() {
   const [message, setMessage] = useState("");
   const [website, setWebsite] = useState("");
   const [renderedAt] = useState(() => Date.now());
+  // Identifies this form instance, so pressing Send again after a timeout or a lost answer is recognised by the CRM as the SAME submission and
+  // stored once. Absent only where randomUUID is unavailable (insecure context); the server then sends no key.
+  const [submissionId] = useState(() => globalThis.crypto?.randomUUID?.());
   const [errors, setErrors] = useState<FormErrors>({});
-  const [pending, startTransition] = useTransition();
+  const [, startTransition] = useTransition();
+  // Our own "a request is in flight" flag. React keeps `useTransition`'s pending flag true until the Server Action itself settles, which after a
+  // time-out (callAction) can be much later, so the button must not be driven by it: it is released as soon as the outcome is known.
+  const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<"idle" | "success" | "error">("idle");
   const [errorMessage, setErrorMessage] = useState("");
 
-  function validateClientSide(): FormErrors {
+  // See handleSubmit: the phone validator is loaded on demand, not with the page.
+  const waitingForPhoneRef = useRef(false);
+  const skipPhoneFormatCheckRef = useRef(false);
+
+  function validateClientSide(isValidPhone: PhoneValidator | null): FormErrors {
     const e: FormErrors = {};
     if (!firstName.trim()) e.firstName = "First name is required.";
     if (!lastName.trim()) e.lastName = "Last name is required.";
     if (!isValidEmail(email)) e.email = "Please enter a valid email address.";
     if (!phone) {
       e.phone = "Phone number is required.";
-    } else if (!isValidPhoneNumber(phone)) {
+    } else if (isValidPhone && !isValidPhone(phone)) {
       e.phone = "Please enter a valid phone number, including the complete number.";
     }
     if (!subject) e.subject = "Please select a subject.";
@@ -55,9 +66,32 @@ export function ContactForm() {
     return e;
   }
 
-  function handleSubmit(e: React.FormEvent) {
+  function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    const clientErrors = validateClientSide();
+    const formEventTarget = e.currentTarget;
+    // The phone validator (libphonenumber) is loaded on demand - see src/lib/phone-validator.ts. Normally it is ready long before a submit
+    // (the phone field loads it on first touch). If it is not (autofill, a very fast submit) wait for it, then submit again so the very same
+    // checks run against the latest field values. If it cannot be loaded the client-side format check is skipped and the server decides.
+    const phoneState = getPhoneValidatorState();
+    let isValidPhone: PhoneValidator | null;
+    if (phoneState.state === "ready") {
+      isValidPhone = phoneState.isValid;
+    } else if (skipPhoneFormatCheckRef.current) {
+      skipPhoneFormatCheckRef.current = false;
+      isValidPhone = null;
+    } else {
+      if (waitingForPhoneRef.current) return;
+      waitingForPhoneRef.current = true;
+      const form = formEventTarget;
+      void loadPhoneValidator().then((loaded) => {
+        waitingForPhoneRef.current = false;
+        if (!loaded) skipPhoneFormatCheckRef.current = true;
+        if (typeof form.requestSubmit === "function") form.requestSubmit();
+        else form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+      });
+      return;
+    }
+    const clientErrors = validateClientSide(isValidPhone);
     if (Object.keys(clientErrors).length > 0) {
       setErrors(clientErrors);
       focusFirstError(clientErrors);
@@ -65,17 +99,34 @@ export function ContactForm() {
     }
     setErrors({});
 
+    setBusy(true);
     startTransition(async () => {
-      const res = await submitContactMessage({
-        firstName,
-        lastName,
-        email,
-        phone: phone as string,
-        subject: subject as ContactSubject,
-        message,
-        website,
-        renderedAt,
-      });
+      // A call that fails as a whole (dropped connection, timeout, thrown action, unexpected reply) is an inline message here, never the route
+      // error page: the form and everything typed stay as they are, and the visitor can try again. Nothing is retried automatically.
+      const outcome = await callAction(
+        () =>
+          submitContactMessage({
+            firstName,
+            lastName,
+            email,
+            phone: phone as string,
+            subject: subject as ContactSubject,
+            message,
+            website,
+            renderedAt,
+            submissionId,
+          }),
+        isContactResult,
+        ACTION_TIMEOUT_MS.contactMessage,
+      );
+      setBusy(false);
+      if (!outcome.ok) {
+        setStatus("error");
+        setErrorMessage(ACTION_FAILURE_MESSAGES.contactMessage);
+        setErrors({});
+        return;
+      }
+      const res = outcome.value;
       if (res.ok) {
         setStatus("success");
       } else {
@@ -112,6 +163,7 @@ export function ContactForm() {
           </label>
           <input
             id="c-firstName"
+            autoComplete="given-name"
             value={firstName}
             onChange={(e) => setFirstName(e.target.value)}
             aria-required="true"
@@ -130,6 +182,7 @@ export function ContactForm() {
           </label>
           <input
             id="c-lastName"
+            autoComplete="family-name"
             value={lastName}
             onChange={(e) => setLastName(e.target.value)}
             aria-required="true"
@@ -149,6 +202,7 @@ export function ContactForm() {
           <input
             id="c-email"
             type="email"
+            autoComplete="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             aria-required="true"
@@ -218,7 +272,7 @@ export function ContactForm() {
       </div>
 
       {status === "error" && (
-        <div className="mt-4 flex items-start gap-2.5 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">
+        <div role="alert" className="mt-4 flex items-start gap-2.5 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">
           <AlertTriangle size={18} className="mt-0.5 shrink-0" />
           <p>{errorMessage}</p>
         </div>
@@ -226,10 +280,10 @@ export function ContactForm() {
 
       <button
         type="submit"
-        disabled={pending}
+        disabled={busy}
         className="mt-6 flex w-full items-center justify-center gap-2 rounded-full bg-[var(--color-navy-950)] px-6 py-3.5 text-sm font-semibold text-white transition-colors hover:bg-[var(--color-gold-600)] disabled:opacity-70 sm:w-auto"
       >
-        {pending ? (
+        {busy ? (
           <>
             <Loader2 size={16} className="animate-spin" /> Sending…
           </>

@@ -648,15 +648,20 @@ test.describe("client-side double-submit guard (duplicate Lead / duplicate notif
   test("handleSubmit returns early on a ref guard, before validation or any submitFlightRequest call", () => {
     const handleSubmitIdx = formSource.indexOf("function handleSubmit(");
     const guardIdx = formSource.indexOf("if (submittingRef.current) return;");
-    const validateIdx = formSource.indexOf("validateClientSide()", handleSubmitIdx);
+    // The phone validator is loaded on demand (src/lib/phone-validator.ts), so validation is now called with it: validateClientSide(isValidPhone).
+    const validateIdx = formSource.indexOf("validateClientSide(isValidPhone)", handleSubmitIdx);
+    const waitIdx = formSource.indexOf("waitingForPhoneRef", handleSubmitIdx);
     expect(handleSubmitIdx).toBeGreaterThan(-1);
     expect(guardIdx).toBeGreaterThan(handleSubmitIdx);
     expect(guardIdx).toBeLessThan(validateIdx);
+    // ...and the wait-for-the-validator branch (which re-submits the form) is also behind the guard, so it can never start a second submission.
+    expect(waitIdx).toBeGreaterThan(guardIdx);
+    expect(waitIdx).toBeLessThan(validateIdx);
   });
 
   test("the ref is set only once validation passed, and ALWAYS released in a finally (a failed request must not lock the form)", () => {
     const setIdx = formSource.indexOf("submittingRef.current = true;");
-    const validateIdx = formSource.indexOf("validateClientSide()");
+    const validateIdx = formSource.indexOf("validateClientSide(isValidPhone)");
     const finallyIdx = formSource.indexOf("submittingRef.current = false;");
     expect(setIdx).toBeGreaterThan(validateIdx);
     expect(finallyIdx).toBeGreaterThan(setIdx);
