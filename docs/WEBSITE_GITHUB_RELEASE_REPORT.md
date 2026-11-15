@@ -67,3 +67,20 @@ Once these are answered, publication is a normal non-force push of a reviewed co
 * No pull request was opened, nothing was merged, nothing was deployed.
 * No CI exists in the repository, so none was triggered and there is no CI result.
 * The CRM repository was not touched by this task.
+
+### Result of the publication (recorded after the push)
+
+| Item | Value |
+|---|---|
+| Repository | `https://github.com/jasurkhonazizkhonov-source/Business-Flights-Travel-Website` (the existing repository; **public**, default branch `main`, confirmed from the unauthenticated GitHub API) |
+| Branch | `review/website-parity-and-contact-ip-2026-11-15` (new on the remote) |
+| Release commit | `ab5f6b001f33f0de2cf2c2cc852e9cc9eb133a06`, 57 files, 4414 insertions, 108 deletions; the commit on top of it only records this table |
+| Push | plain `git push -u origin <branch>`: `[new branch]`, no force. Local and remote branch tips were identical afterwards (0 ahead, 0 behind) |
+| Other remote branches | unchanged: `main` 40113cb, `feature/vps-website` 10fe079, `feature/api-only-crm-integration` 62274d3, `work/website-crm-api-integration` 3d68d0f |
+| Published branch relative to `work/website-crm-api-integration` | 7 commits ahead (the 6 earlier local commits plus the release commit) |
+| Excluded folders in the commit | none (`docs/workspace-archive/`, `docs/brand-assets/` stay untracked locally) |
+| CI | the repository has no workflow files, so none was triggered; **no CI result exists** |
+| Pull request | not opened (GitHub offers `.../pull/new/review/website-parity-and-contact-ip-2026-11-15`) |
+| Local state after | working branch is the review branch; the earlier branch `work/website-crm-api-integration` is unchanged at d1d1b61 |
+
+**Because the repository is public**, everything in the 57 files is public. A scan found no secret, no personal e-mail address and no credential. One item deserves your decision: `docs/DEPLOYMENT_VPS.md` states the VPS host address (and its layout). It was already public on `feature/vps-website`, so this branch does not add a new exposure, but you may want it removed from the documentation (public ports are closed according to the same document; the address itself is not a credential).
