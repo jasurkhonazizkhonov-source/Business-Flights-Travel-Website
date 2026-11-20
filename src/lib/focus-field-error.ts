@@ -10,8 +10,10 @@ export function focusFieldError(key: string): void {
   const wrapper = document.getElementById(`field-${key}`);
   if (!wrapper) return;
   wrapper.scrollIntoView({ behavior: "smooth", block: "center" });
+  // Inputs, selects and textareas first: a field can carry a helper button in its label row (the departure field's "Use my location"), which comes
+  // earlier in the document than the input but is not what needs fixing. Fields made only of a button (the date pickers) fall back to it.
   const control = wrapper.matches("input, select, textarea, button")
     ? wrapper
-    : wrapper.querySelector<HTMLElement>("input:not([type=hidden]), select, textarea, button");
+    : (wrapper.querySelector<HTMLElement>("input:not([type=hidden]), select, textarea") ?? wrapper.querySelector<HTMLElement>("button"));
   control?.focus({ preventScroll: true });
 }

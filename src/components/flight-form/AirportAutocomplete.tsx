@@ -20,6 +20,9 @@ export function AirportAutocomplete({
   icon = "from",
   error,
   placeholder = "City or airport code",
+  onClear,
+  labelAction,
+  describedBy,
 }: {
   label: string;
   value: AirportOption | null;
@@ -27,6 +30,15 @@ export function AirportAutocomplete({
   icon?: "from" | "to";
   error?: string;
   placeholder?: string;
+  /**
+   * Called when the visitor edits the text so it no longer names the selected airport. The field would otherwise keep submitting the old airport
+   * while showing something else (or nothing). If the text is later put back to exactly that airport's label, `onChange` re-selects it.
+   */
+  onClear?: () => void;
+  /** Content for the right-hand end of the label row (a "Suggested" tag, a "use my location" button). It must not be taller than the label. */
+  labelAction?: React.ReactNode;
+  /** id of extra descriptive text (for example "suggested from your approximate location"), joined to the input's aria-describedby. */
+  describedBy?: string;
 }) {
   const [query, setQuery] = useState(labelFor(value));
   const [results, setResults] = useState<AirportOption[]>([]);
@@ -38,6 +50,9 @@ export function AirportAutocomplete({
   // there was no way to reach or choose an option without a mouse.
   const [highlightedIndex, setHighlightedIndex] = useState(-1);
   const containerRef = useRef<HTMLDivElement>(null);
+  // The airport that was selected before the visitor started editing the text, and whether the current null value came from such an edit.
+  const [lastSelected, setLastSelected] = useState<AirportOption | null>(value);
+  const [edited, setEdited] = useState(false);
   const listboxId = useId();
   const labelId = useId();
   const errorId = useId();
@@ -74,7 +89,12 @@ export function AirportAutocomplete({
   const [prevValue, setPrevValue] = useState(value);
   if (value !== prevValue) {
     setPrevValue(value);
-    setQuery(labelFor(value));
+    // A value that went null because the visitor is editing must not wipe what they are typing.
+    if (value !== null || !edited) setQuery(labelFor(value));
+    if (value !== null) {
+      setLastSelected(value);
+      setEdited(false);
+    }
   }
 
   useClickOutside(containerRef, () => setOpen(false), open);
@@ -176,9 +196,18 @@ export function AirportAutocomplete({
 
   return (
     <div className="relative" ref={containerRef}>
-      <label id={labelId} className="mb-1.5 block text-xs font-semibold tracking-wide text-[var(--color-navy-700)]">
-        {label}
-      </label>
+      {labelAction === undefined ? (
+        <label id={labelId} className="mb-1.5 block text-xs font-semibold tracking-wide text-[var(--color-navy-700)]">
+          {label}
+        </label>
+      ) : (
+        <div className="mb-1.5 flex items-center justify-between gap-2">
+          <label id={labelId} className="block text-xs font-semibold tracking-wide text-[var(--color-navy-700)]">
+            {label}
+          </label>
+          {labelAction}
+        </div>
+      )}
       <div
         className={cn(
           // Vertical padding lives on the <input> (below), not on this box: with `py-3` here the
@@ -195,8 +224,15 @@ export function AirportAutocomplete({
           placeholder={placeholder}
           onFocus={() => setOpen(true)}
           onChange={(e) => {
-            setQuery(e.target.value);
+            const next = e.target.value;
+            setQuery(next);
             setOpen(true);
+            if (value && next !== labelFor(value)) {
+              setEdited(true);
+              onClear?.();
+            } else if (!value && lastSelected && next === labelFor(lastSelected)) {
+              onChange(lastSelected);
+            }
           }}
           onKeyDown={handleKeyDown}
           className="w-full bg-transparent py-3 text-sm text-[var(--color-navy-950)] outline-none"
@@ -209,7 +245,7 @@ export function AirportAutocomplete({
           aria-activedescendant={highlightedIndex >= 0 ? `${listboxId}-option-${highlightedIndex}` : undefined}
           // The error text was announced when it appeared but never tied to the field: the focused input said nothing about being invalid.
           aria-invalid={error ? true : undefined}
-          aria-describedby={error ? errorId : undefined}
+          aria-describedby={[error ? errorId : undefined, describedBy].filter(Boolean).join(" ") || undefined}
         />
         {loading && <Loader2 size={15} className="animate-spin text-[var(--color-navy-950)]/60" aria-hidden="true" />}
       </div>

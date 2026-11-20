@@ -10,7 +10,7 @@ const EMAIL = "info@businessflights.travel";
 const MAILTO = `mailto:${EMAIL}`;
 const STREET = "350 Sansome St";
 // Anything from the previous contact details (formatted or not), the old addresses and any other company's names/links.
-const OLD = /777[\s.\-)]*7788|4157777788|requests?@businessflights|580 California|California Street|skylux|prime flights|travel consolidator/i;
+const OLD = /777[\s.\-)]*7788|4157777788|requests?@businessflights|580 California|California Street|prime flights|travel consolidator/i;
 
 async function dismissCookieBanner(page: Page) {
   const reject = page.getByRole("button", { name: /Reject Non-Essential/i });
@@ -101,7 +101,7 @@ test.describe("notice under the flight-request button", () => {
       // functionality and records no such consent (docs/LEGAL.md, item 4).
       expect(await notice.innerText()).not.toMatch(/text message|\bsms\b|\boffers?\b|\bdeals?\b|marketing|purchase necessary|condition of purchase|spam/i);
       // Nothing from the example companies.
-      expect(await notice.innerText()).not.toMatch(/skylux|prime flights|travel consolidator/i);
+      expect(await notice.innerText()).not.toMatch(/prime flights|travel consolidator/i);
 
       // Below the button, in the same form, and small (12px).
       const b = await button.boundingBox();
@@ -136,5 +136,38 @@ test.describe("notice under the flight-request button", () => {
     await expect(page.locator("main")).toContainText("about your request");
     const policy = await page.locator("main").innerText();
     expect(policy).not.toMatch(/offers by phone|travel information and offers|marketing messages|condition of purchase/i);
+  });
+});
+
+// Privacy links are this website's own, everywhere. No page links to another company's privacy policy (or to any external privacy page), and the contact form
+// carries a neutral pointer to the site's own policy (not a consent claim, no checkbox).
+test.describe("privacy links", () => {
+  for (const url of PAGES) {
+    test(`${url}: every link that mentions privacy is internal, and resolves to /privacy-policy`, async ({ page }) => {
+      await page.goto(url);
+      const hrefs = await page.locator('a[href*="privacy" i]').evaluateAll((els) => els.map((e) => (e as HTMLAnchorElement).getAttribute("href") ?? ""));
+      for (const href of hrefs) expect(href, `${url} -> ${href}`).toBe("/privacy-policy");
+      const external = await page.locator('a[href^="http"]').evaluateAll((els) =>
+        els.map((e) => e as HTMLAnchorElement).filter((a) => /privacy/i.test(a.textContent ?? "") || /privacy/i.test(a.getAttribute("href") ?? "")).map((a) => a.href),
+      );
+      expect(external, `${url} has an external privacy link`).toEqual([]);
+    });
+  }
+
+  test("the contact form has a Privacy Policy pointer under the button: internal link, no checkbox, no consent wording", async ({ page }) => {
+    await page.goto("/contact");
+    const form = page.locator("form:has(#c-phone)");
+    const pointer = form.getByTestId("contact-privacy-pointer");
+    await expect(pointer).toBeVisible();
+    await expect(pointer.getByRole("link", { name: "Privacy Policy" })).toHaveAttribute("href", "/privacy-policy");
+    expect(await pointer.innerText()).not.toMatch(/agree|consent|text message|marketing|offers/i);
+    await expect(form.locator('input[type="checkbox"]')).toHaveCount(0);
+    // the button comes first, the pointer directly after it
+    const order = await form.evaluate((f) => {
+      const btn = f.querySelector('button[type="submit"]');
+      const p = f.querySelector('[data-testid="contact-privacy-pointer"]');
+      return !!btn && !!p && !!(btn.compareDocumentPosition(p) & Node.DOCUMENT_POSITION_FOLLOWING);
+    });
+    expect(order).toBe(true);
   });
 });

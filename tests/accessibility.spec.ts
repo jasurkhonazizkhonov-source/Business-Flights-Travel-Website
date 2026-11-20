@@ -160,6 +160,11 @@ test.describe("Floating call button", () => {
 
   test("steps aside while a date or traveler popup is open, so it cannot cover (and be tapped instead of) a calendar day", async ({ page }) => {
     await answeredCookieNotice(page);
+    // This test is about the POPUP rule only. The pill also (correctly) steps aside whenever the form's own submit button is near the bottom of the
+    // screen, which on a tall tablet window (768x1024) is already the case at load - so the window is made short enough that the submit button is
+    // below the fold at every project width. The submit-button rule has its own test below.
+    const size = page.viewportSize();
+    if (size) await page.setViewportSize({ width: size.width, height: Math.min(size.height, 640) });
     await page.goto("/flights");
     const fab = page.locator('a.fixed[href^="tel:"]');
     await expect(fab).toHaveAttribute("aria-hidden", "false", { timeout: 15000 });
@@ -170,6 +175,32 @@ test.describe("Floating call button", () => {
     // submit button into view, and the pill deliberately steps aside for that button too. Return to the top so this asserts only the popup rule.
     await page.evaluate(() => window.scrollTo(0, 0));
     await expect(fab).toHaveAttribute("aria-hidden", "false");
+  });
+
+  test("steps aside while the form's own submit button is on screen, so it can never sit on top of it, and returns when that button is out of view", async ({ page }) => {
+    await answeredCookieNotice(page);
+    // A tall tablet-sized window shows the submit button in the first screen: the pill must be hidden, not covering it.
+    await page.setViewportSize({ width: 768, height: 1100 });
+    await page.goto("/flights");
+    const submit = page.locator("form:has(#phone) button[type=submit]");
+    await expect(submit).toBeVisible();
+    const fab = page.locator('a.fixed[href^="tel:"]');
+    await expect(fab).toHaveAttribute("aria-hidden", "true", { timeout: 15000 });
+    expect(await fab.evaluate((el) => getComputedStyle(el).pointerEvents)).toBe("none");
+    // The pill and the button never overlap in any state we can observe.
+    const overlap = await page.evaluate(() => {
+      const f = document.querySelector('a.fixed[href^="tel:"]') as HTMLElement | null;
+      const b = document.querySelector("form button[type=submit]") as HTMLElement | null;
+      if (!f || !b || getComputedStyle(f).opacity === "0") return false;
+      const x = f.getBoundingClientRect();
+      const y = b.getBoundingClientRect();
+      return Math.min(x.right, y.right) > Math.max(x.left, y.left) && Math.min(x.bottom, y.bottom) > Math.max(x.top, y.top);
+    });
+    expect(overlap).toBe(false);
+    // A short window puts the submit button below the fold: the pill is available again.
+    await page.setViewportSize({ width: 768, height: 640 });
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await expect(fab).toHaveAttribute("aria-hidden", "false", { timeout: 15000 });
   });
 
   test("never covers anything at the end of the page", async ({ page }) => {

@@ -9,6 +9,7 @@ import { useClickOutside } from "@/hooks/useClickOutside";
 import { usePopoverAlign } from "@/hooks/usePopoverAlign";
 import { useScrollPopoverIntoView } from "@/hooks/useScrollPopoverIntoView";
 import { cn } from "@/lib/cn";
+import { maxSelectableDate } from "@/lib/flight-date-window";
 import { FieldError } from "@/components/forms/FieldError";
 
 // react-day-picker (+ its CSS, pulled in inside DayPickerCalendar.tsx) is
@@ -83,8 +84,8 @@ export function DateField({
 
   const selected = parseIso(value);
   const floor = minDate ?? new Date(new Date().setHours(0, 0, 0, 0));
-  const maxDate = new Date();
-  maxDate.setFullYear(maxDate.getFullYear() + 1);
+  // The last bookable day: 11 calendar months after today (src/lib/flight-date-window.ts; the server applies the same rule).
+  const maxDate = maxSelectableDate();
 
   // --- date-range display -------------------------------------------------------------------------------------------------
   const start = rangeStart ? parseIso(rangeStart) : undefined;
@@ -223,6 +224,8 @@ export function DateField({
           }}
           className="bfw-daypicker"
         />
+        {/* Only while open: the date depends on today, and this component is also part of the pages that are prerendered at build time. */}
+        {open && <p className="mt-1 px-1 text-center text-[11px] text-[var(--color-navy-950)]/65">Flights can be requested until {format(maxDate, "MMM d, yyyy")}.</p>}
         {previewing && (
           <div className="mt-1 border-t border-[var(--color-navy-950)]/8 px-1 pt-2 text-center">
             <p id={summaryId} aria-live="polite" className="min-h-5 text-xs font-medium text-[var(--color-navy-800)]">

@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState, useTransition } from "react";
+import Link from "next/link";
 import { m } from "framer-motion";
 import { CheckCircle2, AlertTriangle, Loader2 } from "lucide-react";
 import { PhoneNumberField } from "@/components/forms/PhoneNumberField";
@@ -12,12 +13,22 @@ import { ACTION_FAILURE_MESSAGES, ACTION_TIMEOUT_MS, callAction, isContactResult
 // pull in zod and the full validation schema — see the comment in
 // contact-options.ts.
 import { CONTACT_SUBJECT_OPTIONS, type ContactSubject } from "@/lib/validations/contact-options";
-import { isValidEmail } from "@/lib/validate";
+import { checkEmail, emailProblemMessage } from "@/lib/validate";
 import { focusFieldError } from "@/lib/focus-field-error";
-import { getPhoneValidatorState, loadPhoneValidator, type PhoneValidator } from "@/lib/phone-validator";
+import { getPhoneValidatorState, loadPhoneValidator, type PhoneErrorFor } from "@/lib/phone-validator";
+import { useVisitorHint } from "@/hooks/useVisitorHint";
 import { cn } from "@/lib/cn";
 
 type FormErrors = Record<string, string>;
+
+const CONTACT_EMAIL_BASE = "Please enter a valid email address.";
+const CONTACT_PHONE_MESSAGES = { incomplete: "Please enter a valid phone number, including the complete number.", required: "Phone number is required." };
+
+function without(errors: FormErrors, key: string): FormErrors {
+  const rest = { ...errors };
+  delete rest[key];
+  return rest;
+}
 
 function focusFirstError(errors: FormErrors) {
   const firstKey = Object.keys(errors)[0];
@@ -46,20 +57,51 @@ export function ContactForm() {
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<"idle" | "success" | "error">("idle");
   const [errorMessage, setErrorMessage] = useState("");
+  // Approximate, server-derived country (see src/lib/visitor-hint.ts): only pre-selects the phone country code, while the field is untouched.
+  const hint = useVisitorHint();
 
   // See handleSubmit: the phone validator is loaded on demand, not with the page.
   const waitingForPhoneRef = useRef(false);
   const skipPhoneFormatCheckRef = useRef(false);
 
-  function validateClientSide(isValidPhone: PhoneValidator | null): FormErrors {
+  function validateEmailField(value: string): string | undefined {
+    const result = checkEmail(value);
+    return result.ok ? undefined : emailProblemMessage(result.problem, CONTACT_EMAIL_BASE);
+  }
+
+  /** Validate-on-blur: only for something the visitor has actually typed - an empty field is not complained about until they submit. */
+  function checkEmailOnBlur() {
+    if (!email.trim()) return;
+    const message = validateEmailField(email);
+    setErrors((prev) => (message ? { ...prev, email: message } : prev.email ? without(prev, "email") : prev));
+  }
+
+  function checkPhoneOnBlur(value: string | undefined) {
+    if (!value) return;
+    const run = (errorFor: PhoneErrorFor) => {
+      const message = errorFor(value, CONTACT_PHONE_MESSAGES);
+      setErrors((prev) => (message ? { ...prev, phone: message } : prev.phone ? without(prev, "phone") : prev));
+    };
+    const state = getPhoneValidatorState();
+    if (state.state === "ready") run(state.errorFor);
+    else
+      void loadPhoneValidator().then(() => {
+        const loaded = getPhoneValidatorState();
+        if (loaded.state === "ready") run(loaded.errorFor);
+      });
+  }
+
+  function validateClientSide(phoneErrorFor: PhoneErrorFor | null): FormErrors {
     const e: FormErrors = {};
     if (!firstName.trim()) e.firstName = "First name is required.";
     if (!lastName.trim()) e.lastName = "Last name is required.";
-    if (!isValidEmail(email)) e.email = "Please enter a valid email address.";
+    const emailMessage = validateEmailField(email);
+    if (emailMessage) e.email = emailMessage;
     if (!phone) {
-      e.phone = "Phone number is required.";
-    } else if (isValidPhone && !isValidPhone(phone)) {
-      e.phone = "Please enter a valid phone number, including the complete number.";
+      e.phone = CONTACT_PHONE_MESSAGES.required;
+    } else if (phoneErrorFor) {
+      const phoneMessage = phoneErrorFor(phone, CONTACT_PHONE_MESSAGES);
+      if (phoneMessage) e.phone = phoneMessage;
     }
     if (!subject) e.subject = "Please select a subject.";
     if (message.trim().length < 10) e.message = "Please add a few more details (at least 10 characters).";
@@ -73,12 +115,12 @@ export function ContactForm() {
     // (the phone field loads it on first touch). If it is not (autofill, a very fast submit) wait for it, then submit again so the very same
     // checks run against the latest field values. If it cannot be loaded the client-side format check is skipped and the server decides.
     const phoneState = getPhoneValidatorState();
-    let isValidPhone: PhoneValidator | null;
+    let phoneErrorFor: PhoneErrorFor | null;
     if (phoneState.state === "ready") {
-      isValidPhone = phoneState.isValid;
+      phoneErrorFor = phoneState.errorFor;
     } else if (skipPhoneFormatCheckRef.current) {
       skipPhoneFormatCheckRef.current = false;
-      isValidPhone = null;
+      phoneErrorFor = null;
     } else {
       if (waitingForPhoneRef.current) return;
       waitingForPhoneRef.current = true;
@@ -91,7 +133,7 @@ export function ContactForm() {
       });
       return;
     }
-    const clientErrors = validateClientSide(isValidPhone);
+    const clientErrors = validateClientSide(phoneErrorFor);
     if (Object.keys(clientErrors).length > 0) {
       setErrors(clientErrors);
       focusFirstError(clientErrors);
@@ -204,7 +246,12 @@ export function ContactForm() {
             type="email"
             autoComplete="email"
             value={email}
-            onChange={(e) => setEmail(e.target.value)}
+            onChange={(e) => {
+              setEmail(e.target.value);
+              // Once an error is showing, it clears the moment the address becomes valid (no need to leave the field first).
+              if (errors.email && checkEmail(e.target.value).ok) setErrors((prev) => without(prev, "email"));
+            }}
+            onBlur={checkEmailOnBlur}
             aria-required="true"
             aria-invalid={Boolean(errors.email)}
             aria-describedby={errors.email ? "c-email-error" : undefined}
@@ -215,7 +262,23 @@ export function ContactForm() {
           />
           {errors.email && <FieldError id="c-email-error">{errors.email}</FieldError>}
         </div>
-        <PhoneNumberField id="c-phone" fieldKey="phone" label="Phone" value={phone} onChange={setPhone} error={errors.phone} />
+        <PhoneNumberField
+          id="c-phone"
+          fieldKey="phone"
+          label="Phone"
+          value={phone}
+          onChange={(next) => {
+            setPhone(next);
+            // As with the email: a showing phone error is cleared as soon as the number is acceptable.
+            if (errors.phone) {
+              const state = getPhoneValidatorState();
+              if (state.state === "ready" && next && !state.errorFor(next, CONTACT_PHONE_MESSAGES)) setErrors((prev) => without(prev, "phone"));
+            }
+          }}
+          error={errors.phone}
+          suggestedCountry={hint?.countryCode}
+          onBlurValue={checkPhoneOnBlur}
+        />
         <div id="field-subject" className="sm:col-span-2">
           <label htmlFor="c-subject" className="mb-1.5 block text-xs font-semibold tracking-wide text-[var(--color-navy-700)]">
             Subject <span className="text-[var(--color-gold-600)]">*</span>
@@ -291,6 +354,17 @@ export function ContactForm() {
           "Send Message"
         )}
       </button>
+      {/* A pointer to this site's own Privacy Policy, not a consent claim: nothing here says the visitor agrees to anything, and there is no checkbox. */}
+      <p data-testid="contact-privacy-pointer" className="mt-3 text-xs leading-relaxed text-[var(--color-navy-950)]/70">
+        See our{" "}
+        <Link
+          href="/privacy-policy"
+          className="font-medium text-[var(--color-navy-800)] underline decoration-[var(--color-navy-950)]/30 underline-offset-2 hover:text-[var(--color-gold-600)]"
+        >
+          Privacy Policy
+        </Link>{" "}
+        for how we handle your information.
+      </p>
     </form>
   );
 }

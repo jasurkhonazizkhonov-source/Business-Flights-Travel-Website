@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { cn } from "@/lib/cn";
 import { FieldError } from "@/components/forms/FieldError";
@@ -74,6 +74,8 @@ export function PhoneNumberField({
   onChange,
   error,
   placeholder = "Enter phone number",
+  suggestedCountry,
+  onBlurValue,
 }: {
   /** id of the actual <input> — must be unique on the page (label `htmlFor` targets this). */
   id: string;
@@ -87,8 +89,46 @@ export function PhoneNumberField({
   onChange: (value: string | undefined) => void;
   error?: string;
   placeholder?: string;
+  /**
+   * ISO 3166-1 alpha-2 code of the country the visitor appears to be in (server-derived, approximate - see src/lib/visitor-hint.ts). It pre-selects
+   * that country's calling code, but only while the field is untouched: once the visitor has typed a number or picked a country themselves, a
+   * suggestion that arrives (or changes) later is ignored, so nothing the visitor chose is ever overwritten. With no suggestion the field is
+   * neutral - no country is assumed; the visitor picks one or types a number starting with "+".
+   */
+  suggestedCountry?: string;
+  /** Called with the current value when focus leaves the whole field (number input AND country select), for validate-on-blur. */
+  onBlurValue?: (value: string | undefined) => void;
 }) {
   const errorId = `${id}-error`;
+  // The country in effect once the visitor has made the field their own: the suggestion as it stood at that moment.
+  const [frozen, setFrozen] = useState<{ country: string | undefined } | null>(null);
+  const defaultCountry = (frozen ? frozen.country : suggestedCountry) as React.ComponentProps<typeof PhoneInputRich>["defaultCountry"];
+  // Set when the visitor changes the country while a number is already in the field. The phone input library (international mode) clears the typed
+  // digits when the country changes - the same digits under another calling code would be a different, possibly valid but WRONG number - so the visitor
+  // is told that it happened and can put the previous number back with one click.
+  const [countryNotice, setCountryNotice] = useState<{ text: string; previous: string } | null>(null);
+  const valueRef = useRef(value);
+  useEffect(() => {
+    valueRef.current = value;
+  });
+  // Set by the country <select>, read by the very next onChange (the library reports the reset number right after the change).
+  const countryJustChangedRef = useRef(false);
+
+  function handleChange(next: string | undefined) {
+    if (!frozen && next) setFrozen({ country: suggestedCountry });
+    const changedCountry = countryJustChangedRef.current;
+    countryJustChangedRef.current = false;
+    // A country change keeps its notice; any other edit of the number dismisses it.
+    if (!changedCountry) setCountryNotice(null);
+    onChange(next);
+  }
+
+  function restorePreviousNumber() {
+    if (!countryNotice) return;
+    const previous = countryNotice.previous;
+    setCountryNotice(null);
+    onChange(previous);
+  }
 
   // Mirrors the module the dynamic() call above already points at — this
   // just gives PhoneNumberField its own signal for when that chunk (fetched
@@ -114,7 +154,35 @@ export function PhoneNumberField({
   const warmValidator = () => void loadPhoneValidator();
 
   return (
-    <div id={`field-${fieldKey}`} onFocusCapture={warmValidator} onPointerDownCapture={warmValidator} onTouchStartCapture={warmValidator}>
+    <div
+      id={`field-${fieldKey}`}
+      onFocusCapture={warmValidator}
+      onPointerDownCapture={warmValidator}
+      onTouchStartCapture={warmValidator}
+      // The country <select> is part of the phone control: choosing a country is the visitor making the field theirs, and when a number is
+      // already there the digits now sit under a different country code, so say so.
+      onChangeCapture={(event) => {
+        const target = event.target as HTMLElement;
+        if (target.tagName !== "SELECT") return;
+        if (!frozen) setFrozen({ country: suggestedCountry });
+        const chosen = (target as HTMLSelectElement).value;
+        if (valueRef.current && /^[A-Z]{2}$/.test(chosen) && chosen !== "ZZ") {
+          countryJustChangedRef.current = true;
+          const previous = valueRef.current;
+          let name: string | undefined;
+          try {
+            name = new Intl.DisplayNames(["en"], { type: "region" }).of(chosen);
+          } catch {
+            name = undefined;
+          }
+          setCountryNotice({ text: `Country changed to ${name && name !== chosen ? name : chosen}. The number you had entered was cleared, because it belonged to the previous country code.`, previous: previous! });
+        }
+      }}
+      onBlur={(event) => {
+        // Only when focus really leaves the control, not when it moves between the country select and the number input.
+        if (onBlurValue && !event.currentTarget.contains(event.relatedTarget as Node | null)) onBlurValue(value);
+      }}
+    >
       <label htmlFor={id} className="mb-1.5 block text-xs font-semibold tracking-wide text-[var(--color-navy-700)]">
         {label} {required && <span className="text-[var(--color-gold-600)]">*</span>}
       </label>
@@ -130,9 +198,9 @@ export function PhoneNumberField({
           <PhoneInputRich
             id={id}
             international
-            defaultCountry="US"
+            defaultCountry={defaultCountry}
             value={value}
-            onChange={onChange}
+            onChange={handleChange}
             placeholder={placeholder}
             aria-required={required}
             aria-invalid={Boolean(error)}
@@ -142,7 +210,7 @@ export function PhoneNumberField({
           <PlainPhoneInputFallback
             id={id}
             value={value}
-            onChange={onChange}
+            onChange={handleChange}
             placeholder={placeholder}
             ariaRequired={required}
             ariaInvalid={Boolean(error)}
@@ -152,6 +220,14 @@ export function PhoneNumberField({
       </div>
       {error && (
         <FieldError id={errorId}>{error}</FieldError>
+      )}
+      {countryNotice && (
+        <p role="status" id={`${id}-country-notice`} className="mt-1.5 text-xs text-[var(--color-navy-800)]">
+          {countryNotice.text}{" "}
+          <button type="button" onClick={restorePreviousNumber} className="font-semibold underline underline-offset-2 hover:text-[var(--color-gold-600)]">
+            Restore it
+          </button>
+        </p>
       )}
     </div>
   );

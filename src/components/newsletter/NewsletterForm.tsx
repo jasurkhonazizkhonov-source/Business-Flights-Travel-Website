@@ -7,7 +7,7 @@ import { Loader2 } from "lucide-react";
 import { subscribeToNewsletter } from "@/server/actions/subscribe-newsletter";
 import { ACTION_FAILURE_MESSAGES, ACTION_TIMEOUT_MS, callAction, isNewsletterResult } from "@/lib/safe-action";
 import { cn } from "@/lib/cn";
-import { isValidEmail } from "@/lib/validate";
+import { checkEmail, emailProblemMessage } from "@/lib/validate";
 
 // `idPrefix` must be unique per instance on a page: the home page renders this form twice (the
 // newsletter band and the footer), and fixed ids made the second email field's <label for> point at the
@@ -30,8 +30,9 @@ export function NewsletterForm({ variant = "dark", idPrefix = "newsletter" }: { 
     // FlightRequestForm/ContactForm — catches a malformed address (missing
     // "@", no TLD, etc.) without a round trip to the server, which
     // previously only caught this via subscribeToNewsletter's zod check.
-    if (!isValidEmail(email)) {
-      setError("Please enter a valid email address.");
+    const emailCheck = checkEmail(email);
+    if (!emailCheck.ok) {
+      setError(emailProblemMessage(emailCheck.problem, "Please enter a valid email address."));
       return;
     }
     setError("");

@@ -2,7 +2,7 @@
 
 import { useRef, useState, useTransition } from "react";
 import { m, AnimatePresence } from "framer-motion";
-import { Plus, CheckCircle2, AlertTriangle, Loader2 } from "lucide-react";
+import { Plus, CheckCircle2, AlertTriangle, Loader2, MapPin } from "lucide-react";
 import { PhoneNumberField } from "@/components/forms/PhoneNumberField";
 import { FieldError } from "@/components/forms/FieldError";
 import { SegmentRow, type SegmentState } from "./SegmentRow";
@@ -19,9 +19,12 @@ import type { AirportOption, FlightRequestInput } from "@/lib/validations/flight
 import { TRIP_TYPES, BUDGET_CURRENCIES, DEFAULT_BUDGET_CURRENCY, type BudgetCurrency } from "@/lib/validations/flight-request-options";
 import { cn } from "@/lib/cn";
 import { PRIMARY_CTA_LABEL } from "@/lib/constants";
-import { isValidEmail } from "@/lib/validate";
+import { checkEmail, emailProblemMessage } from "@/lib/validate";
 import { focusFieldError } from "@/lib/focus-field-error";
-import { getPhoneValidatorState, loadPhoneValidator, type PhoneValidator } from "@/lib/phone-validator";
+import { getPhoneValidatorState, loadPhoneValidator, type PhoneErrorFor } from "@/lib/phone-validator";
+import { PAST_MESSAGE, TOO_FAR_MESSAGE, clientDateWindow, dateProblem } from "@/lib/flight-date-window";
+import { useVisitorHint } from "@/hooks/useVisitorHint";
+import { useDeviceAirport } from "@/hooks/useDeviceAirport";
 
 const TRIP_TYPE_LABELS: Record<(typeof TRIP_TYPES)[number], string> = {
   ONE_WAY: "One Way",
@@ -38,6 +41,21 @@ function todayFloor() {
 }
 
 type FormErrors = Record<string, string>;
+
+const FLIGHT_EMAIL_BASE = "Please enter a valid email address so our travel specialist can contact you about your flight request.";
+const FLIGHT_PHONE_MESSAGES = {
+  incomplete: "Please enter a valid phone number, including the complete number, so our travel specialist can reach you.",
+  required: "Phone number is required",
+};
+
+/** Where the first flight's origin came from: nothing yet, an automatic suggestion (approximate network location / the device), or the visitor. */
+type OriginSource = "none" | "approximate" | "device" | "user";
+
+function without(errors: FormErrors, key: string): FormErrors {
+  const rest = { ...errors };
+  delete rest[key];
+  return rest;
+}
 
 export function FlightRequestForm({
   compact = false,
@@ -76,6 +94,8 @@ export function FlightRequestForm({
   // retries inside that one call.
   const [submissionId] = useState(() => globalThis.crypto?.randomUUID?.());
   const [showMore, setShowMore] = useState(false);
+  const [originSource, setOriginSource] = useState<OriginSource>("none");
+  const [hintHandled, setHintHandled] = useState(false);
 
   const [errors, setErrors] = useState<FormErrors>({});
   const [, startTransition] = useTransition();
@@ -102,6 +122,9 @@ export function FlightRequestForm({
   }
 
   function updateSegment(index: number, next: SegmentState) {
+    // Any change the visitor makes to the first origin (choosing an airport, or editing the text away from the current one) makes it theirs:
+    // automatic suggestions never touch it again.
+    if (index === 0 && next.from !== segments[0]?.from) setOriginSource("user");
     setSegments((prev) => prev.map((s, i) => (i === index ? next : s)));
     // Round trip: moving the departure past an already chosen return date would leave a return BEFORE the departure
     // (the calendar cannot offer one, and validation would reject it), so the stale return date is cleared and re-asked.
@@ -119,12 +142,129 @@ export function FlightRequestForm({
 
   const firstDeparture = segments[0]?.departureDate ? new Date(`${segments[0].departureDate}T00:00:00`) : todayFloor();
 
-  function validateClientSide(isValidPhone: PhoneValidator | null): FormErrors {
+  // --- automatic departure-airport suggestions -------------------------------------------------------------------------------------------------
+  // Source 1 (preferred): the device's own position, only when the visitor allows it (a click, or a permission they already granted).
+  // Source 2: the server's approximate, network-derived location. Neither ever replaces an airport the visitor chose: a suggestion is only
+  // placed while the origin is empty or still an earlier suggestion. The one exception is the visitor's own click on "Use my location".
+  function placeSuggestedOrigin(airport: AirportOption, source: "approximate" | "device", force: boolean) {
+    if (!force && originSource === "user") return;
+    if (!force && source === "approximate" && originSource === "device") return; // the device's position outranks the network's estimate
+    if (segments[0]?.to?.iata === airport.iata) return; // never suggest departing from the place the visitor wants to go to
+    setSegments((prev) => prev.map((seg, i) => (i === 0 ? { ...seg, from: airport } : seg)));
+    setOriginSource(source);
+  }
+  const hint = useVisitorHint();
+  if (hint && !hintHandled) {
+    // Adjusting state during render (React's documented pattern for reacting to a value that arrived) - once, when the answer comes in.
+    setHintHandled(true);
+    if (hint.airport && originSource === "none" && !segments[0]?.from) placeSuggestedOrigin(hint.airport, "approximate", false);
+  }
+  const device = useDeviceAirport((airport, how) => placeSuggestedOrigin(airport, "device", how === "requested"));
+
+  const suggestionNote =
+    originSource === "approximate"
+      ? "Suggested from your approximate location. You can change it."
+      : originSource === "device"
+        ? "Suggested from your device's location. You can change it."
+        : "";
+  const locationNote =
+    device.status === "locating"
+      ? "Finding your location"
+      : device.status === "denied"
+        ? "Location access is off. Please type your departure city."
+        : device.status === "timeout" || device.status === "unavailable"
+          ? "We couldn't get your location. Please type your departure city."
+          : device.status === "none-nearby"
+            ? "No major airport found near you. Please type your departure city."
+            : "";
+  const showLocateButton = device.status === "idle" || device.status === "locating" || device.status === "found" || device.status === "timeout" || device.status === "unavailable";
+  const originExtras = {
+    describedBy: suggestionNote ? "origin-suggestion-note" : undefined,
+    labelAction: (
+      <span className="flex items-center gap-2">
+        <span id="origin-suggestion-note" role="status" className="sr-only">
+          {suggestionNote || locationNote}
+        </span>
+        {(originSource === "approximate" || originSource === "device") && (
+          <span aria-hidden="true" className="inline-flex h-4 items-center rounded-full bg-[var(--color-gold-400)]/25 px-2 text-[11px] font-semibold leading-4 text-[var(--color-navy-800)]">
+            Suggested
+          </span>
+        )}
+        {locationNote && device.status !== "locating" && (
+          <span aria-hidden="true" className="text-[11px] leading-4 text-[var(--color-navy-950)]/65">
+            Location unavailable
+          </span>
+        )}
+        {device.status === "unsupported" && (
+          // Server render and the first client render (before the browser's permission state is read): hold the button's place, invisible and out of
+          // the accessibility tree and tab order, so that when it appears (about 300 ms later) the label row does not grow by a line and push the
+          // whole form down. Where the label and the button share one line this changes nothing; between roughly 768 and 1023 px the button wraps
+          // to a second line, which is exactly the 16 px this reserves (measured: layout shift 0.0064 -> 0).
+          <span aria-hidden="true" className="invisible -my-1 inline-flex select-none items-center gap-1 px-1.5 py-1 text-[11px] font-medium leading-4">
+            <MapPin size={12} aria-hidden="true" />
+            Use my location
+          </span>
+        )}
+        {showLocateButton && (
+          <button
+            type="button"
+            onClick={device.request}
+            disabled={device.status === "locating"}
+            aria-label="Use my current location to suggest a departure airport"
+            // Visually as tall as the label text, with a 24px-tall hit area (WCAG 2.5.8): the vertical padding is cancelled by negative margins,
+            // so the label row, and the grid row it sits in, do not grow.
+            className="-my-1 inline-flex items-center gap-1 rounded-full px-1.5 py-1 text-[11px] font-medium leading-4 text-[var(--color-navy-700)] underline decoration-dotted underline-offset-2 hover:text-[var(--color-gold-600)] disabled:opacity-70"
+          >
+            <MapPin size={12} aria-hidden="true" />
+            {device.status === "locating" ? "Locating…" : originSource === "none" ? "Use my location" : null}
+          </button>
+        )}
+      </span>
+    ),
+  };
+
+  const dateWindow = clientDateWindow();
+
+  function validateEmailField(value: string): string | undefined {
+    const result = checkEmail(value);
+    return result.ok ? undefined : emailProblemMessage(result.problem, FLIGHT_EMAIL_BASE);
+  }
+
+  /** Validate-on-blur: only for something the visitor has actually typed - an empty field is not complained about until they submit. */
+  function checkEmailOnBlur() {
+    if (!email.trim()) return;
+    const message = validateEmailField(email);
+    setErrors((prev) => (message ? { ...prev, email: message } : prev.email ? without(prev, "email") : prev));
+  }
+
+  function checkPhoneOnBlur(value: string | undefined) {
+    if (!value) return;
+    const run = (errorFor: PhoneErrorFor) => {
+      const message = errorFor(value, FLIGHT_PHONE_MESSAGES);
+      setErrors((prev) => (message ? { ...prev, phone: message } : prev.phone ? without(prev, "phone") : prev));
+    };
+    const state = getPhoneValidatorState();
+    if (state.state === "ready") run(state.errorFor);
+    else
+      void loadPhoneValidator().then(() => {
+        const loaded = getPhoneValidatorState();
+        if (loaded.state === "ready") run(loaded.errorFor);
+      });
+  }
+
+  function validateClientSide(phoneErrorFor: PhoneErrorFor | null): FormErrors {
     const e: FormErrors = {};
     segments.forEach((s, i) => {
       if (!s.from) e[`segments.${i}.from`] = "Select an origin";
       if (!s.to) e[`segments.${i}.to`] = "Select a destination";
       if (!s.departureDate) e[`segments.${i}.departureDate`] = "Select a date";
+      else {
+        // The same window the server enforces (src/lib/flight-date-window.ts): from today to 11 calendar months after today.
+        const problem = dateProblem(s.departureDate, dateWindow);
+        if (problem === "past") e[`segments.${i}.departureDate`] = PAST_MESSAGE;
+        else if (problem === "too_far") e[`segments.${i}.departureDate`] = TOO_FAR_MESSAGE;
+        else if (problem === "invalid") e[`segments.${i}.departureDate`] = "Enter a valid date";
+      }
       // Mirrors the server's segmentSchema refine (flight-request.ts) so
       // this catches an identical origin/destination instantly instead of
       // only after a round trip to the server — same error message and
@@ -138,16 +278,18 @@ export function FlightRequestForm({
     // the first segment's departureDate.
     if (tripType === "ROUND_TRIP" && returnDate && segments[0]?.departureDate && returnDate < segments[0].departureDate) {
       e.returnDate = "Return date must be on or after the departure date";
+    } else if (tripType === "ROUND_TRIP" && returnDate && dateProblem(returnDate, dateWindow) === "too_far") {
+      e.returnDate = TOO_FAR_MESSAGE;
     }
     if (!firstName.trim()) e.firstName = "First name is required";
     if (!lastName.trim()) e.lastName = "Last name is required";
-    if (!isValidEmail(email)) {
-      e.email = "Please enter a valid email address so our travel specialist can contact you about your flight request.";
-    }
+    const emailMessage = validateEmailField(email);
+    if (emailMessage) e.email = emailMessage;
     if (!phone) {
-      e.phone = "Phone number is required";
-    } else if (isValidPhone && !isValidPhone(phone)) {
-      e.phone = "Please enter a valid phone number, including the complete number, so our travel specialist can reach you.";
+      e.phone = FLIGHT_PHONE_MESSAGES.required;
+    } else if (phoneErrorFor) {
+      const phoneMessage = phoneErrorFor(phone, FLIGHT_PHONE_MESSAGES);
+      if (phoneMessage) e.phone = phoneMessage;
     }
     return e;
   }
@@ -167,12 +309,12 @@ export function FlightRequestForm({
     // (the phone field loads it on first touch). If it is not (autofill, a very fast submit) wait for it, then submit again so the very same
     // checks run against the latest field values. If it cannot be loaded the client-side format check is skipped and the server decides.
     const phoneState = getPhoneValidatorState();
-    let isValidPhone: PhoneValidator | null;
+    let phoneErrorFor: PhoneErrorFor | null;
     if (phoneState.state === "ready") {
-      isValidPhone = phoneState.isValid;
+      phoneErrorFor = phoneState.errorFor;
     } else if (skipPhoneFormatCheckRef.current) {
       skipPhoneFormatCheckRef.current = false;
-      isValidPhone = null;
+      phoneErrorFor = null;
     } else {
       if (waitingForPhoneRef.current) return;
       waitingForPhoneRef.current = true;
@@ -185,7 +327,7 @@ export function FlightRequestForm({
       });
       return;
     }
-    const clientErrors = validateClientSide(isValidPhone);
+    const clientErrors = validateClientSide(phoneErrorFor);
     if (Object.keys(clientErrors).length > 0) {
       setErrors(clientErrors);
       const firstKey = Object.keys(clientErrors)[0];
@@ -303,6 +445,7 @@ export function FlightRequestForm({
               onRemove={() => removeSegment(i)}
               showRemove={tripType === "MULTI_CITY" && segments.length > 2}
               returnDate={i === 0 && tripType === "ROUND_TRIP" ? returnDate : undefined}
+              fromExtras={i === 0 ? originExtras : undefined}
               errors={{
                 from: errors[`segments.${i}.from`],
                 to: errors[`segments.${i}.to`],
@@ -486,7 +629,12 @@ export function FlightRequestForm({
               id="email"
               type="email"
               value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              onChange={(e) => {
+                setEmail(e.target.value);
+                // Once an error is showing, it clears the moment the address becomes valid (no need to leave the field first).
+                if (errors.email && checkEmail(e.target.value).ok) setErrors((prev) => without(prev, "email"));
+              }}
+              onBlur={checkEmailOnBlur}
               autoComplete="email"
               aria-invalid={Boolean(errors.email)}
               aria-describedby={errors.email ? "email-error" : undefined}
@@ -497,7 +645,22 @@ export function FlightRequestForm({
             />
             {errors.email && <FieldError id="email-error">{errors.email}</FieldError>}
           </div>
-          <PhoneNumberField id="phone" label="Phone Number" value={phone} onChange={setPhone} error={errors.phone} />
+          <PhoneNumberField
+            id="phone"
+            label="Phone Number"
+            value={phone}
+            onChange={(next) => {
+              setPhone(next);
+              // As with the email: a showing phone error is cleared as soon as the number is acceptable.
+              if (errors.phone) {
+                const state = getPhoneValidatorState();
+                if (state.state === "ready" && next && !state.errorFor(next, FLIGHT_PHONE_MESSAGES)) setErrors((prev) => without(prev, "phone"));
+              }
+            }}
+            error={errors.phone}
+            suggestedCountry={hint?.countryCode}
+            onBlurValue={checkPhoneOnBlur}
+          />
         </div>
 
         {/* Honeypot — hidden from real visitors via CSS, left in the tab

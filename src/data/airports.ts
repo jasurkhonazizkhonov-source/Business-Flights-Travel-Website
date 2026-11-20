@@ -37,6 +37,7 @@ type AirportTuple = [
 ];
 
 import type { AirportOption } from "@/lib/validations/flight-request";
+import { nearestHub, type HubRow } from "@/lib/airport-suggestion";
 export type { AirportOption };
 
 type AirportIndex = {
@@ -115,6 +116,19 @@ export async function searchAirports(query: string, limit = 8): Promise<AirportO
 // page's initial JavaScript bundle or blocking first paint/interactivity.
 export function prefetchAirports(): void {
   void loadIndex();
+}
+
+// The major commercial airport nearest to an approximate position (null when there is none within MAX_SUGGESTION_KM, or the position is not
+// usable). The candidate list is the small, separately loaded src/data/airport-hubs.json (large-class airports only, see
+// scripts/build-airport-hubs.mjs); the airport's name and city come from the full dataset above, so nothing here is typed in by hand.
+// Used on the server (Cloudflare's approximate position) and in the browser (the device's position, when the visitor allows it - that position
+// never leaves the browser).
+export async function suggestAirportNear(latitude: number, longitude: number): Promise<{ airport: AirportOption; distanceKm: number } | null> {
+  const { default: hubs } = await import("./airport-hubs.json");
+  const near = nearestHub(latitude, longitude, hubs as unknown as HubRow[]);
+  if (!near) return null;
+  const airport = await findAirportByIata(near.iata);
+  return airport ? { airport, distanceKm: near.distanceKm } : null;
 }
 
 // Authoritative single-airport lookup by IATA code. Used server-side

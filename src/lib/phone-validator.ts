@@ -9,22 +9,33 @@
 // has always validated the number again with the same library and the same message - remains the authority.
 
 export type PhoneValidator = (raw: string) => boolean;
-export type PhoneValidatorState = { state: "idle" } | { state: "ready"; isValid: PhoneValidator };
+
+/** What a form says about a number: `undefined` = valid (in the numbering-plan sense - not "reachable", not "owned by the visitor"), else the text to show. */
+export type PhoneErrorFor = (raw: string | undefined, messages: { incomplete: string; required: string }) => string | undefined;
+
+export type PhoneValidatorState = { state: "idle" } | { state: "ready"; isValid: PhoneValidator; errorFor: PhoneErrorFor };
 
 let current: PhoneValidatorState = { state: "idle" };
-let inflight: Promise<PhoneValidator | null> | undefined;
+let inflight: Promise<PhoneValidatorState & { state: "ready" } | null> | undefined;
 
 export function getPhoneValidatorState(): PhoneValidatorState {
   return current;
 }
 
-/** Starts (or joins) the one load. Never rejects: resolves to the validator, or null when it could not be loaded (a later call retries). */
-export function loadPhoneValidator(): Promise<PhoneValidator | null> {
-  if (current.state === "ready") return Promise.resolve(current.isValid);
+/** Starts (or joins) the one load. Never rejects: resolves to the ready state, or null when it could not be loaded (a later call retries). */
+function load(): Promise<(PhoneValidatorState & { state: "ready" }) | null> {
   inflight ??= import("@/lib/phone").then(
     (mod) => {
-      current = { state: "ready", isValid: mod.isValidPhoneNumber };
-      return current.isValid;
+      const ready: PhoneValidatorState & { state: "ready" } = {
+        state: "ready",
+        isValid: (raw) => mod.isValidPhoneNumber(raw),
+        errorFor: (raw, messages) => {
+          const check = mod.checkPhoneNumber(raw ?? "");
+          return check.ok ? undefined : mod.phoneProblemMessage(check, messages.incomplete, messages.required);
+        },
+      };
+      current = ready;
+      return ready;
     },
     () => {
       inflight = undefined; // allow a retry on the next interaction
@@ -32,4 +43,10 @@ export function loadPhoneValidator(): Promise<PhoneValidator | null> {
     },
   );
   return inflight;
+}
+
+/** Starts (or joins) the one load. Never rejects: resolves to the validator, or null when it could not be loaded (a later call retries). */
+export function loadPhoneValidator(): Promise<PhoneValidator | null> {
+  if (current.state === "ready") return Promise.resolve(current.isValid);
+  return load().then((ready) => ready?.isValid ?? null);
 }

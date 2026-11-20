@@ -68,6 +68,14 @@ export default function PrivacyPolicyPage() {
           missing (for example when you use a VPN or a privacy relay). If the information is unavailable, nothing is recorded in its
           place.
         </p>
+        <p>
+          To save you typing, our forms may suggest a phone country code and a departure airport. These suggestions use the same
+          kind of approximate, connection-based location (a country and, where available, the position of your network connection),
+          which our server reads from the request and uses only to make the suggestion; the suggestion itself is not stored. If you
+          choose &quot;Use my location&quot;, your browser asks for your permission first; if you allow it, your device&apos;s
+          position is used in your browser only to find a nearby airport and is not sent to us or stored by us. You can change or
+          ignore any suggestion.
+        </p>
       </LegalSection>
 
       <LegalSection heading="3. How We Use Your Information">

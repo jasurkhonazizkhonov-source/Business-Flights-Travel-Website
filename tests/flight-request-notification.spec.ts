@@ -40,12 +40,12 @@ const BASE: FlightRequestNotificationInput = {
 };
 
 // A request the real zod schema accepts, so schema-level tests change exactly
-// one field at a time. The date is far in the future so "not in the past"
-// never flips this fixture to invalid.
+// one field at a time. The date is a few months ahead - inside the window of today to 11 months from today (src/lib/flight-date-window.ts) - so neither
+// "not in the past" nor "not too far ahead" ever flips this fixture to invalid.
 function validRequest() {
   return {
     tripType: "ONE_WAY" as const,
-    segments: [{ from: JFK, to: CDG, departureDate: "2099-01-01" }],
+    segments: [{ from: JFK, to: CDG, departureDate: new Date(Date.now() + 90 * 86_400_000).toISOString().slice(0, 10) }],
     cabinClass: "BUSINESS" as const,
     adults: 1,
     children: 0,
@@ -648,8 +648,8 @@ test.describe("client-side double-submit guard (duplicate Lead / duplicate notif
   test("handleSubmit returns early on a ref guard, before validation or any submitFlightRequest call", () => {
     const handleSubmitIdx = formSource.indexOf("function handleSubmit(");
     const guardIdx = formSource.indexOf("if (submittingRef.current) return;");
-    // The phone validator is loaded on demand (src/lib/phone-validator.ts), so validation is now called with it: validateClientSide(isValidPhone).
-    const validateIdx = formSource.indexOf("validateClientSide(isValidPhone)", handleSubmitIdx);
+    // The phone validator is loaded on demand (src/lib/phone-validator.ts), so validation is now called with the checker it provides: validateClientSide(phoneErrorFor).
+    const validateIdx = formSource.indexOf("validateClientSide(phoneErrorFor)", handleSubmitIdx);
     const waitIdx = formSource.indexOf("waitingForPhoneRef", handleSubmitIdx);
     expect(handleSubmitIdx).toBeGreaterThan(-1);
     expect(guardIdx).toBeGreaterThan(handleSubmitIdx);
@@ -661,7 +661,7 @@ test.describe("client-side double-submit guard (duplicate Lead / duplicate notif
 
   test("the ref is set only once validation passed, and ALWAYS released in a finally (a failed request must not lock the form)", () => {
     const setIdx = formSource.indexOf("submittingRef.current = true;");
-    const validateIdx = formSource.indexOf("validateClientSide(isValidPhone)");
+    const validateIdx = formSource.indexOf("validateClientSide(phoneErrorFor)");
     const finallyIdx = formSource.indexOf("submittingRef.current = false;");
     expect(setIdx).toBeGreaterThan(validateIdx);
     expect(finallyIdx).toBeGreaterThan(setIdx);

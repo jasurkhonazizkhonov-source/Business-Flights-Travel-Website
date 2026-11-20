@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { checkEmail, emailProblemMessage } from "@/lib/email-validation";
 import { CONTACT_SUBJECT_VALUES, CONTACT_SUBJECT_OPTIONS, type ContactSubject } from "./contact-options";
 
 // Values match the subjects the CRM's POST /api/public/contact-inquiry
@@ -20,8 +21,12 @@ export const contactMessageSchema = z.object({
     .string()
     .trim()
     .min(1, "Email address is required")
-    .email("Please enter a valid email address.")
-    .max(200),
+    .max(200, "Please enter a valid email address. The address is too long.")
+    // The shared rules (src/lib/email-validation.ts), with a specific hint; a subset of what the CRM accepts.
+    .superRefine((value, ctx) => {
+      const result = checkEmail(value);
+      if (!result.ok) ctx.addIssue({ code: "custom", message: emailProblemMessage(result.problem, "Please enter a valid email address.") });
+    }),
   // Presence/shape only — the real phone-number check (via libphonenumber-js)
   // happens in submit-contact-message.ts, matching how the flight request
   // form validates phone (see lib/validations/flight-request.ts).
