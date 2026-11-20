@@ -19,6 +19,8 @@ const INFRASTRUCTURE_SPECS = [
   /form-failure-recovery-e2e\.spec\.ts$/, // standalone server + browser, stub CRM
   /server-action-body-limit-e2e\.spec\.ts$/, // standalone server, raw HTTP
   /vps-deployment\.spec\.ts$/,
+  /docker-topology\.spec\.ts$/, // static checks of the compose files and the rehearsal project (no Docker needed)
+  /visitor-hint-route\.spec\.ts$/, // standalone servers, raw HTTP
 ];
 const VIEWPORT_PROJECTS = ["Desktop Chrome", "Mobile 320", "Mobile 375", "Mobile 390"];
 

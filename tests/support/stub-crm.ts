@@ -24,7 +24,7 @@ const TRIP_TYPES = ["ONE_WAY", "ROUND_TRIP", "MULTI_CITY"];
 const CABINS = ["ECONOMY", "PREMIUM_ECONOMY", "BUSINESS", "FIRST"];
 const SUBJECTS = ["GENERAL_INQUIRY", "FLIGHT_REQUEST_HELP", "EXISTING_BOOKING", "CORPORATE_TRAVEL", "OTHER"];
 
-export type VisitorContext = { state: "absent" | "invalid" | "verified"; ip?: string; city?: string; region?: string; country?: string; timezone?: string; source?: string };
+export type VisitorContext = { state: "absent" | "invalid" | "verified"; reason?: string; ip?: string; city?: string; region?: string; country?: string; timezone?: string; source?: string };
 
 export type RecordedRequest = {
   method: string;
@@ -34,7 +34,7 @@ export type RecordedRequest = {
   json?: Record<string, unknown>;
   /** What the stub answered with. */
   status: number;
-  /** The verified signed visitor context: v1 flight inquiries and contact inquiries. */
+  /** The result of verifying the signing-v2 envelope of this request (flight, contact and newsletter). */
   visitor?: VisitorContext;
 };
 
@@ -76,21 +76,43 @@ function canonical(value: unknown): string {
   return JSON.stringify(value);
 }
 
-function verifyVisitor(headers: Record<string, string>, secret: string | undefined, nowMs: number): VisitorContext {
+/**
+ * Signing v2, verified with code written separately from the website's signer: the canonical message is "CT-WEBSITE-REQUEST-V2" and the length-prefixed fields
+ * METHOD | path | companyId | ts | nonce | SHA-256(body bytes) | context header; the nonce is accepted once; at most 120 s old and 30 s ahead.
+ */
+function verifyVisitor(
+  headers: Record<string, string>,
+  secret: string | undefined,
+  nowMs: number,
+  what: { method: string; path: string; companyId: string; bodyText: string },
+  nonces: Set<string>,
+): VisitorContext {
   const context = headers["x-ct-visitor-context"];
   const signature = headers["x-ct-visitor-signature"];
   if (!context && !signature) return { state: "absent" };
-  if (!context || !signature || !secret) return { state: "invalid" };
-  const expected = createHmac("sha256", secret).update(context).digest();
-  const given = Buffer.from(signature, "hex");
-  if (given.length !== expected.length || !timingSafeEqual(given, expected)) return { state: "invalid" };
+  const invalid = (reason: string): VisitorContext => ({ state: "invalid", reason });
+  if (!context || !signature || !secret) return invalid("malformed");
   let payload: Record<string, unknown>;
   try {
     payload = JSON.parse(Buffer.from(context, "base64url").toString("utf8"));
   } catch {
-    return { state: "invalid" };
+    return invalid("malformed");
   }
-  if (payload.v !== 1 || typeof payload.ts !== "number" || Math.abs(nowMs / 1000 - payload.ts) > 300) return { state: "invalid" };
+  if (payload.v !== 2) return invalid("unsupported_version");
+  if (typeof payload.ts !== "number" || !Number.isInteger(payload.ts)) return invalid("malformed");
+  if (typeof payload.nonce !== "string" || !/^[A-Za-z0-9_-]{22,64}$/.test(payload.nonce)) return invalid("bad_nonce");
+  const bodyHash = createHash("sha256").update(Buffer.from(what.bodyText, "utf8")).digest("hex");
+  const fields = [what.method.toUpperCase(), what.path, what.companyId, String(payload.ts), payload.nonce, bodyHash, context];
+  const message = "CT-WEBSITE-REQUEST-V2\n" + fields.map((x) => Buffer.byteLength(x, "utf8") + ":" + x).join("\n");
+  const expected = createHmac("sha256", secret).update(message).digest();
+  const given = Buffer.from(signature, "hex");
+  if (given.length !== expected.length || !timingSafeEqual(given, expected)) return invalid("bad_signature");
+  const age = nowMs / 1000 - payload.ts;
+  if (age > 120) return invalid("expired");
+  if (-age > 30) return invalid("future");
+  const key = what.companyId + ":" + payload.nonce;
+  if (nonces.has(key)) return invalid("replay");
+  nonces.add(key);
   const str = (v: unknown) => (typeof v === "string" ? v : undefined);
   const city = str(payload.city);
   return { state: "verified", ip: str(payload.ip), city: city === undefined ? undefined : decodeURIComponent(city), region: str(payload.region), country: str(payload.country), timezone: str(payload.timezone), source: str(payload.source) };
@@ -145,6 +167,8 @@ export async function startStubCrm(options: { apiKey: string; companyId?: string
   // Contact inquiries keyed like the CRM's contact route: by the optional `submissionId`, with the same message required for a repeat.
   const inquiries = new Map<string, { fingerprint: string; id: string }>();
   let unkeyedInquiries = 0;
+  // One-time nonces the stand-in has accepted (the real CRM keeps them in a shared table); cleared by reset().
+  const nonces = new Set<string>();
   const scripts: Array<{ response: Scripted; remaining: number; path?: string }> = [];
   const sockets = new Set<import("node:net").Socket>();
 
@@ -190,6 +214,9 @@ export async function startStubCrm(options: { apiKey: string; companyId?: string
         if (!/^application\/json(\s*;.*)?$/i.test(headers["content-type"] ?? "")) return fail(415, "unsupported_media_type", "Content-Type must be application/json.");
         const key = (headers["idempotency-key"] ?? "").trim();
         if (!/^[A-Za-z0-9._-]{8,200}$/.test(key)) return fail(400, "idempotency_key_required", "Send an Idempotency-Key header.");
+        // Signing v2 (bound to method, path, the credential's company and the exact body): required whenever the CRM has a secret; no unsigned or v1 fallback.
+        record.visitor = verifyVisitor(headers, options.ingestSecret, Date.now(), { method: req.method ?? "", path, companyId: options.companyId ?? "test-company", bodyText }, nonces);
+        if (options.ingestSecret && record.visitor.state !== "verified") return fail(401, "invalid_signature", "The request signature is missing or invalid.");
         let json: unknown;
         try {
           json = JSON.parse(bodyText);
@@ -200,7 +227,6 @@ export async function startStubCrm(options: { apiKey: string; companyId?: string
         record.json = json as Record<string, unknown>;
         const issues = validateFlightBody(record.json);
         if (issues.length) return fail(400, "validation_failed", "The request did not pass validation.", issues);
-        record.visitor = verifyVisitor(headers, options.ingestSecret, Date.now());
         const hash = createHash("sha256").update(canonical(record.json)).digest("hex");
         const existing = leads.get(key);
         if (!existing) {
@@ -222,7 +248,6 @@ export async function startStubCrm(options: { apiKey: string; companyId?: string
       record.json = json;
       if (path === "/api/public/contact-inquiry") {
         // The CRM's contact route reads the visitor's IP/location ONLY from a verified signed context (its connection is this website's server).
-        record.visitor = verifyVisitor(headers, options.ingestSecret, Date.now());
         const ok =
           json?.companyId === (options.companyId ?? "test-company") &&
           typeof json.firstName === "string" && json.firstName.length > 0 &&
@@ -231,6 +256,8 @@ export async function startStubCrm(options: { apiKey: string; companyId?: string
           SUBJECTS.includes(json.subject as string) &&
           typeof json.message === "string" && json.message.length >= 1 && json.message.length <= 5000;
         if (!ok) return send(400, { ok: false, error: "Invalid submission" });
+        record.visitor = verifyVisitor(headers, options.ingestSecret, Date.now(), { method: req.method ?? "", path, companyId: String(json?.companyId), bodyText }, nonces);
+        if (options.ingestSecret && record.visitor.state !== "verified") return send(401, { ok: false, error: "Invalid request signature." });
         const key = json?.submissionId;
         if (key === undefined) {
           unkeyedInquiries++;
@@ -250,6 +277,8 @@ export async function startStubCrm(options: { apiKey: string; companyId?: string
       if (path === "/api/public/subscribe") {
         const ok = json?.companyId === (options.companyId ?? "test-company") && typeof json.email === "string" && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(json.email);
         if (!ok) return send(400, { ok: false, error: "Invalid submission" });
+        record.visitor = verifyVisitor(headers, options.ingestSecret, Date.now(), { method: req.method ?? "", path, companyId: String(json?.companyId), bodyText }, nonces);
+        if (options.ingestSecret && record.visitor.state !== "verified") return send(401, { ok: false, error: "Invalid request signature." });
         return send(200, { ok: true });
       }
       return fail(404, "not_found", "Not found.");
@@ -274,6 +303,7 @@ export async function startStubCrm(options: { apiKey: string; companyId?: string
       leads.clear();
       inquiries.clear();
       unkeyedInquiries = 0;
+      nonces.clear();
       scripts.length = 0;
     },
     close: () =>

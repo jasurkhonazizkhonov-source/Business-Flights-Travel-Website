@@ -27,8 +27,8 @@ container to PostgreSQL.
 
 | Item | Value (reported from the VPS on 2026-10-16; **not re-checked by this branch**) |
 |---|---|
-| Host | OVH VPS, Ubuntu 26.04.1, `51.161.102.115`; public ports 80/443 closed |
-| CRM Compose project | `compass-tools` (`/home/ubuntu/apps/Compass-Tools/compose.yaml`) — and, for the API, the release checkout `~/apps/Compass-Tools-release` |
+| Host | OVH VPS, Ubuntu 26.04.1 (the address is deliberately not written in this public repository: the owner has it); public ports 80/443 closed |
+| CRM Compose project | `compass-tools` (`~/apps/Compass-Tools/compose.yaml`) — and, for the API, the release checkout `~/apps/Compass-Tools-release` |
 | Tunnel | remotely managed; ingress `compass-tools.com` → `http://app:3000`, then a catch-all HTTP 404 |
 
 The compose layout of the live CRM stack differs from the repository's (see the CRM's own notes on the live stack versus Git compose). The website

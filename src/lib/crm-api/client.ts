@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { CrmApiConfig } from "./config";
+import type { RequestSigner } from "./visitor-context";
 
 // HTTP client for the Compass Tools CRM, used only by the website's SERVER ACTIONS (never imported by a client component; the one place that
 // reads the environment is src/server/crm-api.ts). It takes its configuration and `fetch` as arguments so every outcome can be tested against
@@ -23,6 +24,7 @@ import type { CrmApiConfig } from "./config";
 
 export const DEFAULT_TIMEOUT_MS = 10_000;
 export const DEFAULT_FLIGHT_ATTEMPTS = 3;
+const FLIGHT_PATH = "/api/v1/website/flight-inquiries";
 const BACKOFF_MS = [1_000, 2_000, 4_000, 8_000];
 const MAX_RETRY_AFTER_MS = 5_000;
 
@@ -71,8 +73,11 @@ export async function postFlightInquiry(
     config: CrmApiConfig;
     body: unknown;
     idempotencyKey: string;
-    /** x-ct-visitor-context / x-ct-visitor-signature (src/lib/crm-api/visitor-context.ts), or {}. */
-    visitorHeaders?: Record<string, string>;
+    /**
+     * Signs each ATTEMPT (signing v2, src/lib/crm-api/visitor-context.ts): a fresh timestamp and a fresh one-time nonce bound to this method, path, company and
+     * the exact body bytes. Absent only when no LEAD_INGEST_SECRET is configured. A retry is signed again; the unchanged Idempotency-Key makes it a duplicate.
+     */
+    sign?: RequestSigner;
     maxAttempts?: number;
   },
 ): Promise<FlightInquiryOutcome> {
@@ -81,15 +86,14 @@ export async function postFlightInquiry(
   const sleep = options.sleep ?? defaultSleep;
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const maxAttempts = Math.max(1, options.maxAttempts ?? DEFAULT_FLIGHT_ATTEMPTS);
-  const url = `${config.baseUrl}/api/v1/website/flight-inquiries`;
+  const url = `${config.baseUrl}${FLIGHT_PATH}`;
   // Serialised ONCE: every attempt sends exactly the same bytes.
   const payload = JSON.stringify(options.body);
-  const headers: Record<string, string> = {
+  const baseHeaders: Record<string, string> = {
     "Content-Type": "application/json",
     Accept: "application/json",
     Authorization: `Bearer ${config.apiKey ?? ""}`,
     "Idempotency-Key": idempotencyKey,
-    ...(options.visitorHeaders ?? {}),
   };
 
   let last: Extract<FlightInquiryOutcome, { status: "unavailable" }>["reason"] = "network";
@@ -98,6 +102,8 @@ export async function postFlightInquiry(
     let wait = BACKOFF_MS[Math.min(attempt - 1, BACKOFF_MS.length - 1)];
     let res: Response | undefined;
     try {
+      // Signed afresh for every attempt: the CRM accepts each nonce once.
+      const headers = { ...baseHeaders, ...(options.sign?.({ method: "POST", path: FLIGHT_PATH, companyId: config.companyId ?? "", body: payload }) ?? {}) };
       res = await fetchImpl(url, { method: "POST", headers, body: payload, signal: AbortSignal.timeout(timeoutMs), redirect: "error", cache: "no-store" });
     } catch (err) {
       const name = (err as { name?: string } | null)?.name;
@@ -149,14 +155,17 @@ export type PublicOutcome =
 
 const publicOkSchema = z.object({ ok: z.literal(true), duplicate: z.boolean().optional() });
 
-async function postPublic(options: Common & { config: CrmApiConfig; path: string; body: unknown; visitorHeaders?: Record<string, string> }): Promise<PublicOutcome> {
+async function postPublic(options: Common & { config: CrmApiConfig; path: string; body: unknown; sign?: RequestSigner }): Promise<PublicOutcome> {
   const fetchImpl: FetchLike = options.fetchImpl ?? ((input, init) => fetch(input, init));
+  // Serialised once; the signature covers exactly these bytes, this method, this path and the company in them (signing v2).
+  const payload = JSON.stringify(options.body);
   let res: Response;
   try {
+    const signed = options.sign?.({ method: "POST", path: options.path, companyId: options.config.companyId ?? "", body: payload }) ?? {};
     res = await fetchImpl(`${options.config.baseUrl}${options.path}`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", Accept: "application/json", ...(options.visitorHeaders ?? {}) },
-      body: JSON.stringify(options.body),
+      headers: { "Content-Type": "application/json", Accept: "application/json", ...signed },
+      body: payload,
       signal: AbortSignal.timeout(options.timeoutMs ?? DEFAULT_TIMEOUT_MS),
       redirect: "error",
       cache: "no-store",
@@ -186,14 +195,14 @@ export function postContactInquiry(
   options: Common & {
     config: CrmApiConfig;
     body: { firstName: string; lastName: string; email: string; phone: string; subject: string; message: string; submissionId?: string };
-    /** x-ct-visitor-context / x-ct-visitor-signature (src/lib/crm-api/visitor-context.ts), or {}: the visitor's IP and approximate location, signed. */
-    visitorHeaders?: Record<string, string>;
+    /** Signing v2 for this one attempt (src/lib/crm-api/visitor-context.ts): binds the method, path, company and exact body, and carries the visitor's IP and location. */
+    sign?: RequestSigner;
   },
 ): Promise<PublicOutcome> {
   return postPublic({ ...options, path: "/api/public/contact-inquiry", body: { companyId: options.config.companyId, ...options.body } });
 }
 
 /** POST /api/public/subscribe. One attempt. */
-export function postNewsletterSubscription(options: Common & { config: CrmApiConfig; email: string; source: string }): Promise<PublicOutcome> {
+export function postNewsletterSubscription(options: Common & { config: CrmApiConfig; email: string; source: string; sign?: RequestSigner }): Promise<PublicOutcome> {
   return postPublic({ ...options, path: "/api/public/subscribe", body: { companyId: options.config.companyId, email: options.email, source: options.source } });
 }

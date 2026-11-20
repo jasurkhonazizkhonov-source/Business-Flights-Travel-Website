@@ -154,20 +154,32 @@ in either order (until the CRM is updated a resent message may still be stored t
 Body: `{ companyId, email, source: "website" }`. The CRM upserts the subscriber (an address that unsubscribed earlier is re-subscribed) and notifies
 staff about a new one. One attempt.
 
-## Visitor IP and approximate location
+## Request signature v2 and the visitor IP / approximate location
 
-The CRM sees the website's server, not the visitor, so it records an IP and location only from a **signed visitor context** built by the website
-(`src/lib/crm-api/visitor-context.ts`) from what the website itself observed (`src/lib/submission-info.ts`: Cloudflare's headers behind the
-tunnel — never a form field, never the visitor's own `X-Forwarded-For`):
+Every request to the CRM (flight inquiry, contact inquiry, newsletter sign-up) is signed with **signing v2** whenever `LEAD_INGEST_SECRET` is configured
+(`src/lib/crm-api/visitor-context.ts`; the CRM's verifier is `src/server/website-request-signature.ts`, specified in the CRM's `docs/WEBSITE_LEAD_API.md`).
+The earlier v1 context vouched only for the visitor fields and bound nothing else; v2 binds the HTTP method, the request path, the company, the exact body bytes,
+a timestamp and a one-time nonce, and the CRM accepts each nonce once:
 
 ```
-x-ct-visitor-context:   base64url( JSON { v: 1, ts: <unix seconds>, ip?, city?, region?, country?, timezone? } )
-x-ct-visitor-signature: hex( HMAC-SHA256( LEAD_INGEST_SECRET, <the context header value exactly as sent> ) )
+x-ct-visitor-context:   base64url( JSON { v: 2, ts: <unix seconds>, nonce, ip?, city?, region?, country?, timezone?, source? } )
+x-ct-visitor-signature: hex( HMAC-SHA256( LEAD_INGEST_SECRET, canonicalMessage ) )
+canonicalMessage = "CT-WEBSITE-REQUEST-V2" LF then the fields METHOD | path | companyId | ts | nonce | SHA-256(exact body bytes) | the context header value,
+                   each written as <UTF-8 byte length>:<field> (length-prefixed, so no field can change where another begins)
 ```
 
-Sent only when `LEAD_INGEST_SECRET` (≥ 32 characters, identical to the CRM's) is configured. The CRM accepts it for 5 minutes, rejects a bad
-signature or a private/reserved IP, and otherwise creates the lead with **no** IP and location. `country`/`region` are sent as codes and `city`
-percent-encoded, because the CRM re-reads the context as Vercel-style header values.
+* **Every attempt is signed afresh** (new `ts`, new nonce). A flight retry re-signs and keeps the same `Idempotency-Key` and the same body bytes, so the CRM
+  answers `duplicate` instead of creating a second lead; the contact message's `submissionId` does the same for a visitor's resend.
+* The visitor IP and location are inside the signed context and come only from what this server observed (`src/lib/submission-info.ts`: Cloudflare's headers
+  behind the tunnel; never a form field, never the visitor's own `X-Forwarded-For`). `country`/`region` are codes and `city` is percent-encoded. When nothing was
+  observed the request is still signed and carries no visitor facts. The newsletter call also carries the visitor IP, **only** so the CRM can rate-limit that public
+  route per visitor; the CRM stores no subscriber IP.
+* **Set the secret on both sides together.** A CRM that has `LEAD_INGEST_SECRET` **refuses unsigned requests** (the visitor sees the generic failure message, nothing is
+  stored); a CRM without it records no visitor IP or location and accepts unsigned requests as before. The flight call also needs `CRM_COMPANY_ID` (the CRM's
+  `WEBSITE_API_COMPANY_ID`) once a secret is set, because the signature binds the company.
+* The two servers' clocks must agree: the CRM accepts a timestamp at most 120 seconds old and 30 seconds ahead (keep both on NTP).
+* **Deployment order:** the CRM first (a build that has v2, with its secret set), the website second. The signing code is in the website release; a website
+  signing v2 against a CRM that predates it would be refused or ignored, which is why the CRM update comes first. See `docs/WEBSITE_VPS_DEPLOYMENT_AND_ROLLBACK_RUNBOOK.md`.
 
 ## Configuration
 

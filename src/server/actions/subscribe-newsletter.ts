@@ -6,6 +6,8 @@ import { rateLimitClientKey } from "@/lib/rate-limit-client";
 import { newsletterSchema, type NewsletterInput } from "@/lib/validations/newsletter";
 import { postNewsletterSubscription } from "@/lib/crm-api/client";
 import { crmApiConfig } from "@/server/crm-api";
+import { captureSubmissionInfo } from "@/lib/submission-info";
+import { createRequestSigner } from "@/lib/crm-api/visitor-context";
 
 export type SubscribeNewsletterResult = { ok: true; alreadySubscribed: boolean } | { ok: false; error: string };
 
@@ -42,7 +44,12 @@ export async function subscribeToNewsletter(input: NewsletterInput): Promise<Sub
   const api = crmApiConfig("public-inquiry", "newsletter");
   if (!api.ok) return { ok: false, error: "We're sorry, something went wrong. Please try again." };
 
-  const outcome = await postNewsletterSubscription({ config: api.config, email: parsed.data.email, source: "website" });
+  // Signed like the other two calls (signing v2: method, path, company, exact body, one-time nonce). The visitor IP this server observed travels inside the signed
+  // context ONLY so the CRM can apply a per-visitor rate limit to this public route (its own limiter cannot see the visitor behind the website's server); the CRM
+  // stores no subscriber IP.
+  const { info: submissionInfo } = captureSubmissionInfo(headerList);
+  const sign = createRequestSigner(submissionInfo, api.config.ingestSecret);
+  const outcome = await postNewsletterSubscription({ config: api.config, email: parsed.data.email, source: "website", sign });
   if (outcome.status === "ok") return { ok: true, alreadySubscribed: false };
 
   switch (outcome.status) {

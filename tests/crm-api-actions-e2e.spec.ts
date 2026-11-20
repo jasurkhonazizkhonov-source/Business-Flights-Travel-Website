@@ -307,7 +307,8 @@ test.describe("the forms against a configured website and a stand-in CRM (produc
 
   test("contact: no trusted client IP (only forged forwarding headers, an invalid or a private value) -> the inquiry succeeds, with NO IP in the context and nothing substituted", async () => {
     const forged = await contactVisitor({ "X-Forwarded-For": "8.8.8.8", "X-Real-IP": "8.8.4.4", Forwarded: "for=1.1.1.1" });
-    expect(forged.v.state).toBe("absent"); // nothing at all to sign: no IP, no location
+    expect(forged.v.state).toBe("verified"); // the REQUEST is signed (signing v2) ...
+    expect([forged.v.ip, forged.v.city, forged.v.region, forged.v.country, forged.v.timezone]).toEqual([undefined, undefined, undefined, undefined, undefined]); // ... but carries no visitor facts: no IP, no location
     expect(JSON.stringify(forged.r)).not.toMatch(/8\.8\.8\.8|8\.8\.4\.4|1\.1\.1\.1/);
     for (const bad of ["not-an-ip", "10.0.0.5", "127.0.0.1", "fe80::1", "999.1.1.1"]) {
       const v = (await contactVisitor(cf({ "CF-Connecting-IP": bad, "CF-IPCountry": "DE" }), {})).v;
@@ -321,6 +322,128 @@ test.describe("the forms against a configured website and a stand-in CRM (produc
     expect(v.ip).toBe("203.0.113.31");
     expect(v.city).toBeUndefined();
     expect(JSON.stringify(r)).not.toMatch(/6\.6\.6\.|Atlantis|Mars|Nowhere/);
+  });
+
+  // ---- flight request: the same IP / location guarantees as the contact form (it uses the same capture and the same signature) -----------------------
+  const flightVisitor = async (headers: Record<string, string>, over: Record<string, unknown> = {}) => {
+    crm.reset();
+    const text = await call("submitFlightRequest", [flightInput(over)], headers);
+    expect(text, "the flight request itself must still succeed").toMatch(/"ok":true/);
+    const r = crm.requests.find((x) => x.path === "/api/v1/website/flight-inquiries")!;
+    return { r, v: r.visitor! };
+  };
+
+  test("flight request: IPv6 in full and compressed notation is preserved (canonical form), IPv4-mapped collapses to IPv4, Pseudo-IPv4 is replaced by the real IPv6", async () => {
+    expect((await flightVisitor(cf({ "CF-Connecting-IP": "2001:4860:4860:0:0:0:0:8888", "CF-IPCountry": "US" }))).v.ip).toBe("2001:4860:4860::8888");
+    expect((await flightVisitor(cf({ "CF-Connecting-IP": "2A00:1450:4001:081B:0000:0000:0000:200E" }))).v.ip).toBe("2a00:1450:4001:81b::200e");
+    expect((await flightVisitor(cf({ "CF-Connecting-IP": "::ffff:203.0.113.9" }))).v.ip).toBe("203.0.113.9");
+    expect((await flightVisitor(cf({ "CF-Connecting-IP": "240.0.0.7", "CF-Connecting-IPv6": "2606:4700:4700::1111" }))).v.ip).toBe("2606:4700:4700::1111");
+    const { r, v } = await flightVisitor(cf({ "CF-Connecting-IP": "2001:4860:4860::8888", "CF-IPCountry": "US", "CF-IPCity": "Mountain View", "CF-Region-Code": "CA", "CF-Timezone": "America/Los_Angeles" }));
+    expect(v).toMatchObject({ state: "verified", ip: "2001:4860:4860::8888", country: "US", city: "Mountain View", region: "CA", timezone: "America/Los_Angeles", source: "cloudflare" });
+    expect(r.bodyText).not.toMatch(/2001:4860/); // only inside the signed context, never in the body
+  });
+
+  test("flight request: incomplete or absent location keeps what exists and invents nothing; unknown country markers are dropped", async () => {
+    const partial = (await flightVisitor(cf({ "CF-Connecting-IP": "203.0.113.20", "CF-IPCountry": "GB" }))).v;
+    expect(partial).toMatchObject({ state: "verified", ip: "203.0.113.20", country: "GB", source: "cloudflare" });
+    expect([partial.city, partial.region]).toEqual([undefined, undefined]);
+    const none = (await flightVisitor(cf({ "CF-Connecting-IP": "203.0.113.21" }))).v;
+    expect(none).toMatchObject({ state: "verified", ip: "203.0.113.21" });
+    expect([none.city, none.region, none.country, none.timezone, none.source]).toEqual([undefined, undefined, undefined, undefined, undefined]);
+    for (const marker of ["XX", "T1"]) expect((await flightVisitor(cf({ "CF-Connecting-IP": "203.0.113.22", "CF-IPCountry": marker }))).v.country, marker).toBeUndefined();
+  });
+
+  test("flight request: only forged, invalid or private addresses -> the request succeeds and is signed, with NO IP in the context and nothing substituted", async () => {
+    const forged = await flightVisitor({ "X-Forwarded-For": "8.8.8.8", "X-Real-IP": "8.8.4.4", Forwarded: "for=1.1.1.1" });
+    expect(forged.v.state).toBe("verified");
+    expect([forged.v.ip, forged.v.city, forged.v.country]).toEqual([undefined, undefined, undefined]);
+    expect(JSON.stringify(forged.r)).not.toMatch(/8\.8\.8\.8|8\.8\.4\.4|1\.1\.1\.1/);
+    for (const bad of ["not-an-ip", "10.0.0.5", "172.17.0.2", "127.0.0.1", "fe80::1", "999.1.1.1"]) {
+      const v = (await flightVisitor(cf({ "CF-Connecting-IP": bad, "CF-IPCountry": "DE" }))).v;
+      expect(v.ip, bad).toBeUndefined(); // an invalid or internal (Docker/private) address is "unavailable", never stored as the visitor
+      expect(v.country, bad).toBe("DE");
+    }
+  });
+
+  test("flight request: an ip / location field in the submitted data is ignored", async () => {
+    const { r, v } = await flightVisitor(cf({ "CF-Connecting-IP": "203.0.113.31" }), { ipAddress: "6.6.6.6", ip: "6.6.6.7", city: "Atlantis", country: "Mars", location: { city: "Nowhere" } });
+    expect(v.ip).toBe("203.0.113.31");
+    expect(v.city).toBeUndefined();
+    expect(JSON.stringify(r)).not.toMatch(/6\.6\.6\.|Atlantis|Mars|Nowhere/);
+  });
+
+  // ---- the new field rules, checked by the server itself (a caller that skips the browser's checks still gets them) ---------------------------------
+  const fieldErrors = (text: string): Record<string, string> => {
+    const match = /"fieldErrors":(\{[^}]*\})/.exec(text);
+    return match ? (JSON.parse(match[1]) as Record<string, string>) : {};
+  };
+  const isoPlus = (days: number) => new Date(Date.now() + days * 86_400_000).toISOString().slice(0, 10);
+
+  test("flight request: the 11-month limit - the last day is accepted, the next is refused before the CRM, at the departure and at the return", async () => {
+    // The server accepts the widest window any time zone could produce (see src/lib/flight-date-window.ts): up to 11 calendar months after the date at UTC+14.
+    const { serverDateWindow } = await import("../src/lib/flight-date-window");
+    const { min, max } = serverDateWindow();
+    const dayAfter = (iso: string) => new Date(Date.parse(`${iso}T00:00:00Z`) + 86_400_000).toISOString().slice(0, 10);
+    const dayBefore = (iso: string) => new Date(Date.parse(`${iso}T00:00:00Z`) - 86_400_000).toISOString().slice(0, 10);
+
+    expect(await call("submitFlightRequest", [flightInput({ tripType: "ONE_WAY", returnDate: undefined, segments: [{ from: JFK, to: CDG, departureDate: max }] })])).toMatch(/"ok":true/);
+    expect(crm.leadCount()).toBe(1);
+    crm.reset();
+
+    const tooFar = await call("submitFlightRequest", [flightInput({ tripType: "ONE_WAY", returnDate: undefined, segments: [{ from: JFK, to: CDG, departureDate: dayAfter(max) }] })]);
+    expect(tooFar).toMatch(/"ok":false/);
+    expect(fieldErrors(tooFar)["segments.0.departureDate"]).toBe("Flights can be requested up to 11 months ahead. Please choose an earlier date.");
+
+    const returnOnLimit = await call("submitFlightRequest", [flightInput({ segments: [{ from: JFK, to: CDG, departureDate: isoPlus(30) }], returnDate: max })]);
+    expect(returnOnLimit).toMatch(/"ok":true/);
+    crm.reset();
+    const returnTooFar = await call("submitFlightRequest", [flightInput({ segments: [{ from: JFK, to: CDG, departureDate: isoPlus(30) }], returnDate: dayAfter(max) })]);
+    expect(fieldErrors(returnTooFar)["returnDate"]).toBe("Flights can be requested up to 11 months ahead. Please choose an earlier date.");
+
+    expect(await call("submitFlightRequest", [flightInput({ tripType: "ONE_WAY", returnDate: undefined, segments: [{ from: JFK, to: CDG, departureDate: min }] })])).toMatch(/"ok":true/);
+    crm.reset();
+    const past = await call("submitFlightRequest", [flightInput({ tripType: "ONE_WAY", returnDate: undefined, segments: [{ from: JFK, to: CDG, departureDate: dayBefore(min) }] })]);
+    expect(fieldErrors(past)["segments.0.departureDate"]).toBe("Departure date cannot be in the past");
+    expect(crm.requests).toHaveLength(0);
+  });
+
+  test("flight request: an email that is not an address is refused field by field, with a hint, before the CRM", async () => {
+    for (const [email, hint] of [["zelda.q@example", "needs a dot"], ["zelda q@example.org", "Remove any spaces"], ["zelda..q@example.org", "two dots in a row"], ["@example.org", "Add the part before the @"]] as const) {
+      const text = await call("submitFlightRequest", [flightInput({ email })]);
+      expect(text, email).toMatch(/"ok":false/);
+      expect(fieldErrors(text).email, email).toContain(hint);
+    }
+    expect(crm.requests).toHaveLength(0);
+    // surrounding whitespace is the one thing that is tolerated (trimmed); the address is otherwise sent exactly as typed
+    expect(await call("submitFlightRequest", [flightInput({ email: "  Zelda.Q+trip@Example.org " })])).toMatch(/"ok":true/);
+    expect(crm.requests[0].json).toMatchObject({ email: "Zelda.Q+trip@Example.org" });
+  });
+
+  test("flight request and contact message: a phone number that is not valid is refused field by field with its own message, before the CRM", async () => {
+    const cases: [string, RegExp][] = [
+      ["+14155552", /complete number/], // too short
+      ["+1415555267112345", /too many digits/],
+      ["+999123456789", /country code/],
+      ["+44207946095", /valid phone number for/], // plausible length, not a number the plan allows
+      ["+1 4155552671 ext", /digits, spaces, dashes and brackets/],
+    ];
+    for (const [phone, message] of cases) {
+      const flight = await call("submitFlightRequest", [flightInput({ phone })]);
+      expect(fieldErrors(flight).phone, `flight ${phone}`).toMatch(message);
+      const contact = await call("submitContactMessage", [contactInput({ phone })]);
+      expect(fieldErrors(contact).phone, `contact ${phone}`).toMatch(message);
+    }
+    expect(crm.requests).toHaveLength(0);
+    // a valid number from another country is normalised to E.164 for the CRM
+    expect(await call("submitFlightRequest", [flightInput({ phone: "+49 30 123456" })])).toMatch(/"ok":true/);
+    expect(crm.requests[0].json).toMatchObject({ phone: "+4930123456" });
+  });
+
+  test("contact message: an invalid email is refused with the same rules", async () => {
+    const text = await call("submitContactMessage", [contactInput({ email: "zelda@@example.org" })]);
+    expect(text).toMatch(/"ok":false/);
+    expect(fieldErrors(text).email).toContain("only contain one @");
+    expect(crm.requests).toHaveLength(0);
   });
 
   test("contact: a resend of the same message from another network is still ONE inquiry; a CRM failure gives the visitor the generic message with no IP in it", async () => {
@@ -481,5 +604,103 @@ test.describe("the CRM settings are missing: friendly errors, the operator is to
     expect(logs).toContain("[crm-api] newsletter: CRM_COMPANY_ID is not set");
     expect(logs.split("flight request: CRM_API_KEY is not set")).toHaveLength(2); // exactly once
     for (const needle of NEEDLES) expect(logs, needle).not.toContain(needle);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------------------------------------------
+// Wrong (but present) settings against a REACHABLE CRM, and a CRM hostname that does not resolve. The website cannot know which of its settings is
+// wrong; what it must do is fail explicitly and safely: a generic message for the visitor, never a false success, one attempt, nothing sensitive in the log,
+// and the server stays healthy afterwards.
+const OTHER_INGEST = "other-ingest-" + "abcdef0123456789".repeat(3);
+test.describe("wrong company id and a different signing secret, against a reachable stand-in CRM", () => {
+  test.skip(!standaloneBuildPresent(), "needs a standalone build (NEXT_OUTPUT=standalone npm run build)");
+  test.setTimeout(120_000);
+  let crm: StubCrm;
+  let server: StandaloneServer;
+  let call: ReturnType<typeof actions>;
+  test.beforeAll(async () => {
+    crm = await startStubCrm({ apiKey: KEY, companyId: COMPANY, ingestSecret: INGEST });
+    server = await startStandalone({
+      label: "crm-api wrong settings e2e",
+      port: 3240,
+      // CRM_COMPANY_ID names a company the CRM does not know; LEAD_INGEST_SECRET is not the CRM's secret.
+      env: { TRUSTED_PROXY: "cloudflare", CRM_API_URL: crm.url, CRM_API_KEY: KEY, CRM_COMPANY_ID: "some-other-company", LEAD_INGEST_SECRET: OTHER_INGEST },
+    });
+    call = actions(server);
+  });
+  test.afterAll(async () => {
+    await server?.stop();
+    await crm?.close();
+  });
+  test.beforeEach(() => {
+    server.assertAlive();
+    crm.reset();
+  });
+
+  test("a company the CRM does not know: contact and newsletter give the generic message once each and store nothing; the log says only that the CRM refused", async () => {
+    expect(await call("submitContactMessage", [contactInput()])).toMatch(GENERIC_CONTACT_ERROR);
+    expect(await call("subscribeToNewsletter", [{ email: "news@example.org", website: "" }])).toMatch(NEWSLETTER_ERROR);
+    expect(crm.inquiryCount()).toBe(0);
+    expect(crm.requests.filter((r) => r.path === "/api/public/contact-inquiry")).toHaveLength(1); // one attempt, never retried
+    expect(crm.requests.filter((r) => r.path === "/api/public/subscribe")).toHaveLength(1);
+    const logs = server.logs();
+    expect(logs).toMatch(/\[submitContactMessage\] the CRM rejected the message \(HTTP 400\)/);
+    expect(logs).not.toContain("some-other-company"); // the configured company id is never logged
+    for (const needle of NEEDLES) expect(logs, needle).not.toContain(needle);
+    expect(logs).not.toContain(OTHER_INGEST);
+  });
+
+  test("a signing secret (and company id) the CRM does not share: the request is REFUSED (401), the visitor gets the generic error, nothing is stored, it is not retried, and no secret is logged", async () => {
+    const text = await call("submitFlightRequest", [flightInput()]);
+    expect(text).toMatch(GENERIC_FLIGHT_ERROR); // never a false success
+    const attempts = crm.requests.filter((x) => x.path === "/api/v1/website/flight-inquiries");
+    expect(attempts).toHaveLength(1); // a signature refusal is an operator problem: not retried
+    expect(attempts[0].status).toBe(401);
+    expect(attempts[0].headers["x-ct-visitor-context"], "the website did sign the request").toBeTruthy();
+    expect(attempts[0].visitor).toEqual({ state: "invalid", reason: "bad_signature" }); // the stand-in CRM, like the real one, does not believe it
+    expect(crm.leadCount()).toBe(0);
+    const logs = server.logs();
+    expect(logs).toMatch(/\[submitFlightRequest\] the CRM refused the website's credential or route \(HTTP 401\)/);
+    expect(logs).not.toContain(OTHER_INGEST);
+    for (const needle of NEEDLES) expect(logs, needle).not.toContain(needle);
+  });
+
+  test("the contact message with a secret the CRM does not share is refused too, once, with the generic message and nothing stored", async () => {
+    expect(await call("submitContactMessage", [contactInput()])).toMatch(GENERIC_CONTACT_ERROR);
+    expect(crm.inquiryCount()).toBe(0);
+    expect(server.logs()).not.toContain(OTHER_INGEST);
+  });
+});
+
+test.describe("the CRM hostname does not resolve (DNS failure): bounded, generic, and the server stays healthy", () => {
+  test.skip(!standaloneBuildPresent(), "needs a standalone build (NEXT_OUTPUT=standalone npm run build)");
+  test.setTimeout(120_000);
+  let server: StandaloneServer;
+  let call: ReturnType<typeof actions>;
+  test.beforeAll(async () => {
+    // ".invalid" is reserved (RFC 2606) and never resolves.
+    server = await startStandalone({
+      label: "crm-api unresolvable host e2e",
+      port: 3241,
+      env: { TRUSTED_PROXY: "cloudflare", CRM_API_URL: "http://compass-crm.invalid:3000", CRM_API_KEY: KEY, CRM_COMPANY_ID: COMPANY, LEAD_INGEST_SECRET: INGEST },
+    });
+    call = actions(server);
+  });
+  test.afterAll(async () => {
+    await server?.stop();
+  });
+
+  test("all three forms give the generic message in bounded time, never a success; the log names the failure class, not the host or any visitor value; /api/health still answers", async () => {
+    const started = Date.now();
+    expect(await call("submitFlightRequest", [flightInput()])).toMatch(GENERIC_FLIGHT_ERROR);
+    expect(await call("submitContactMessage", [contactInput()])).toMatch(GENERIC_CONTACT_ERROR);
+    expect(await call("subscribeToNewsletter", [{ email: "news@example.org", website: "" }])).toMatch(NEWSLETTER_ERROR);
+    expect(Date.now() - started).toBeLessThan(60_000);
+    const logs = server.logs();
+    expect(logs).toMatch(/the CRM could not be reached/);
+    for (const needle of NEEDLES) expect(logs, needle).not.toContain(needle);
+    const health = await fetch(`${server.origin}/api/health`);
+    expect(health.status).toBe(200);
+    expect(await health.text()).toContain("ok");
   });
 });

@@ -20,11 +20,11 @@ ok "required variables are present (values not shown)"
 ok "CRM_API_KEY has at least 32 characters"
 ingest="$(env_value LEAD_INGEST_SECRET)"
 if [ -z "${ingest}" ]; then
-  warn "LEAD_INGEST_SECRET is not set: leads are created WITHOUT the visitor's IP and approximate location (set it, identical to the CRM's, to record them)"
+  warn "LEAD_INGEST_SECRET is not set: requests to the CRM are NOT signed. A CRM that has this secret refuses unsigned requests (visitors see a generic error), and a CRM without it records no visitor IP or location. Set it, identical to the CRM's, on both sides together."
 elif [ "$(printf '%s' "${ingest}" | wc -c)" -lt 32 ]; then
   die "LEAD_INGEST_SECRET is shorter than 32 characters"
 else
-  ok "LEAD_INGEST_SECRET is set (visitor IP / location will be sent, signed)"
+  ok "LEAD_INGEST_SECRET is set (every request to the CRM is signed, signing v2; visitor IP / location travel inside the signature)"
 fi
 CRM_URL="$(env_or_default CRM_API_URL http://compass-crm:3000)"
 case "${CRM_URL}" in
@@ -85,8 +85,12 @@ for NET in "${API_NET}" "${TUN_NET}"; do
   for c in $(docker network inspect "${NET}" -f '{{range .Containers}}{{.Name}} {{end}}'); do
     a=" $(aliases_of "${c}" "${NET}") "
     if [ "${NET}" = "${API_NET}" ]; then case "${a}" in *" ${CRM_HOST} "*) crm="${c}";; esac; fi
-    # The website has no database and must have no network path to one: a container answering to 'db' on either network is a layout error.
-    case "${a}" in *" db "*) dbfound="${dbfound} ${c}@${NET}";; esac
+    # The website has no database and must have no network path to one: a database container on either network is a layout error. The boundary is
+    # enforced on what the container IS, not only on what it is called: the usual database names (db, postgres, postgresql, pgbouncer) OR an image that is
+    # PostgreSQL / a PostgreSQL-compatible server (a database named 'main-store' would otherwise pass). Names are the website's own view (aliases).
+    case "${a}" in *" db "*|*" postgres "*|*" postgresql "*|*" pgbouncer "*) dbfound="${dbfound} ${c}@${NET}";; esac
+    img="$(docker inspect -f '{{.Config.Image}}' "${c}" 2>/dev/null | tr 'A-Z' 'a-z')"
+    case "${img}" in *postgres*|*postgis*|*pgvector*|*timescale*|*pgbouncer*|*pgpool*) dbfound="${dbfound} ${c}@${NET}(image)";; esac
     # Docker DNS answers a name from every container that carries it. Another container (not ours) already called bft-web would make the
     # tunnel and the website's own health traffic land on the wrong place.
     if [ "${c}" != "${CONTAINER}" ]; then case "${a}" in *" bft-web "*) clash="${clash} ${c}";; esac; fi
@@ -94,7 +98,7 @@ for NET in "${API_NET}" "${TUN_NET}"; do
 done
 [ -n "${crm}" ] || die "no container on '${API_NET}' answers to '${CRM_HOST}'. The CRM must be up on that network under the name CRM_API_URL uses (default http://compass-crm:3000: an alias the CRM's compose file must define - read the real aliases with docker network inspect)."
 ok "container '${crm}' answers to '${CRM_HOST}' on '${API_NET}'"
-[ -z "${dbfound}" ] || die "a container answering to 'db' shares a network with the website:${dbfound}. The website must not have any route to the database. Use the CRM's separate tunnel network (TUNNEL_NETWORK_NAME), not one that carries PostgreSQL."
+[ -z "${dbfound}" ] || die "a container answering to 'db' (or running a PostgreSQL image) shares a network with the website:${dbfound}. The website must not have any route to the database. Use the CRM's separate tunnel network (TUNNEL_NETWORK_NAME), not one that carries PostgreSQL."
 ok "no database container on either network"
 [ -z "${clash}" ] || die "another container already answers to 'bft-web':${clash}. Resolve this before deploying."
 ok "no other container answers to 'bft-web'"

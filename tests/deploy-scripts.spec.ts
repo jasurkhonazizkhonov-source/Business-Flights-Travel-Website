@@ -241,8 +241,31 @@ test.describe("deploy scripts, dry-run against a stub docker", () => {
     s = sandbox(dbShared);
     r = s.run("preflight.sh");
     expect(r.code).not.toBe(0);
-    expect(r.out).toMatch(/a container answering to 'db' shares a network with the website: compass-tools-db-1@compass-tools_web/);
+    expect(r.out).toMatch(/a container answering to 'db' \(or running a PostgreSQL image\) shares a network with the website: compass-tools-db-1@compass-tools_web/);
     expect(r.out).not.toContain("FAIL: network");
+    allCalls.push(...s.calls());
+
+    // The boundary is what the container IS, not what it is called: a PostgreSQL image under an unrelated name, and the other usual database names, are refused too.
+    for (const [alias, image, expected] of [
+      ["main-store", "postgres:16-alpine", /compass-tools-main-1@compass-tools_web\(image\)/],
+      ["main-store", "ghcr.io/example/PostGIS:17", /compass-tools-main-1@compass-tools_web\(image\)/],
+      ["postgres", "mysterious:1", /compass-tools-main-1@compass-tools_web/],
+      ["pgbouncer", "edoburu/something:1", /compass-tools-main-1@compass-tools_web/],
+    ] as const) {
+      const disguised = baseState();
+      disguised.containers["compass-tools-main-1"] = { id: "ddd444", startedAt: "2026-10-01T00:00:00Z", aliases: [alias], image, networks: [TUN_NET] };
+      s = sandbox(disguised);
+      r = s.run("preflight.sh");
+      expect(r.code, `${alias} / ${image}`).not.toBe(0);
+      expect(r.out, `${alias} / ${image}`).toMatch(expected);
+      allCalls.push(...s.calls());
+    }
+    // ... while an ordinary container on the tunnel network (an app, a connector) is fine, and the website's own image is never mistaken for a database.
+    const ordinary = baseState();
+    ordinary.containers["compass-tools-sidecar-1"] = { id: "eee555", startedAt: "2026-10-01T00:00:00Z", aliases: ["sidecar"], image: "example/metrics:2", networks: [TUN_NET] };
+    s = sandbox(ordinary);
+    r = s.run("preflight.sh");
+    expect(r.code, r.out).toBe(0);
     allCalls.push(...s.calls());
 
     s = sandbox(baseState({ rendered: "services:\n  bft-web:\n    ports:\n      - 3000:3000\n" }));
@@ -324,7 +347,7 @@ test.describe("deploy scripts, dry-run against a stub docker", () => {
     expect(r.code, r.out).toBe(0);
     r = run("");
     expect(r.code, r.out).toBe(0);
-    expect(r.out).toMatch(/WARN: LEAD_INGEST_SECRET is not set: leads are created WITHOUT the visitor's IP/);
+    expect(r.out).toMatch(/WARN: LEAD_INGEST_SECRET is not set: requests to the CRM are NOT signed/);
     r = run("LEAD_INGEST_SECRET=short\n");
     expect(r.code).not.toBe(0);
     expect(r.out).toMatch(/LEAD_INGEST_SECRET is shorter than 32 characters/);

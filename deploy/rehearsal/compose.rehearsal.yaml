@@ -1,0 +1,74 @@
+# ISOLATED Docker rehearsal of the website release candidate. NOT a production file: it creates its OWN throwaway networks and containers
+# (project `bft-rehearsal`, nothing external, nothing named like the production services), uses fake secrets, a mock CRM and a throwaway PostgreSQL that holds
+# no data. Run it with deploy/rehearsal/run.sh on a machine that has Docker. It must never be pointed at, or attached to, a production network.
+#
+# Topology (mirrors the intended production layout):
+#   rh_data    internal   db  <->  compass-crm (the mock standing in for the CRM)            the website is NOT on it
+#   rh_api     internal   compass-crm (alias `compass-crm`)  <->  bft-web                    the website reaches the CRM here, over HTTP only
+#   rh_tunnel             bft-web (alias `bft-web`)  <->  tunnel-probe (stands in for cloudflared)
+name: bft-rehearsal
+
+services:
+  db:
+    image: postgres:17.11-bookworm
+    environment:
+      POSTGRES_PASSWORD: rehearsal-only-not-a-secret
+    networks: [rh_data]
+    # no ports, no volumes: nothing persists
+
+  compass-crm:
+    image: node:24.21.0-bookworm-slim
+    command: ["node", "/mock/mock-crm.mjs"]
+    environment:
+      LEAD_INGEST_SECRET: rehearsal-ingest-secret-0123456789-abcdefghij
+      WEBSITE_API_KEY: rehearsal-api-key-0123456789-abcdefghijklmnop
+      MOCK_COMPANY_ID: rehearsal-company
+      DB_HOST: db
+    volumes:
+      - ./mock-crm.mjs:/mock/mock-crm.mjs:ro
+    networks:
+      rh_data: {}
+      rh_api:
+        aliases: [compass-crm]
+
+  bft-web:
+    build:
+      context: ../..
+      target: runner
+    image: business-flights-web:rehearsal
+    init: true
+    environment:
+      HOSTNAME: 0.0.0.0
+      PORT: "3000"
+      CRM_API_URL: http://compass-crm:3000
+      CRM_API_KEY: rehearsal-api-key-0123456789-abcdefghijklmnop
+      CRM_COMPANY_ID: rehearsal-company
+      LEAD_INGEST_SECRET: rehearsal-ingest-secret-0123456789-abcdefghij
+      TRUSTED_PROXY: cloudflare
+      GMAIL_SENDER_EMAIL: rehearsal@example.invalid
+      GMAIL_APP_PASSWORD: rehearsal-not-a-password
+    expose: ["3000"]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    tmpfs: [/tmp]
+    mem_limit: 1g
+    cpus: 1.0
+    pids_limit: 256
+    stop_grace_period: 20s
+    restart: unless-stopped
+    networks:
+      rh_api: {}
+      rh_tunnel:
+        aliases: [bft-web]
+
+  tunnel-probe:
+    image: node:24.21.0-bookworm-slim
+    command: ["sleep", "infinity"]
+    networks: [rh_tunnel]
+
+networks:
+  rh_data:
+    internal: true
+  rh_api:
+    internal: true
+  rh_tunnel: {}

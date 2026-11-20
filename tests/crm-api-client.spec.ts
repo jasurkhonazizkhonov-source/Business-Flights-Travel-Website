@@ -1,11 +1,11 @@
 import { test, expect } from "@playwright/test";
-import { createHmac } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { startStubCrm, STUB_ALLOWED_FIELDS, type StubCrm } from "./support/stub-crm";
 import { MIN_SECRET_LENGTH, parseCrmBaseUrl, resolveCrmApiConfig } from "../src/lib/crm-api/config";
 import { buildFlightInquiryBody } from "../src/lib/crm-api/flight-inquiry";
-import { buildVisitorContextHeaders, VISITOR_CONTEXT_HEADER, VISITOR_SIGNATURE_HEADER } from "../src/lib/crm-api/visitor-context";
+import { createRequestSigner, VISITOR_SIGNATURE_HEADER, type RequestSigner } from "../src/lib/crm-api/visitor-context";
+import { decodeContext, signedHeaders } from "./support/signing";
 import { postContactInquiry, postFlightInquiry, postNewsletterSubscription } from "../src/lib/crm-api/client";
 import { flightRequestSchema, type FlightRequestInput } from "../src/lib/validations/flight-request";
 
@@ -73,7 +73,7 @@ test.describe("configuration (src/lib/crm-api/config.ts)", () => {
   });
 
   test("LEAD_INGEST_SECRET is optional; a too-short one is ignored with a warning (the lead is still sent, without the visitor's IP)", () => {
-    const base = { CRM_API_URL: "http://crm:3000", CRM_API_KEY: KEY };
+    const base = { CRM_API_URL: "http://crm:3000", CRM_API_KEY: KEY, CRM_COMPANY_ID: "cabc" }; // the company is needed to SIGN a flight request
     const without = resolveCrmApiConfig(base, "flight-inquiry");
     expect(without.ok && without.config.ingestSecret).toBeUndefined();
     const short = resolveCrmApiConfig({ ...base, LEAD_INGEST_SECRET: "tiny-secret-sentinel" }, "flight-inquiry");
@@ -158,7 +158,7 @@ test.describe("request body (src/lib/crm-api/flight-inquiry.ts)", () => {
 });
 
 // ---------------------------------------------------------------------------------------------------------------------------------------
-test.describe("signed visitor context (src/lib/crm-api/visitor-context.ts)", () => {
+test.describe("signed requests, signing v2 (src/lib/crm-api/visitor-context.ts)", () => {
   const info = {
     ip: { address: "203.0.113.9", version: "v4" as const },
     location: { city: "São Paulo", region: "São Paulo", regionCode: "SP", country: "Brazil", countryCode: "BR", timeZone: "America/Sao_Paulo" },
@@ -166,15 +166,13 @@ test.describe("signed visitor context (src/lib/crm-api/visitor-context.ts)", () 
     capturedAt: new Date(),
   };
 
-  test("the two headers carry base64url(JSON) and hex(HMAC-SHA256(secret, header value)), verifiable with independent code", () => {
+  test("the two headers carry base64url(JSON { v: 2, ts, nonce, ...visitor facts }) and a hex HMAC-SHA256 that never contains the secret", () => {
     const now = Date.UTC(2026, 9, 18, 12, 0, 0);
-    const h = buildVisitorContextHeaders(info, INGEST, now);
-    const context = h[VISITOR_CONTEXT_HEADER];
-    const signature = h[VISITOR_SIGNATURE_HEADER];
-    expect(signature).toBe(createHmac("sha256", INGEST).update(context).digest("hex"));
-    expect(JSON.parse(Buffer.from(context, "base64url").toString("utf8"))).toEqual({
-      v: 1,
+    const h = signedHeaders(info, INGEST, now);
+    expect(decodeContext(h)).toEqual({
+      v: 2,
       ts: Math.floor(now / 1000),
+      nonce: expect.stringMatching(/^[A-Za-z0-9_-]{22}$/),
       ip: "203.0.113.9",
       city: "S%C3%A3o%20Paulo", // percent-encoded, as Vercel's header would carry it; the CRM decodes it
       region: "SP",
@@ -182,18 +180,21 @@ test.describe("signed visitor context (src/lib/crm-api/visitor-context.ts)", () 
       timezone: "America/Sao_Paulo",
       source: "cloudflare", // names which edge produced the location; an older CRM ignores it, a newer one stores the matching label
     });
+    expect(h[VISITOR_SIGNATURE_HEADER]).toMatch(/^[0-9a-f]{64}$/);
     expect(Object.values(h).join("")).not.toContain(INGEST);
   });
 
-  test("nothing is sent without a secret, without information, or with an empty observation", () => {
-    expect(buildVisitorContextHeaders(info, undefined)).toEqual({});
-    expect(buildVisitorContextHeaders(undefined, INGEST)).toEqual({});
-    expect(buildVisitorContextHeaders({ capturedAt: new Date() }, INGEST)).toEqual({});
+  test("no secret means no signer and no headers; with a secret the request is ALWAYS signed, even when the server observed nothing about the visitor", () => {
+    expect(createRequestSigner(info, undefined)).toBeUndefined();
+    expect(signedHeaders(info, undefined)).toEqual({});
+    expect(Object.keys(signedHeaders(undefined, INGEST))).toHaveLength(2);
+    expect(Object.keys(signedHeaders({ capturedAt: new Date() }, INGEST))).toHaveLength(2);
+    expect(decodeContext(signedHeaders({ capturedAt: new Date() }, INGEST))).toEqual({ v: 2, ts: expect.any(Number), nonce: expect.any(String) });
   });
 
-  test("an IP alone, or a location alone, is enough", () => {
-    expect(Object.keys(buildVisitorContextHeaders({ ip: info.ip, capturedAt: new Date() }, INGEST))).toHaveLength(2);
-    expect(Object.keys(buildVisitorContextHeaders({ location: { countryCode: "AU" }, capturedAt: new Date() }, INGEST))).toHaveLength(2);
+  test("an IP alone, or a location alone, is carried exactly as observed", () => {
+    expect(decodeContext(signedHeaders({ ip: info.ip, capturedAt: new Date() }, INGEST))).toMatchObject({ ip: "203.0.113.9" });
+    expect(decodeContext(signedHeaders({ location: { countryCode: "AU" }, capturedAt: new Date() }, INGEST))).toMatchObject({ country: "AU" });
   });
 });
 
@@ -210,12 +211,13 @@ test.describe("POST /api/v1/website/flight-inquiries against the stand-in CRM", 
 
   const config = () => ({ baseUrl: crm.url, apiKey: KEY, companyId: COMPANY });
   const KEY1 = "7b1d2f64-0c9e-4a3b-8d55-1f0a9c3e2b10";
-  const send = (over: { key?: string; body?: unknown; apiKey?: string; sleeps?: number[]; timeoutMs?: number; maxAttempts?: number; visitorHeaders?: Record<string, string> } = {}) =>
+  const send = (over: { key?: string; body?: unknown; apiKey?: string; sleeps?: number[]; timeoutMs?: number; maxAttempts?: number; sign?: RequestSigner | null } = {}) =>
     postFlightInquiry({
       config: { ...config(), apiKey: over.apiKey ?? KEY },
       body: over.body ?? buildFlightInquiryBody(request(), "+14155552671"),
       idempotencyKey: over.key ?? KEY1,
-      visitorHeaders: over.visitorHeaders,
+      // signed like the website does (signing v2) unless a test passes `sign: null` to send it unsigned
+      sign: over.sign === null ? undefined : (over.sign ?? createRequestSigner(undefined, INGEST)),
       timeoutMs: over.timeoutMs ?? 2_000,
       maxAttempts: over.maxAttempts,
       sleep: async (ms) => void over.sleeps?.push(ms),
@@ -369,16 +371,23 @@ test.describe("POST /api/v1/website/flight-inquiries against the stand-in CRM", 
     }
   });
 
-  test("the visitor context headers are passed through unchanged and the CRM verifies them; a wrong secret is simply not believed", async () => {
+  test("the CRM verifies the signed visitor context; a wrong secret, an unsigned request and a replay are refused (401) and never retried", async () => {
     const info = { ip: { address: "198.51.100.77", version: "v4" as const }, location: { city: "Sydney", regionCode: "NSW", countryCode: "AU", timeZone: "Australia/Sydney" }, capturedAt: new Date() };
-    await send({ visitorHeaders: buildVisitorContextHeaders(info, INGEST) });
+    expect(await send({ sign: createRequestSigner(info, INGEST) })).toMatchObject({ status: "created" });
     expect(crm.requests[0].visitor).toMatchObject({ state: "verified", ip: "198.51.100.77", city: "Sydney", region: "NSW", country: "AU", timezone: "Australia/Sydney" });
     crm.reset();
-    await send({ visitorHeaders: buildVisitorContextHeaders(info, "x".repeat(40)) });
-    expect(crm.requests[0].visitor).toEqual({ state: "invalid" });
+    // another secret: the CRM does not believe it, and (it has a secret) refuses the request itself; a 401 is an operator problem, not retried
+    expect(await send({ sign: createRequestSigner(info, "x".repeat(40)) })).toMatchObject({ status: "misconfigured", httpStatus: 401, attempts: 1 });
+    expect(crm.requests[0].visitor).toEqual({ state: "invalid", reason: "bad_signature" });
     crm.reset();
-    await send();
+    expect(await send({ sign: null })).toMatchObject({ status: "misconfigured", httpStatus: 401, attempts: 1 });
     expect(crm.requests[0].visitor).toEqual({ state: "absent" });
+    crm.reset();
+    // a captured envelope replayed verbatim is refused: the same signer output twice
+    const once = createRequestSigner(info, INGEST, undefined, () => "R".repeat(22));
+    expect(await send({ sign: once })).toMatchObject({ status: "created" });
+    expect(await send({ sign: once })).toMatchObject({ status: "misconfigured", httpStatus: 401 });
+    expect(crm.requests[1].visitor).toEqual({ state: "invalid", reason: "replay" });
   });
 
   test("no outcome ever contains the key, a customer value or the CRM's message text", async () => {

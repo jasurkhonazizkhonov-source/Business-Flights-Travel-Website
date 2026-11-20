@@ -6,7 +6,7 @@ import { after } from "next/server";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { rateLimitClientKey } from "@/lib/rate-limit-client";
 import { isSpamSubmission } from "@/lib/anti-spam";
-import { normalizePhoneNumber } from "@/lib/phone";
+import { checkPhoneNumber, phoneProblemMessage } from "@/lib/phone";
 import { findAirportByIata } from "@/data/airports";
 import { flightRequestSchema, type FlightRequestInput } from "@/lib/validations/flight-request";
 import { sendFlightRequestNotification, type FlightRequestSegment } from "@/lib/email/flight-request-notification";
@@ -14,7 +14,7 @@ import { captureSubmissionInfo } from "@/lib/submission-info";
 import { gmailMailer } from "@/lib/email/mailer";
 import { postFlightInquiry } from "@/lib/crm-api/client";
 import { buildFlightInquiryBody } from "@/lib/crm-api/flight-inquiry";
-import { buildVisitorContextHeaders } from "@/lib/crm-api/visitor-context";
+import { createRequestSigner } from "@/lib/crm-api/visitor-context";
 import { crmApiConfig } from "@/server/crm-api";
 
 export type SubmitFlightRequestResult =
@@ -81,11 +81,13 @@ export async function submitFlightRequest(input: FlightRequestInput): Promise<Su
     return friendlyError();
   }
 
-  const phone = normalizePhoneNumber(data.phone);
-  if (!phone) {
-    const message = "Please enter a valid phone number, including the complete number, so our travel specialist can reach you.";
+  // "Valid" is the numbering-plan sense (country code, length, an area code in use); it does not mean the number is assigned or reachable.
+  const phoneCheck = checkPhoneNumber(data.phone);
+  if (!phoneCheck.ok) {
+    const message = phoneProblemMessage(phoneCheck, "Please enter a valid phone number, including the complete number, so our travel specialist can reach you.");
     return { ok: false, error: message, fieldErrors: { phone: message } };
   }
+  const phone = phoneCheck;
 
   // What this server itself can tell about the request: the full IP (only from the headers the platform in front of the app sets - never a
   // form field) and the platform's approximate location. It goes to the CRM only inside the signed visitor context, and into the internal email.
@@ -114,7 +116,7 @@ export async function submitFlightRequest(input: FlightRequestInput): Promise<Su
     config: api.config,
     body: buildFlightInquiryBody(data, phone.e164),
     idempotencyKey,
-    visitorHeaders: buildVisitorContextHeaders(submissionInfo, api.config.ingestSecret),
+    sign: createRequestSigner(submissionInfo, api.config.ingestSecret),
   });
   const ms = Math.round(performance.now() - startedAt);
 
@@ -122,7 +124,7 @@ export async function submitFlightRequest(input: FlightRequestInput): Promise<Su
     // Fixed tags and codes only - never the request, the customer's details, the key, or the CRM's message text.
     switch (outcome.status) {
       case "misconfigured":
-        console.error(`[submitFlightRequest] the CRM refused the website's credential or route (HTTP ${outcome.httpStatus}); check CRM_API_URL / CRM_API_KEY and that the CRM is reached over its private network`);
+        console.error(`[submitFlightRequest] the CRM refused the website's credential or route (HTTP ${outcome.httpStatus}); check CRM_API_URL / CRM_API_KEY / LEAD_INGEST_SECRET (the credential, the request signature, and that both servers' clocks agree) and that the CRM is reached over its private network`);
         break;
       case "rejected":
         console.error(`[submitFlightRequest] the CRM rejected the request (HTTP ${outcome.httpStatus}, ${outcome.code}${outcome.fieldPaths.length ? `, fields: ${outcome.fieldPaths.join(", ")}` : ""})`);
@@ -150,7 +152,7 @@ export async function submitFlightRequest(input: FlightRequestInput): Promise<Su
   // Never the address itself - only whether one was captured and, if not, the value-free reason (see src/lib/client-ip.ts).
   const ipStatus = submissionInfo.ip ? "captured" : `unavailable (${ipUnavailable ?? "unknown"})`;
   console.info(
-    `[submitFlightRequest] accepted by the CRM in ${ms}ms (attempts: ${outcome.attempts}; visitor context ${api.config.ingestSecret ? "signed" : "not configured"}; ip ${ipStatus}; location ${submissionInfo.location ? "captured" : "unavailable"})${outcome.status === "duplicate" ? " - duplicate of an already-received submission" : ""}`,
+    `[submitFlightRequest] accepted by the CRM in ${ms}ms (attempts: ${outcome.attempts}; request ${api.config.ingestSecret ? "signed (v2)" : "not signed: LEAD_INGEST_SECRET is not configured"}; ip ${ipStatus}; location ${submissionInfo.location ? "captured" : "unavailable"})${outcome.status === "duplicate" ? " - duplicate of an already-received submission" : ""}`,
   );
 
   // The CRM already has the request (a repeat of the same submission was answered as such): the customer gets the same success. No second

@@ -5,11 +5,11 @@ import { headers } from "next/headers";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { rateLimitClientKey } from "@/lib/rate-limit-client";
 import { isSpamSubmission } from "@/lib/anti-spam";
-import { normalizePhoneNumber } from "@/lib/phone";
+import { checkPhoneNumber, phoneProblemMessage } from "@/lib/phone";
 import { contactMessageSchema, type ContactMessageInput } from "@/lib/validations/contact";
 import { postContactInquiry } from "@/lib/crm-api/client";
 import { captureSubmissionInfo } from "@/lib/submission-info";
-import { buildVisitorContextHeaders } from "@/lib/crm-api/visitor-context";
+import { createRequestSigner } from "@/lib/crm-api/visitor-context";
 import { crmApiConfig } from "@/server/crm-api";
 
 export type SubmitContactMessageResult = { ok: true } | { ok: false; error: string; fieldErrors?: Record<string, string> };
@@ -63,11 +63,13 @@ export async function submitContactMessage(input: ContactMessageInput): Promise<
   }
 
   // Phone is a required field - validate it's a genuine, complete number (not just non-empty) the same way the flight request form does.
-  const phone = normalizePhoneNumber(data.phone);
-  if (!phone) {
-    const message = "Please enter a valid phone number, including the complete number.";
+  // "Valid" is the numbering-plan sense (country code, length, an area code in use); it does not mean the number is assigned or reachable.
+  const phoneCheck = checkPhoneNumber(data.phone);
+  if (!phoneCheck.ok) {
+    const message = phoneProblemMessage(phoneCheck, "Please enter a valid phone number, including the complete number.");
     return { ok: false, error: message, fieldErrors: { phone: message } };
   }
+  const phone = phoneCheck;
 
   const api = crmApiConfig("public-inquiry", "contact message");
   if (!api.ok) return friendlyError();
@@ -85,11 +87,11 @@ export async function submitContactMessage(input: ContactMessageInput): Promise<
   // website's server, so without the signed context it records no IP and no location for the inquiry. Nothing is fabricated: no trusted IP or no
   // geolocation simply means those parts are absent, and the inquiry is still sent.
   const { info: submissionInfo, ipUnavailable } = captureSubmissionInfo(headerList);
-  const visitorHeaders = buildVisitorContextHeaders(submissionInfo, api.config.ingestSecret);
+  const sign = createRequestSigner(submissionInfo, api.config.ingestSecret);
 
   const outcome = await postContactInquiry({
     config: api.config,
-    visitorHeaders,
+    sign,
     body: {
       firstName: data.firstName,
       lastName: data.lastName,
@@ -105,7 +107,7 @@ export async function submitContactMessage(input: ContactMessageInput): Promise<
     // Value-free: whether an IP/location was available and sent, never the address or the place.
     const ipStatus = submissionInfo.ip ? "captured" : `unavailable (${ipUnavailable ?? "unknown"})`;
     console.info(
-      `[submitContactMessage] accepted by the CRM (visitor context ${Object.keys(visitorHeaders).length ? "signed" : api.config.ingestSecret ? "nothing to send" : "not configured"}; ip ${ipStatus}; location ${submissionInfo.location ? "captured" : "unavailable"})`,
+      `[submitContactMessage] accepted by the CRM (request ${sign ? "signed (v2)" : "not signed: LEAD_INGEST_SECRET is not configured"}; ip ${ipStatus}; location ${submissionInfo.location ? "captured" : "unavailable"})`,
     );
     return { ok: true };
   }

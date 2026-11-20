@@ -5,7 +5,8 @@ import { CLOUDFLARE_GEO_SOURCE, GEO_SOURCE, decodeUtf8Header, readCloudflareAppr
 import { captureSubmissionInfo } from "../src/lib/submission-info";
 import { buildFlightRequestNotificationEmail } from "../src/lib/email/flight-request-notification";
 import { resolveClientIp } from "../src/lib/client-ip";
-import { VISITOR_CONTEXT_HEADER, buildVisitorContextHeaders } from "../src/lib/crm-api/visitor-context";
+import { VISITOR_CONTEXT_HEADER } from "../src/lib/crm-api/visitor-context";
+import { signedHeaders } from "./support/signing";
 import { standaloneBuildPresent, startStandalone, type StandaloneServer } from "./support/standalone-server";
 
 // Self-hosted (OVH VPS + Docker Compose + Cloudflare Tunnel) deployment: visitor IP / location behind Cloudflare, the static properties of
@@ -114,7 +115,7 @@ test.describe("visitor IP and location behind Cloudflare (TRUSTED_PROXY=cloudfla
       for (const [raw, expected, version] of samples) {
         const { info } = captureSubmissionInfo(H({ "cf-connecting-ip": raw }));
         expect(info.ip, raw).toEqual({ address: expected, version });
-        const sent = buildVisitorContextHeaders(info, secret);
+        const sent = signedHeaders(info, secret);
         expect(decode(sent).ip, raw).toBe(expected);
       }
     });
@@ -150,30 +151,33 @@ test.describe("visitor IP and location behind Cloudflare (TRUSTED_PROXY=cloudfla
     const secret = "s".repeat(40);
     const geo = { "cf-ipcountry": "US", "cf-ipcity": "San Francisco", "cf-region-code": "CA", "cf-timezone": "America/Los_Angeles" };
     withEnv({ TRUSTED_PROXY: "cloudflare" }, () => {
-      const full = decode(buildVisitorContextHeaders(captureSubmissionInfo(cf({ ...geo })).info, secret));
-      expect(full).toMatchObject({ v: 1, ip: "198.51.100.50", city: "San%20Francisco", region: "CA", country: "US", timezone: "America/Los_Angeles" });
+      const full = decode(signedHeaders(captureSubmissionInfo(cf({ ...geo })).info, secret));
+      expect(full).toMatchObject({ v: 2, ip: "198.51.100.50", city: "San%20Francisco", region: "CA", country: "US", timezone: "America/Los_Angeles" });
       // Cloudflare's Managed Transform is off: only cf-ipcountry arrives. Country is sent; no city/region is invented.
-      const countryOnly = decode(buildVisitorContextHeaders(captureSubmissionInfo(cf({ "cf-ipcountry": "AU" })).info, secret));
+      const countryOnly = decode(signedHeaders(captureSubmissionInfo(cf({ "cf-ipcountry": "AU" })).info, secret));
       expect(countryOnly.country).toBe("AU");
       expect(countryOnly).not.toHaveProperty("city");
       expect(countryOnly).not.toHaveProperty("region");
       // No geolocation headers at all: IP only.
-      const ipOnly = decode(buildVisitorContextHeaders(captureSubmissionInfo(cf()).info, secret));
+      const ipOnly = decode(signedHeaders(captureSubmissionInfo(cf()).info, secret));
       expect(ipOnly.ip).toBe("198.51.100.50");
       for (const k of ["city", "region", "country", "timezone"]) expect(ipOnly).not.toHaveProperty(k);
       // Tor / unknown country codes are not a location.
-      expect(decode(buildVisitorContextHeaders(captureSubmissionInfo(cf({ "cf-ipcountry": "T1" })).info, secret))).not.toHaveProperty("country");
+      expect(decode(signedHeaders(captureSubmissionInfo(cf({ "cf-ipcountry": "T1" })).info, secret))).not.toHaveProperty("country");
       // Coordinates / postal code are never sent to the CRM (its context has no such field), even when Cloudflare supplies them.
-      const withCoords = JSON.stringify(decode(buildVisitorContextHeaders(captureSubmissionInfo(cf({ ...geo, "cf-iplatitude": "37.77", "cf-iplongitude": "-122.41", "cf-postal-code": "94104" })).info, secret)));
+      const withCoords = JSON.stringify(decode(signedHeaders(captureSubmissionInfo(cf({ ...geo, "cf-iplatitude": "37.77", "cf-iplongitude": "-122.41", "cf-postal-code": "94104" })).info, secret)));
       expect(withCoords).not.toMatch(/37\.77|122\.41|94104|lat|lon|postal/i);
     });
-    // Nothing observed (no trusted proxy): nothing is signed or sent — the CRM then records no IP and no location.
+    // Nothing observed (no trusted proxy): the request is still signed (the signature authenticates the REQUEST), but it carries no visitor facts, so the CRM
+    // records no IP and no location.
     withEnv({ TRUSTED_PROXY: "none" }, () => {
-      expect(buildVisitorContextHeaders(captureSubmissionInfo(cf({ ...geo })).info, secret)).toEqual({});
+      const none = decode(signedHeaders(captureSubmissionInfo(cf({ ...geo })).info, secret));
+      expect(none).toMatchObject({ v: 2 });
+      for (const k of ["ip", "city", "region", "country", "timezone", "source"]) expect(none).not.toHaveProperty(k);
     });
-    // No secret configured: nothing is sent either.
+    // No secret configured: nothing can be signed, so no headers at all.
     withEnv({ TRUSTED_PROXY: "cloudflare" }, () => {
-      expect(buildVisitorContextHeaders(captureSubmissionInfo(cf({ ...geo })).info, undefined)).toEqual({});
+      expect(signedHeaders(captureSubmissionInfo(cf({ ...geo })).info, undefined)).toEqual({});
     });
   });
 
@@ -202,7 +206,7 @@ test.describe("visitor IP and location behind Cloudflare (TRUSTED_PROXY=cloudfla
     const without = buildFlightRequestNotificationEmail({ ...base, submission: { ip: { address: "198.51.100.50", version: "v4" }, location: pair("", ""), locationSource: CLOUDFLARE_GEO_SOURCE } });
     expect(without.text).not.toContain("Coordinates");
     // The CRM context is built from named fields only, so coordinates never leave in it.
-    const sent = buildVisitorContextHeaders({ ip: { address: "198.51.100.50", version: "v4" }, location: pair("37.77490", "-122.41940"), capturedAt: new Date() }, "s".repeat(40));
+    const sent = signedHeaders({ ip: { address: "198.51.100.50", version: "v4" }, location: pair("37.77490", "-122.41940"), capturedAt: new Date() }, "s".repeat(40));
     expect(Buffer.from(sent[VISITOR_CONTEXT_HEADER], "base64url").toString("utf8")).not.toMatch(/latitude|longitude|37\.77|122\.4/);
   });
 });

@@ -290,7 +290,7 @@ test.describe("privacy and boundary guards (structural)", () => {
   });
 
   test("the visitor's IP and location reach the CRM only inside the SIGNED visitor context, and the website writes no database row of its own", () => {
-    expect(action).toContain("buildVisitorContextHeaders(submissionInfo, api.config.ingestSecret)");
+    expect(action).toContain("createRequestSigner(submissionInfo, api.config.ingestSecret)");
     expect(action).not.toMatch(/prisma|saveLeadSubmissionInfo|LeadSubmissionInfo/);
     // The IP is never part of the JSON body: the CRM's strict endpoint rejects an `ipAddress` field, and only the signed context is believed.
     expect(read("src/lib/crm-api/flight-inquiry.ts")).not.toMatch(/ipAddress|submissionInfo|\.ip\b/);

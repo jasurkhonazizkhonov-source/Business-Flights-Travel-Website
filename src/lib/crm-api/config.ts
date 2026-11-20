@@ -5,9 +5,9 @@
 //
 //   CRM_API_URL         origin of the CRM on the private Docker network, e.g. http://compass-crm:3000   (required for every call)
 //   CRM_API_KEY         bearer key for POST /api/v1/website/flight-inquiries, >= 32 characters           (required for flight requests)
-//   CRM_COMPANY_ID      the CRM Company id for the CRM's PUBLIC endpoints (contact inquiry, newsletter)  (required for those two forms)
-//   LEAD_INGEST_SECRET  optional: signs the visitor's IP / approximate location sent with a flight request AND with a contact inquiry, >= 32 characters,
-//                       identical on both sides (without it the CRM records neither for that request)
+//   CRM_COMPANY_ID      the CRM Company id for the CRM's PUBLIC endpoints (contact inquiry, newsletter)  (required for those two forms; also needed to sign flight requests)
+//   LEAD_INGEST_SECRET  signs EVERY request (signing v2: method, path, company, exact body, one-time nonce, visitor IP / approximate location), >= 32 characters,
+//                       identical on both sides. Optional here, but a CRM that has the secret REFUSES unsigned requests, so set both or neither.
 //
 // None of these is ever a NEXT_PUBLIC_* variable and none is read by client code.
 
@@ -69,12 +69,18 @@ export function resolveCrmApiConfig(env: Env, target: CrmApiTarget): CrmApiConfi
 
   let ingestSecret: string | undefined;
   const rawSecret = env.LEAD_INGEST_SECRET?.trim();
-  // Both calls that create a CRM record about a visitor carry the signed visitor context: the flight request and the contact inquiry. (The newsletter
-  // call shares the public-inquiry target but never attaches it; the secret is simply not used there.) Before 2026-11-13 only the flight request got the
-  // secret, so a contact inquiry reached the CRM with no visitor IP or location at all.
-  if ((target === "flight-inquiry" || target === "public-inquiry") && rawSecret) {
+  // Every request to the CRM is signed (signing v2: method, path, company, exact body, one-time nonce) whenever a secret is configured: the flight request,
+  // the contact inquiry and the newsletter sign-up. A secret that is too short is not used (a warning, nothing is signed): the CRM, which requires a signature
+  // as soon as IT has a secret, then refuses the request and the visitor sees the generic failure.
+  if (rawSecret) {
     if (rawSecret.length >= MIN_SECRET_LENGTH) ingestSecret = rawSecret;
-    else warnings.push(`LEAD_INGEST_SECRET is shorter than ${MIN_SECRET_LENGTH} characters, so the visitor's IP and location are not sent`);
+    else warnings.push(`LEAD_INGEST_SECRET is shorter than ${MIN_SECRET_LENGTH} characters, so requests are not signed`);
+  }
+  // The signature binds the company. The public calls already carry it; the flight call's company is fixed by the CRM's credential, so signing it needs
+  // the same CRM_COMPANY_ID (the CRM's WEBSITE_API_COMPANY_ID) to be configured here as well.
+  if (target === "flight-inquiry" && ingestSecret) {
+    companyId = env.CRM_COMPANY_ID?.trim();
+    if (!companyId) problems.push("CRM_COMPANY_ID is not set (it is needed to sign flight requests)");
   }
 
   if (problems.length > 0 || !base.ok) return { ok: false, problems };
