@@ -8,7 +8,7 @@ Date: 2026-11-13. Local verification only (stand-in CRM and CRM unit tests). Not
 |------|----------|----------------|-----------------|-------------|
 | Flight request | `POST /api/v1/website/flight-inquiries` | `CRM_API_KEY` + `CRM_COMPANY_ID`, server side only | signed IP / location headers (needs `LEAD_INGEST_SECRET`) | request id |
 | Contact message | `POST /api/public/contact-inquiry` | none (public endpoint) | signed IP / location headers (**new in this change**) | `submissionId` |
-| Newsletter | `POST /api/public/newsletter` | none | not sent | CRM side |
+| Newsletter | `POST /api/public/subscribe` | none | not sent | CRM side |
 
 The website has no database and imports nothing from the CRM. Credentials are read in one server-only module. Structural tests assert all of this (43/43 in `crm-api-client.spec.ts`).
 
@@ -42,7 +42,7 @@ The contract was re-read against the CRM source as a read-only reference (the CR
 | Check | Result |
 |---|---|
 | Flight endpoint `POST /api/v1/website/flight-inquiries`: bearer `CRM_API_KEY`, `Idempotency-Key` header, body from `buildFlightInquiryBody` | consistent with the CRM route and tests; website suites green (Infrastructure 168 passed) |
-| Contact endpoint `POST /api/public/contact-inquiry` (unauthenticated, `CRM_COMPANY_ID` in the body, `submissionId`) and newsletter `POST /api/public/newsletter` | consistent with the CRM source; the website uses exactly these paths |
+| Contact endpoint `POST /api/public/contact-inquiry` (unauthenticated, `CRM_COMPANY_ID` in the body, `submissionId`) and newsletter `POST /api/public/subscribe` | consistent with the CRM source; the website uses exactly these paths |
 | Signature and timestamp | the website signs `ts` (unix seconds); the CRM accepts 300 s and at most 2048 bytes; verified with independent code in a test |
 | Replay protection | **None beyond the 300 s window**: no nonce and not bound to the body. The flight route has its own idempotency key; the visitor context is separate. Documented in the security audit (limitation 1); needs a joint change |
 | Company identification | flight: derived by the CRM from the API credential; contact and newsletter: `CRM_COMPANY_ID` in the body |
@@ -58,3 +58,5 @@ The contract was re-read against the CRM source as a read-only reference (the CR
 1. `vitest.config.ts` has no `exclude` for `.next/**`, so stale `.next/standalone` test copies are collected. Correction: `exclude: [...configDefaults.exclude, ".next/**"]`.
 2. The visitor context is not bound to the request body (see above).
 Both need separate approval.
+
+> **Erratum, 2026-11-15:** earlier versions of this report named the newsletter route `/api/public/newsletter`. The website, and the CRM, use `POST /api/public/subscribe` (website `src/lib/crm-api/client.ts`, CRM `src/app/api/public/subscribe/route.ts`). The name was wrong in the report only, never in the code. Corrected in the working tree; see `WEBSITE_LIVE_CRM_ENDPOINT_VERIFICATION.md`.
