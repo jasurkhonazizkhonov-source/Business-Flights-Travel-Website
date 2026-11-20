@@ -45,12 +45,15 @@ const securityHeaders = [
   { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
   {
     key: "Permissions-Policy",
-    value: "camera=(), microphone=(), geolocation=(), payment=(), usb=(), interest-cohort=()",
+    value: "camera=(), microphone=(), geolocation=(self), payment=(), usb=(), interest-cohort=()",
   },
   // Only takes effect when actually served over HTTPS (the header itself is
   // harmless over plain HTTP); enforced at the hosting/reverse-proxy layer,
   // this just tells browsers to remember and require it going forward.
-  { key: "Strict-Transport-Security", value: "max-age=63072000; includeSubDomains; preload" },
+  // Two years for THIS host only. `includeSubDomains` and `preload` are deliberately NOT sent: they bind every subdomain of the domain
+  // (and, with `preload`, make the domain eligible for the browsers' built-in list, which is very hard to undo) and nothing here can confirm
+  // that every subdomain is HTTPS-only or that the owner wants to be on that list. Add them only after that decision (docs/SECURITY_REVIEW_AND_REMAINING_LIMITATIONS.md).
+  { key: "Strict-Transport-Security", value: "max-age=63072000" },
 ];
 
 // Self-hosted (Docker) build only: `NEXT_OUTPUT=standalone` makes `next build` emit a minimal, self-contained server
@@ -94,6 +97,13 @@ const nextConfig: NextConfig = {
       { source: "/blog/airport-lounge-guide-for-executives", destination: "/blog/business-class-airport-lounge-guide", permanent: true },
       { source: "/blog/business-class-travel-tips", destination: "/blog/long-haul-business-class-travel-tips", permanent: true },
       { source: "/blog/best-airlines-for-business-class-routes", destination: "/blog/best-business-class-airlines-long-haul", permanent: true },
+      // Search Console 2026-11 (see docs/SEO_INDEXING_RECOVERY_AUDIT.md). Same test as above: only where the topic is the same page we publish.
+      // "Sleep better on overnight business-class flights" is the article we publish on sleeping on long-haul business class; "best airport
+      // lounges around the world" is the lounge topic our lounge guide covers (the guide, not a ranking of named lounges - a judgement call
+      // recorded in the audit); "/terms" is the conventional address of the page that lives at /terms-of-service.
+      { source: "/blog/sleep-better-on-overnight-business-class-flights", destination: "/blog/how-to-sleep-better-on-long-haul-business-class", permanent: true },
+      { source: "/blog/best-airport-lounges-around-the-world", destination: "/blog/business-class-airport-lounge-guide", permanent: true },
+      { source: "/terms", destination: "/terms-of-service", permanent: true },
     ];
   },
 };
