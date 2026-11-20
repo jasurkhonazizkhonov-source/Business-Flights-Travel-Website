@@ -13,7 +13,7 @@
 // Read-only (GET requests only). Default base is production.
 import fs from "node:fs";
 import path from "node:path";
-import { destinations, destinationPath } from "../src/data/destinations.ts";
+import { destinations, destinationPath, regionHubRegions } from "../src/data/destinations.ts";
 import { blogPosts } from "../src/data/blog-posts.ts";
 
 const args = process.argv.slice(2);
@@ -29,6 +29,7 @@ const HOST = new URL(BASE).host;
 const STATIC = ["", "/flights", "/business-class", "/destinations", "/how-it-works", "/about", "/blog", "/contact", "/privacy-policy", "/cookie-policy", "/terms-of-service"];
 const routes = [
   ...STATIC.map((p) => ({ path: p || "/", kind: "static" })),
+  ...regionHubRegions().map((r) => ({ path: `/destinations/${r}`, kind: "region-hub" })),
   ...destinations.map((d) => ({ path: destinationPath(d), kind: "destination", meta: d })),
   ...blogPosts.map((p) => ({ path: `/blog/${p.slug}`, kind: "blog", meta: p })),
 ];

@@ -444,6 +444,12 @@ export const destinations: Destination[] = [
     popularAirlines: ["Lufthansa", "British Airways", "Air France", "United Airlines"],
     bestTimeToVisit: "Late spring and early autumn offer the most comfortable temperatures.",
     airportInfo: "BUD (Budapest Ferenc Liszt International) is Hungary's primary international gateway.",
+    airportAccess:
+      "The 100E Airport Express is a direct bus between Budapest's Liszt Ferenc International Airport and Deák Ferenc tér in the city centre, calling at Kálvin tér on the way. Budapest's transport authority (BKK) gives the journey time to the city centre as 40 minutes and says buses run every 6 to 10 minutes during the day and every 30 to 40 minutes on average at night. Check the current timetable and ticket rules on bkk.hu before you travel.",
+    sources: [
+      { label: "BKK — 100E Airport Express", url: "https://bkk.hu/en/travel-information/airport-express/" },
+    ],
+    verifiedOn: "2026-11-20",
     faqs: [
       {
         question: "What's the best routing for business class to Budapest?",
@@ -474,6 +480,12 @@ export const destinations: Destination[] = [
     popularAirlines: ["Lufthansa", "United Airlines", "Delta Air Lines"],
     bestTimeToVisit: "Business travel is consistent year-round; late spring through early autumn pairs well with any personal time added on.",
     airportInfo: "MUC (Munich Airport) is Germany's second-busiest airport and a major Lufthansa hub.",
+    airportAccess:
+      "Munich Airport is linked to the city by the S-Bahn lines S1 and S8, which the airport says take approximately 40 minutes to the main railway station (Hauptbahnhof). The airport also lists a Lufthansa Express Bus to the Central Station, with a journey time of 45 minutes. Check the timetable for the day you travel.",
+    sources: [
+      { label: "Munich Airport — bus and train connections", url: "https://www.munich-airport.com/public-transport-260822" },
+    ],
+    verifiedOn: "2026-11-20",
     faqs: [
       {
         question: "Is Munich a good hub for onward European business travel?",
@@ -504,6 +516,13 @@ export const destinations: Destination[] = [
     popularAirlines: ["American Airlines", "British Airways", "Delta Air Lines"],
     bestTimeToVisit: "Late spring through early autumn offers the most reliable weather and the widest nonstop seasonal schedules.",
     airportInfo: "EDI (Edinburgh Airport) is Scotland's busiest airport.",
+    airportAccess:
+      "Edinburgh Trams run from Edinburgh Airport to the city centre. The airport describes the journey between the airport and the city centre as 30 minutes, with trams departing every 7 minutes between 6:30am and 7pm and every 10 minutes early in the morning and later in the evening; Edinburgh Trams itself says the journey to the city centre takes less than 35 minutes. Allow for the longer of the two if you have a tight connection.",
+    sources: [
+      { label: "Edinburgh Airport — by tram", url: "https://www.edinburghairport.com/transport-links/trams" },
+      { label: "Edinburgh Trams — Edinburgh Airport stop", url: "https://edinburghtrams.com/stop/edinburgh-airport" },
+    ],
+    verifiedOn: "2026-11-20",
     faqs: [
       {
         question: "Is nonstop service to Edinburgh available year-round?",
@@ -534,6 +553,12 @@ export const destinations: Destination[] = [
     popularAirlines: ["Scandinavian Airlines", "Lufthansa", "British Airways"],
     bestTimeToVisit: "May through September offers the most daylight and the most comfortable temperatures.",
     airportInfo: "OSL (Oslo Airport, Gardermoen) is Norway's primary international gateway.",
+    airportAccess:
+      "The Flytoget Airport Express is the direct train between Oslo Airport and Oslo Central Station. The operator says its direct trains take 19 minutes to Oslo Central Station and depart every ten minutes virtually all day. Check the live timetable on the day you travel.",
+    sources: [
+      { label: "Flytoget — train from Oslo Airport to the city", url: "https://flytoget.no/en/to-and-from-airport/train-from-oslo-airport-to-city/" },
+    ],
+    verifiedOn: "2026-11-20",
     faqs: [
       {
         question: "What's the best routing for business class to Oslo?",
@@ -2882,6 +2907,12 @@ export const destinations: Destination[] = [
     popularAirlines: ["Singapore Airlines", "United Airlines"],
     bestTimeToVisit: "Business travel to Singapore runs steadily year-round given its equatorial, relatively stable climate.",
     airportInfo: "SIN (Singapore Changi) is the sole major gateway and a primary hub for Southeast Asian and ultra-long-haul connectivity.",
+    airportAccess:
+      "Changi Airport has its own MRT station (CG2). The airport's directions describe two ways into the city by train: change at Tanah Merah (EW4) onto the East West Line, or at Expo (CG1/DT35) onto the Downtown Line. The airport also lists city buses from the basement bus bays of Terminals 1 to 3, and says a taxi ride to the city takes about 30 minutes.",
+    sources: [
+      { label: "Changi Airport — leaving the airport", url: "https://www.changiairport.com/en/at-changi/transport-and-directions/leaving-the-airport.html" },
+    ],
+    verifiedOn: "2026-11-20",
     faqs: [
       {
         question: "Are there nonstop ultra-long-haul business-class options from the U.S.?",
@@ -4799,6 +4830,25 @@ export function getFeaturedDestinations(limit?: number): Destination[] {
 
 export function getDestinationsByRegion(region: Region): Destination[] {
   return destinations.filter((d) => d.region === region);
+}
+
+/**
+ * A region gets its own hub page (src/app/destinations/[region]/page.tsx) only when it has enough destinations to make a hub worth reading
+ * and worth indexing: a "hub" of two cities (North America) would be a thin page, so those regions stay as a section of /destinations.
+ */
+export const REGION_HUB_MIN_DESTINATIONS = 9;
+
+export function regionHasHub(region: Region): boolean {
+  return getDestinationsByRegion(region).length >= REGION_HUB_MIN_DESTINATIONS;
+}
+
+export function regionHubRegions(): Region[] {
+  return REGIONS.filter((r) => regionHasHub(r.slug)).map((r) => r.slug);
+}
+
+/** The page that represents a region: its hub when it has one, otherwise the region's section of the destinations index. */
+export function regionPath(region: Region): string {
+  return regionHasHub(region) ? `/destinations/${region}` : `/destinations#${region}`;
 }
 
 // Slim shape for the header's destinations nav menu (desktop mega-menu and

@@ -5,6 +5,7 @@ import { Reveal } from "@/components/Reveal";
 import { ContactForm } from "@/components/contact/ContactForm";
 import { CONTACT_EMAIL, CONTACT_PHONE_DISPLAY, PRIMARY_CTA_LABEL } from "@/lib/constants";
 import { pageMetadata } from "@/lib/seo";
+import { BreadcrumbJsonLd } from "@/components/seo/BreadcrumbJsonLd";
 
 export const metadata: Metadata = pageMetadata({
   title: "Contact Our Flight Specialists",
@@ -15,6 +16,8 @@ export const metadata: Metadata = pageMetadata({
 
 export default function ContactPage() {
   return (
+    <>
+      <BreadcrumbJsonLd name="Contact" path="/contact" />
     <section className="mx-auto max-w-6xl px-4 py-16 sm:px-6 lg:px-8 lg:py-24">
       <Reveal>
         <p className="text-xs font-semibold tracking-[0.25em] text-[var(--color-gold-600)]">CONTACT</p>
@@ -59,5 +62,6 @@ export default function ContactPage() {
         </Reveal>
       </div>
     </section>
+    </>
   );
 }

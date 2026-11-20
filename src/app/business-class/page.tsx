@@ -6,6 +6,7 @@ import { Reveal } from "@/components/Reveal";
 import { CTASection } from "@/components/sections/CTASection";
 import { PRIMARY_CTA_LABEL } from "@/lib/constants";
 import { pageMetadata } from "@/lib/seo";
+import { BreadcrumbJsonLd } from "@/components/seo/BreadcrumbJsonLd";
 
 export const metadata: Metadata = pageMetadata({
   title: "Business-Class Flight Assistance",
@@ -67,6 +68,7 @@ const decisionPoints = [
 export default function BusinessClassPage() {
   return (
     <>
+      <BreadcrumbJsonLd name="Business Class" path="/business-class" />
       <section className="relative overflow-hidden bg-[var(--color-navy-950)] py-20 sm:py-28">
         <div className="absolute inset-0">
           <Image

@@ -1,5 +1,5 @@
 import type { MetadataRoute } from "next";
-import { destinations, destinationPath } from "@/data/destinations";
+import { destinations, destinationPath, regionHubRegions } from "@/data/destinations";
 import { blogPosts } from "@/data/blog-posts";
 import { SITE_URL } from "@/lib/constants";
 
@@ -39,6 +39,12 @@ export default function sitemap(): MetadataRoute.Sitemap {
       url: `${SITE_URL}${r.path}`,
       changeFrequency: r.changeFrequency,
       priority: r.priority,
+    })),
+    // Region hubs (src/app/destinations/[region]/page.tsx): only the regions that have one.
+    ...regionHubRegions().map((region) => ({
+      url: `${SITE_URL}/destinations/${region}`,
+      changeFrequency: "monthly" as const,
+      priority: 0.7,
     })),
     ...destinations.map((d) => ({
       url: `${SITE_URL}${destinationPath(d)}`,

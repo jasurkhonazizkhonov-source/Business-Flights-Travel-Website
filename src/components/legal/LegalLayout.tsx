@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { Reveal } from "@/components/Reveal";
+import { BreadcrumbJsonLd } from "@/components/seo/BreadcrumbJsonLd";
 
 const LEGAL_NAV = [
   { label: "Privacy Policy", href: "/privacy-policy" },
@@ -23,6 +24,7 @@ export function LegalLayout({
 }) {
   return (
     <>
+      <BreadcrumbJsonLd name={title} path={currentHref} />
       <section className="border-b border-[var(--color-navy-950)]/8 bg-[var(--color-cream-100)] py-12 sm:py-16">
         <div className="mx-auto max-w-3xl px-4 sm:px-6 lg:px-8">
           <Reveal>

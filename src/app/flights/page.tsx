@@ -4,6 +4,7 @@ import { Reveal } from "@/components/Reveal";
 import { SITE_NAME, CONTACT_PHONE_DISPLAY } from "@/lib/constants";
 import { resolveAirportByIata } from "@/server/queries/airports";
 import { pageMetadata } from "@/lib/seo";
+import { BreadcrumbJsonLd } from "@/components/seo/BreadcrumbJsonLd";
 
 // Server Actions inherit this page's limit, and so does the after()
 // notification submitFlightRequest schedules: its SMTP worst case is ~21s
@@ -50,6 +51,7 @@ export default async function FlightsPage({ searchParams }: PageProps<"/flights"
 
   return (
     <>
+      <BreadcrumbJsonLd name="Request a Quote" path="/flights" />
       <section className="bg-[var(--color-navy-950)] pb-14 pt-14 sm:pt-20">
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
           <div className="mx-auto max-w-2xl text-center">

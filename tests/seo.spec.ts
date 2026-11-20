@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { blogPosts } from "../src/data/blog-posts";
-import { destinations, destinationPath } from "../src/data/destinations";
+import { destinations, destinationPath, regionHubRegions } from "../src/data/destinations";
 import { isGenericFlyingFromUS, isGenericWhatToExpect, overviewIsRedundant } from "../src/lib/destination-content";
 
 // Search + sharing metadata, sitemap, robots, icons and structured data. Runs
@@ -266,6 +266,7 @@ test.describe("indexing policy", () => {
     const expected = new Set<string>([
       ORIGIN,
       ...["/flights", "/business-class", "/destinations", "/how-it-works", "/about", "/blog", "/contact", "/privacy-policy", "/cookie-policy", "/terms-of-service"].map((p) => ORIGIN + p),
+      ...regionHubRegions().map((r) => `${ORIGIN}/destinations/${r}`),
       ...destinations.map((d) => ORIGIN + destinationPath(d)),
       ...blogPosts.map((p) => `${ORIGIN}/blog/${p.slug}`),
     ]);
@@ -369,3 +370,93 @@ test.describe("crawlable HTML and destination content", () => {
     expect(overviewIsRedundant({ tagline: "A.", overview: "A. Something else entirely.", whyVisit: ["One", "Two"] })).toBe(false);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Search Console recovery pass (2026-11-20): see docs/SEO_INDEXING_RECOVERY_AUDIT.md.
+// ---------------------------------------------------------------------------
+test.describe("Search Console recovery: redirects, 404s, region hubs, breadcrumbs, robots", () => {
+  test("retired URLs with a same-topic page are 308s to a live indexable page; those without stay real 404s (never redirected to the home page)", async ({ request }) => {
+    const redirects: Record<string, string> = {
+      "/blog/sleep-better-on-overnight-business-class-flights": "/blog/how-to-sleep-better-on-long-haul-business-class",
+      "/blog/best-airport-lounges-around-the-world": "/blog/business-class-airport-lounge-guide",
+      "/blog/airport-lounge-guide-for-executives": "/blog/business-class-airport-lounge-guide",
+      "/terms": "/terms-of-service",
+    };
+    for (const [from, to] of Object.entries(redirects)) {
+      const res = await request.get(from, noRedirect);
+      expect(res.status(), from).toBe(308);
+      expect(new URL(res.headers()["location"], ORIGIN).pathname, from).toBe(to);
+      const target = await request.get(to, noRedirect);
+      expect(target.status(), to).toBe(200);
+      expect(canonicalOf(await target.text()), to).toBe(`${ORIGIN}${to}`);
+    }
+    for (const gone of ["/blog/singapore-airlines-business-class-lounges", "/blog/qatar-qsuite-vs-emirates-business-class", "/blog/emirates-business-class-guide", "/offers", "/cdn-cgi/l/email-protection"]) {
+      expect((await request.get(gone, noRedirect)).status(), gone).toBe(404);
+    }
+  });
+
+  test("robots.txt keeps every indexable section open and keeps crawlers out of /api/ and Cloudflare's /cdn-cgi/", async ({ request }) => {
+    const txt = await (await request.get("/robots.txt")).text();
+    expect(txt).toMatch(/Disallow: \/api\//);
+    expect(txt).toMatch(/Disallow: \/cdn-cgi\//);
+    expect(txt).toMatch(/Allow: \//);
+    expect(txt).not.toMatch(/Disallow:\s*\/(blog|destinations|flights|terms|offers)\b/);
+  });
+
+  test("region hubs exist exactly for the regions with enough destinations, and North/South America stay sections of /destinations", async ({ request }) => {
+    const hubs = regionHubRegions();
+    expect(hubs.sort()).toEqual(["africa", "asia", "europe", "middle-east", "oceania"]);
+    for (const region of hubs) {
+      const res = await request.get(`/destinations/${region}`, noRedirect);
+      expect(res.status(), region).toBe(200);
+      const html = await res.text();
+      expect(canonicalOf(html), region).toBe(`${ORIGIN}/destinations/${region}`);
+      expect(robotsMeta(html), region).not.toMatch(/noindex/i);
+      expect((html.match(/<h1[\s>]/g) || []).length, `${region} h1`).toBe(1);
+      // every destination of the region is linked from its hub (crawlable <a href>)
+      for (const d of destinations.filter((x) => x.region === region)) expect(html, `${region} -> ${d.city}`).toContain(`href="${destinationPath(d)}"`);
+    }
+    for (const region of ["north-america", "south-america", "antarctica"]) expect((await request.get(`/destinations/${region}`, noRedirect)).status(), region).toBe(404);
+  });
+
+  test("breadcrumb data on destination pages never contains a URL fragment, and names the region hub when there is one", async ({ request }) => {
+    // One request per destination page, one after the other: legitimately longer than the 30 s default on a busy machine (it took 20-37 s under load).
+    test.setTimeout(120_000);
+    for (const d of destinations) {
+      const html = await (await request.get(destinationPath(d), noRedirect)).text();
+      const ld = [...html.matchAll(/<script type="application\/ld\+json"[^>]*>([\s\S]*?)<\/script>/g)].map((m) => JSON.parse(m[1]));
+      const crumb = ld.find((x) => x["@type"] === "BreadcrumbList");
+      expect(crumb, d.city).toBeTruthy();
+      const items: string[] = crumb.itemListElement.map((i: { item: string }) => i.item);
+      for (const item of items) expect(item, `${d.city} ${item}`).not.toContain("#");
+      expect(items[items.length - 1]).toBe(`${ORIGIN}${destinationPath(d)}`);
+      expect(items.includes(`${ORIGIN}/destinations/${d.region}`), `${d.city} hub crumb`).toBe(hubs().includes(d.region));
+    }
+    const hubHtml = await (await request.get("/destinations/europe/germany/munich", noRedirect)).text();
+    expect(hubHtml).toContain(`"item":"${ORIGIN}/destinations/europe"`);
+    // A region with no hub (North America): the structured data lists Home > Destinations > City only; the visible breadcrumb link goes to the region's section of /destinations.
+    const naHtml = await (await request.get(destinationPath(destinations.find((x) => x.region === "north-america")!), noRedirect)).text();
+    const naCrumb = [...naHtml.matchAll(/<script type="application\/ld\+json"[^>]*>([\s\S]*?)<\/script>/g)].map((m) => JSON.parse(m[1])).find((x) => x["@type"] === "BreadcrumbList");
+    expect(naCrumb.itemListElement.map((i: { name: string }) => i.name)).toHaveLength(3);
+    expect(JSON.stringify(naCrumb)).not.toContain("#");
+  });
+
+  test("the destinations with verified airport access cite primary sources and a check date, and the hub pages are in the sitemap", async ({ request }) => {
+    const verified = destinations.filter((d) => d.airportAccess);
+    expect(verified.map((d) => d.citySlug).sort()).toEqual(expect.arrayContaining(["munich", "singapore", "oslo", "edinburgh", "budapest", "frankfurt", "zurich"]));
+    for (const d of verified) {
+      expect(d.verifiedOn, d.city).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+      expect(d.sources?.length, d.city).toBeGreaterThan(0);
+      // React puts "<!-- -->" between the text pieces of a heading; compare the text as a reader gets it.
+      const html = (await (await request.get(destinationPath(d), noRedirect)).text()).replace(/<!--[\s\S]*?-->/g, "");
+      expect(html, d.city).toContain(`From ${d.iata} Into the City`);
+    }
+    const sitemap = await (await request.get("/sitemap.xml")).text();
+    for (const region of regionHubRegions()) expect(sitemap).toContain(`<loc>${ORIGIN}/destinations/${region}</loc>`);
+    expect(sitemap).not.toMatch(/\/destinations#|\?to=|\/terms<|\/offers/);
+  });
+});
+
+function hubs() {
+  return regionHubRegions();
+}

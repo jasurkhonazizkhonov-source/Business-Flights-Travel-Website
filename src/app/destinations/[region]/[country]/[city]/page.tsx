@@ -5,7 +5,7 @@ import { notFound } from "next/navigation";
 import { ArrowRight, MapPin, Clock, PlaneTakeoff, Info, Route as RouteIcon } from "lucide-react";
 import { Reveal } from "@/components/Reveal";
 import { DestinationCard } from "@/components/destinations/DestinationCard";
-import { destinations, destinationPath, getDestination, regionLabel } from "@/data/destinations";
+import { destinations, destinationPath, getDestination, regionHasHub, regionLabel, regionPath } from "@/data/destinations";
 import { blogPosts } from "@/data/blog-posts";
 import { SITE_NAME, SITE_URL } from "@/lib/constants";
 import { pickRelatedDestinations } from "@/lib/related-destinations";
@@ -102,15 +102,18 @@ export default async function DestinationPage({ params }: PageProps<"/destinatio
   );
   const travelGuideSlugs = [...new Set([...specificGuideSlugs, ...GENERAL_TRAVEL_GUIDE_SLUGS])];
 
+  // Home > Destinations > [Region hub] > City. A region with no hub page (North and South America) has no crumb of its own: a fragment such as
+  // /destinations#north-america is not a page, so it is left out of the structured data rather than listed as one.
+  const crumbs: { name: string; item: string }[] = [
+    { name: "Home", item: SITE_URL },
+    { name: "Destinations", item: `${SITE_URL}/destinations` },
+    ...(regionHasHub(destination.region) ? [{ name: regionLabel(destination.region), item: `${SITE_URL}${regionPath(destination.region)}` }] : []),
+    { name: destination.city, item: `${SITE_URL}${destinationPath(destination)}` },
+  ];
   const breadcrumbJsonLd = {
     "@context": "https://schema.org",
     "@type": "BreadcrumbList",
-    itemListElement: [
-      { "@type": "ListItem", position: 1, name: "Home", item: SITE_URL },
-      { "@type": "ListItem", position: 2, name: "Destinations", item: `${SITE_URL}/destinations` },
-      { "@type": "ListItem", position: 3, name: regionLabel(destination.region), item: `${SITE_URL}/destinations#${destination.region}` },
-      { "@type": "ListItem", position: 4, name: destination.city, item: `${SITE_URL}${destinationPath(destination)}` },
-    ],
+    itemListElement: crumbs.map((c, i) => ({ "@type": "ListItem", position: i + 1, name: c.name, item: c.item })),
   };
 
   const faqJsonLd = destination.faqs.length
@@ -142,7 +145,7 @@ export default async function DestinationPage({ params }: PageProps<"/destinatio
             <nav aria-label="Breadcrumb" className="flex flex-wrap items-center gap-1 text-xs text-white/60">
               <Link href="/destinations" className="hover:text-white">Destinations</Link>
               <span aria-hidden="true">/</span>
-              <Link href={`/destinations#${destination.region}`} className="hover:text-white">{regionLabel(destination.region)}</Link>
+              <Link href={regionPath(destination.region)} className="hover:text-white">{regionLabel(destination.region)}</Link>
               <span aria-hidden="true">/</span>
               <span>{destination.country}</span>
               <span aria-hidden="true">/</span>

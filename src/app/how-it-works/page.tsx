@@ -3,6 +3,7 @@ import { Reveal } from "@/components/Reveal";
 import { HowItWorksSteps } from "@/components/sections/HowItWorksSteps";
 import { CTASection } from "@/components/sections/CTASection";
 import { pageMetadata } from "@/lib/seo";
+import { BreadcrumbJsonLd } from "@/components/seo/BreadcrumbJsonLd";
 
 export const metadata: Metadata = pageMetadata({
   title: "How Our Flight Request Process Works",
@@ -14,6 +15,7 @@ export const metadata: Metadata = pageMetadata({
 export default function HowItWorksPage() {
   return (
     <>
+      <BreadcrumbJsonLd name="How It Works" path="/how-it-works" />
       <section className="mx-auto max-w-5xl px-4 py-16 text-center sm:px-6 lg:px-8 lg:py-24">
         <Reveal>
           <p className="text-xs font-semibold tracking-[0.25em] text-[var(--color-gold-600)]">HOW IT WORKS</p>

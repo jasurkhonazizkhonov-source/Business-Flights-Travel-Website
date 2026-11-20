@@ -3,9 +3,10 @@ import Link from "next/link";
 import { Reveal } from "@/components/Reveal";
 import { DestinationCard } from "@/components/destinations/DestinationCard";
 import { PopularAirlines } from "@/components/sections/PopularAirlines";
-import { REGIONS, getFeaturedDestinations, getDestinationsByRegion } from "@/data/destinations";
+import { REGIONS, getFeaturedDestinations, getDestinationsByRegion, regionHasHub } from "@/data/destinations";
 import { FARE_DISCLAIMER } from "@/lib/fares";
 import { pageMetadata } from "@/lib/seo";
+import { BreadcrumbJsonLd } from "@/components/seo/BreadcrumbJsonLd";
 
 export const metadata: Metadata = pageMetadata({
   title: "Business-Class Flight Destinations",
@@ -19,6 +20,7 @@ const featured = getFeaturedDestinations(8);
 export default function DestinationsPage() {
   return (
     <>
+      <BreadcrumbJsonLd name="Destinations" path="/destinations" />
       <section className="mx-auto max-w-7xl px-4 py-14 sm:px-6 sm:py-20 lg:px-8">
         <Reveal>
           <p className="text-xs font-semibold tracking-[0.25em] text-[var(--color-gold-600)]">DESTINATIONS</p>
@@ -89,6 +91,16 @@ export default function DestinationsPage() {
                   {region.label.toUpperCase()}
                 </h2>
                 <p className="mt-1.5 max-w-xl text-sm text-[var(--color-navy-950)]/65">{region.blurb}</p>
+                {regionHasHub(region.slug) && (
+                  <p className="mt-2 text-sm">
+                    <Link
+                      href={`/destinations/${region.slug}`}
+                      className="font-semibold text-[var(--color-navy-900)] underline decoration-dotted underline-offset-2 hover:text-[var(--color-gold-600)]"
+                    >
+                      Browse {region.label} by country
+                    </Link>
+                  </p>
+                )}
               </Reveal>
               <div className="mt-7 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
                 {cities.map((d, i) => (

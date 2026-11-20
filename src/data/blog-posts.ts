@@ -314,7 +314,7 @@ export const blogPosts: BlogPost[] = [
     featuredImage: "https://images.unsplash.com/photo-1521737604893-d14cc237f11d?q=80&w=1600&auto=format&fit=crop",
     author: "Business Flights Travel Editorial Team",
     publishedAt: "2026-04-08",
-    updatedAt: "2026-09-02",
+    updatedAt: "2026-11-20",
     category: "Corporate Travel Tips",
     tags: ["corporate travel", "corporate business class travel", "business class travel agency"],
     seoTitle: "Corporate Travel Planning Tips | Business Flights Travel",
@@ -351,8 +351,45 @@ export const blogPosts: BlogPost[] = [
         text: "Corporate travel changes plans more often than leisure travel does — a client meeting moves, a trip gets extended, a connection is missed. Working with the same specialist across a series of trips means changes get handled by someone who already has the original itinerary and preferences on file, rather than starting from scratch with a new booking each time.",
       },
       {
+        type: "h2",
+        text: "Setting a simple travel policy",
+      },
+      {
+        type: "ul",
+        items: [
+          "Decide who can book which cabin on which routes, for example by the length of the flight.",
+          "Decide how far ahead trips are booked, and who approves exceptions.",
+          "Agree how changes and cancellations are handled.",
+          "Keep itineraries and receipts in one place so expenses are easy to reconcile.",
+          "Review the policy after a few trips and adjust it.",
+        ],
+      },
+      {
+        type: "p",
+        text: "A written policy saves the same discussion happening before every trip, and it makes the choices in a quote easier to compare because everyone is working from the same rules.",
+      },
+      {
+        type: "h2",
+        text: "Questions to ask any travel provider",
+      },
+      {
+        type: "ul",
+        items: [
+          "How do changes and cancellations work, and who handles them?",
+          "Can the itinerary and the fare rules be sent to me in writing before I pay?",
+          "How are receipts and invoices provided?",
+        ],
+      },
+      {
         type: "p",
         text: "If your organization travels internationally on a regular cadence, [tell us about your typical routes and preferences](/contact) and we'll tailor how we handle your requests going forward.",
+      },
+    ],
+    faqs: [
+      {
+        question: "How far ahead should a team book international business class?",
+        answer:
+          "Booking earlier generally gives more choice of flights and seats, particularly in busy seasons. Our guide on when to book international business class explains the factors involved.",
       },
     ],
     relatedSlugs: ["long-haul-business-class-travel-tips", "how-to-find-business-class-flight-deals", "business-class-flights-to-africa"],
@@ -433,7 +470,7 @@ export const blogPosts: BlogPost[] = [
     featuredImage: "https://images.unsplash.com/photo-1540959733332-eab4deabeeaf?q=80&w=1600&auto=format&fit=crop",
     author: "Business Flights Travel Editorial Team",
     publishedAt: "2026-08-11",
-    updatedAt: "2026-09-02",
+    updatedAt: "2026-11-20",
     category: "Choosing Your Flight",
     tags: ["business class vs first class", "luxury flights", "premium cabin flights"],
     seoTitle: "Business Class vs. First Class: What's the Real Difference? | Business Flights Travel",
@@ -475,6 +512,22 @@ export const blogPosts: BlogPost[] = [
         text: "For most international itineraries — including [long-haul business class](/blog/long-haul-business-class-travel-tips) on a strong modern seat product — business class delivers the majority of what first class offers (lie-flat rest, lounge access, priority handling) at a meaningfully lower price, and on far more routes and dates than first class is even offered. If comfortable rest and a productive arrival are the goal rather than the most exclusive product available, a well-chosen business-class seat is usually the more practical decision.",
       },
       {
+        type: "h2",
+        text: "A simple way to decide",
+      },
+      {
+        type: "p",
+        text: "Start with the flight rather than the cabin name: how long is it, is it overnight, and is the airline's business-class seat fully flat with direct aisle access? If it is, ask for the fare difference to first class and decide whether the extra space and service are worth it for this trip. If the business seat is older, compare first class with a different airline's business class on the same route as well.",
+      },
+      {
+        type: "h2",
+        text: "What your quote will show",
+      },
+      {
+        type: "p",
+        text: "When first class exists on a route, we show it next to business class, with the aircraft and seat for each option, so the comparison is between the actual products and the actual difference in price.",
+      },
+      {
         type: "p",
         text: "Not sure which makes sense for a specific route? [Submit a flight request](/flights) and tell us if first class is available and worth considering — we'll include it as an option alongside business class where it exists, rather than assuming you want the more expensive cabin by default.",
       },
@@ -490,6 +543,11 @@ export const blogPosts: BlogPost[] = [
         answer:
           "No — many airlines have phased out first class in favor of investing in a stronger business-class product across their whole fleet. Where first class still exists, it's usually limited to specific long-haul aircraft on the airline's highest-demand routes, not the entire network.",
       },
+      {
+        question: "Can I upgrade from business class to first class later?",
+        answer:
+          "Some airlines allow paid upgrades, or upgrades using miles, subject to availability and fare rules. It varies by airline and fare, so ask before you book if the option matters to you.",
+      },
     ],
     relatedSlugs: ["how-to-choose-the-right-business-class-flight", "understanding-business-class-seat-types", "business-class-flights-to-dubai"],
   },
@@ -501,7 +559,7 @@ export const blogPosts: BlogPost[] = [
     featuredImage: "https://images.unsplash.com/photo-1706945629188-60679cd384b3?q=80&w=1600&auto=format&fit=crop",
     author: "Business Flights Travel Editorial Team",
     publishedAt: "2026-08-25",
-    updatedAt: "2026-09-02",
+    updatedAt: "2026-11-20",
     category: "Business Class Travel Guides",
     tags: ["lie-flat seats", "business class cabins", "business class seat selection"],
     seoTitle: "Business-Class Seat Types Explained | Business Flights Travel",
@@ -543,8 +601,31 @@ export const blogPosts: BlogPost[] = [
         ],
       },
       {
+        type: "h2",
+        text: "Reading a seat map: what 1-2-1 and 2-2-2 mean",
+      },
+      {
+        type: "p",
+        text: "The numbers describe how many seats sit side by side across the cabin, separated by aisles. In a 1-2-1 layout there is one seat, an aisle, two seats, an aisle and one seat, so every seat has direct aisle access. In a 2-2-2 layout the window seats do not: the passenger beside the window has to pass the neighbour to reach the aisle.",
+      },
+      {
+        type: "h2",
+        text: "Choosing a seat within the cabin",
+      },
+      {
+        type: "p",
+        text: "Even in one cabin the best seat depends on what you want. Seats beside the galley or the toilets tend to see more movement and light, and the seat map for your flight shows what sits next to you. Travelling with a colleague or partner is a separate question: some layouts have pairs of seats that sit close together and some keep every seat apart, so say who is travelling when you ask for a seat.",
+      },
+      {
         type: "p",
         text: "When we prepare a quote through a [flight request](/flights), we note the seat type and configuration for each option, not just the cabin class, so you know what you're actually comparing.",
+      },
+    ],
+    faqs: [
+      {
+        question: "What does a 1-2-1 business-class layout mean?",
+        answer:
+          "It describes the seats across the cabin: one seat, an aisle, two seats, an aisle, then one seat. In a 1-2-1 layout every seat has direct access to an aisle. In a 2-2-2 layout the window seats do not.",
       },
     ],
     relatedSlugs: ["how-to-choose-the-right-business-class-flight", "best-business-class-airlines-long-haul", "business-class-flights-to-japan"],
@@ -557,7 +638,7 @@ export const blogPosts: BlogPost[] = [
     featuredImage: "https://images.unsplash.com/photo-1661954864180-e61dea14208a?q=80&w=1600&auto=format&fit=crop",
     author: "Business Flights Travel Editorial Team",
     publishedAt: "2026-07-16",
-    updatedAt: "2026-07-16",
+    updatedAt: "2026-11-20",
     category: "Business Class Travel Guides",
     tags: ["business class inclusions", "business class fare", "premium cabin benefits"],
     seoTitle: "What Does Business Class Include? | Business Flights Travel",
@@ -595,6 +676,28 @@ export const blogPosts: BlogPost[] = [
       },
       { type: "h2", text: "What varies the most" },
       {
+        type: "h2",
+        text: "How to compare two business-class fares",
+      },
+      {
+        type: "ul",
+        items: [
+          "Seat: is it fully lie-flat, and does every seat have direct aisle access?",
+          "Lounges: is access included at the departure airport, at any connection and at the destination?",
+          "Baggage: how many bags, and what weight limit, on every flight of the ticket?",
+          "Flexibility: what does it cost to change the date or cancel, and what is refundable?",
+          "Connectivity and service: is Wi-Fi available, and what are the meal and sleeping arrangements on an overnight flight?",
+        ],
+      },
+      {
+        type: "h2",
+        text: "What \"included\" does not mean",
+      },
+      {
+        type: "p",
+        text: "The inclusions an airline advertises apply to its own tickets and fares. A discounted business fare, a flight operated by a partner airline or a fare sold by a third party can come with different conditions. Read the fare rules, or ask for the specifics, before you rely on a particular benefit.",
+      },
+      {
         type: "p",
         text: "Change and cancellation flexibility varies significantly by fare class, not just cabin — some business-class fares allow free changes, others are heavily restricted for a lower price. Wi-Fi availability and cost, seat privacy (an open seat vs. an enclosed suite with a door), and whether you get guaranteed direct aisle access also depend on the specific airline and aircraft. When we prepare a quote through a [flight request](/flights), we explain what a given fare actually includes — not just the cabin name — so there are no surprises at the airport.",
       },
@@ -609,6 +712,11 @@ export const blogPosts: BlogPost[] = [
         question: "Does business class always mean a lie-flat seat?",
         answer:
           "Not always. Most long-haul international business class is now lie-flat, but shorter regional routes sometimes use a wide recliner instead. We note the actual seat type for the specific aircraft on your route.",
+      },
+      {
+        question: "Is Wi-Fi included in business class?",
+        answer:
+          "It depends on the airline and the aircraft. Some include it for business-class passengers, some charge for it, and some aircraft do not have it at all. We note it in your quote where we can confirm it.",
       },
     ],
     relatedSlugs: ["understanding-business-class-seat-types", "business-class-baggage-allowance-explained", "business-class-airport-lounge-guide"],
@@ -805,7 +913,7 @@ export const blogPosts: BlogPost[] = [
     featuredImage: "https://images.unsplash.com/photo-1700811476854-52f99a9f2ec1?q=80&w=1600&auto=format&fit=crop",
     author: "Business Flights Travel Editorial Team",
     publishedAt: "2026-07-20",
-    updatedAt: "2026-07-20",
+    updatedAt: "2026-11-20",
     category: "Airline / Cabin Education",
     tags: ["business class suites", "business class seat privacy", "business class cabins"],
     seoTitle: "Business-Class Suites vs. Traditional Seats | Business Flights Travel",
@@ -838,8 +946,42 @@ export const blogPosts: BlogPost[] = [
       },
       { type: "h2", text: "Is the suite worth prioritizing?" },
       {
+        type: "h2",
+        text: "Check which seat is on your flight",
+      },
+      {
+        type: "p",
+        text: "An airline can operate more than one business-class seat on the same route, and the aircraft assigned to a flight can change. Look at the seat map for your exact flight and date, and ask your specialist to confirm the aircraft type. We note the seat product for each option in your quote.",
+      },
+      {
+        type: "h2",
+        text: "Questions worth asking before you book",
+      },
+      {
+        type: "ul",
+        items: [
+          "Is the door full height, or is it a partial privacy panel?",
+          "Do all seats in the cabin have the suite design, or only some rows?",
+          "Does the seat convert to a fully flat bed, and does every seat have direct aisle access?",
+          "Is the same aircraft scheduled for your return flight?",
+          "Is the extra privacy worth any difference in fare for this particular trip?",
+        ],
+      },
+      {
         type: "p",
         text: "If privacy is a priority for you specifically — you want to feel fully enclosed to work, sleep, or simply not be visible to the aisle — a suite is worth seeking out, and increasingly available on newer aircraft from several major international carriers. If it isn't a priority, a well-configured traditional seat delivers most of the same comfort and rest. When we compare options for a [flight request](/flights), we note where a suite is available as part of the seat comparison, not just the cabin class.",
+      },
+    ],
+    faqs: [
+      {
+        question: "Is a business-class suite the same as first class?",
+        answer:
+          "Not necessarily. \"Suite\" is a marketing term that each airline uses in its own way: some use it for an enclosed business-class seat and others for their first-class cabin. Compare the actual seat and service rather than the name.",
+      },
+      {
+        question: "Does a suite change the service or the baggage allowance?",
+        answer:
+          "No. Service and baggage allowance are set by the cabin and the fare, not by the design of the seat.",
       },
     ],
     relatedSlugs: ["direct-aisle-access-business-class", "understanding-business-class-seat-types", "how-to-compare-business-class-cabins-across-airlines"],
@@ -901,7 +1043,7 @@ export const blogPosts: BlogPost[] = [
     featuredImage: "https://images.unsplash.com/photo-1714235058886-a0b38ad5066c?q=80&w=1600&auto=format&fit=crop",
     author: "Business Flights Travel Editorial Team",
     publishedAt: "2026-07-22",
-    updatedAt: "2026-07-22",
+    updatedAt: "2026-11-20",
     category: "Business Class Travel Guides",
     tags: ["business class baggage", "business class fare", "airline baggage policy"],
     seoTitle: "Business-Class Baggage Allowance Explained | Business Flights Travel",
@@ -933,6 +1075,27 @@ export const blogPosts: BlogPost[] = [
         text: "Even with a generous business-class allowance, oversized or overweight bags beyond the stated limit can still incur a fee — the allowance isn't unlimited. If you're traveling with sports equipment, musical instruments, or unusually bulky items, it's worth checking the specific airline's policy in advance rather than assuming business class covers anything.",
       },
       {
+        type: "h2",
+        text: "How to check your own allowance",
+      },
+      {
+        type: "ul",
+        items: [
+          "Your booking confirmation or e-ticket receipt normally states the baggage allowance for each flight on the ticket. Look for it before you pack, not at the check-in desk.",
+          "For each segment, read the baggage page of the airline that operates the flight, which may not be the airline that sold the ticket.",
+          "Note whether the allowance is counted in pieces or in total weight. Some airlines and routes use one system and some the other, and a single itinerary can mix them.",
+          "If a frequent-flyer status or an alliance tier adds to the allowance, confirm that it applies to the fare you are buying.",
+        ],
+      },
+      {
+        type: "h2",
+        text: "What to keep out of checked bags",
+      },
+      {
+        type: "p",
+        text: "Medication, travel documents, valuables and anything you need on arrival belong in the cabin. Spare lithium batteries and power banks must generally travel in cabin baggage rather than in checked bags under international dangerous-goods rules, and many airlines publish their own limits on them. If a bag is delayed or damaged, report it at the airline's desk before you leave the airport and keep your baggage tag: airlines and the international rules they follow set short time limits for claims, measured in days rather than weeks.",
+      },
+      {
         type: "p",
         text: "When we prepare a [flight request](/flights) quote, we confirm the actual baggage allowance for your specific itinerary and airline combination — useful information to have well before departure day, not a surprise at the check-in counter.",
       },
@@ -948,6 +1111,11 @@ export const blogPosts: BlogPost[] = [
         answer:
           "They can. A codeshare or partner-airline segment sometimes applies the operating airline's baggage policy rather than the ticketing airline's, which matters for multi-leg international trips.",
       },
+      {
+        question: "Is a baggage allowance counted by pieces or by weight?",
+        answer:
+          "Both systems are used. A piece-based allowance is common on routes to and from the Americas and a weight-based one is common elsewhere, but it depends on the airline and the fare. That is why the allowance should be read from your actual ticket rather than assumed.",
+      },
     ],
     relatedSlugs: ["what-does-business-class-actually-include", "business-travel-packing-guide-long-haul", "planning-a-comfortable-multi-city-business-trip"],
   },
@@ -959,7 +1127,7 @@ export const blogPosts: BlogPost[] = [
     featuredImage: "https://images.unsplash.com/photo-1631981990690-6542771a19a9?q=80&w=1600&auto=format&fit=crop",
     author: "Business Flights Travel Editorial Team",
     publishedAt: "2026-07-23",
-    updatedAt: "2026-07-23",
+    updatedAt: "2026-11-20",
     category: "Business Class Guides",
     tags: ["sleep on flights", "long-haul travel tips", "business class comfort"],
     seoTitle: "How to Sleep Better on Long-Haul Business Class | Business Flights Travel",
@@ -991,6 +1159,28 @@ export const blogPosts: BlogPost[] = [
       },
       { type: "h2", text: "On arrival" },
       {
+        type: "h2",
+        text: "A simple timing plan",
+      },
+      {
+        type: "p",
+        text: "Work backwards from your arrival. If you land in the morning local time, aim to sleep through most of the night portion of the flight and avoid a long nap shortly before landing. If you land in the evening, sleep less on the flight so that you are tired at local bedtime. If you have an early meeting, ask the crew to wake you in good time before landing.",
+      },
+      {
+        type: "h2",
+        text: "Small things that help",
+      },
+      {
+        type: "ul",
+        items: [
+          "Wear loose layers so you can adjust to the cabin temperature.",
+          "Bring your own eye mask, earplugs or noise-canceling headphones if you prefer them to the ones provided.",
+          "Use the bedding provided, and ask whether an extra pillow or mattress pad is available.",
+          "Avoid bright screens for a while before your planned sleep.",
+          "Set your watch to the destination time when you board, so you begin to think in that time.",
+        ],
+      },
+      {
         type: "p",
         text: "However well you sleep on the flight, give yourself a realistic adjustment period rather than expecting to be fully sharp immediately — see our [guide to reducing jet lag](/blog/how-to-reduce-jet-lag-business-travel) for practical steps once you land, especially for an important meeting or event the same day.",
       },
@@ -1005,6 +1195,11 @@ export const blogPosts: BlogPost[] = [
         question: "Should I sleep on the flight even if it's a daytime departure?",
         answer:
           "It depends on your destination's time zone relative to your departure — sleeping on a daytime flight can sometimes work against adjusting to local time. Planning your sleep window around your arrival time zone generally works better than defaulting to whenever you're tired.",
+      },
+      {
+        question: "How much sleep can I realistically get on an overnight flight?",
+        answer:
+          "It depends on the flight length, the departure time and the seat. On a shorter overnight flight the time you can sleep is limited by the meal service and the descent, which is why timing your rest around your arrival matters.",
       },
     ],
     relatedSlugs: ["understanding-business-class-seat-types", "how-to-reduce-jet-lag-business-travel", "long-haul-business-class-travel-tips"],
@@ -1162,7 +1357,7 @@ export const blogPosts: BlogPost[] = [
     featuredImage: "https://images.unsplash.com/photo-1604928141064-207cea6f571f?q=80&w=1600&auto=format&fit=crop",
     author: "Business Flights Travel Editorial Team",
     publishedAt: "2026-07-27",
-    updatedAt: "2026-07-27",
+    updatedAt: "2026-11-20",
     category: "Destination Planning",
     tags: ["business class to Japan", "business class to Tokyo", "transpacific flights"],
     seoTitle: "Business-Class Flights to Japan | Business Flights Travel",
@@ -1198,8 +1393,44 @@ export const blogPosts: BlogPost[] = [
         text: "Japan is far enough from the U.S. time-zone-wise that jet lag is a real consideration, especially for a short business trip with meetings soon after arrival. See our [guide to reducing jet lag](/blog/how-to-reduce-jet-lag-business-travel) and consider timing your flight and in-flight sleep around Tokyo's local schedule rather than your home time zone.",
       },
       {
+        type: "h2",
+        text: "From the airport into Tokyo",
+      },
+      {
+        type: "p",
+        text: "Both Tokyo airports are connected to the city by rail, but the station you arrive at and the length of the ride differ between Haneda and Narita, so check which airport your flight uses before you book a hotel or schedule a first meeting. Our [Tokyo destination page](/destinations/asia/japan/tokyo) has the airport details for the city.",
+      },
+      {
+        type: "h2",
+        text: "Osaka and the rest of Japan",
+      },
+      {
+        type: "p",
+        text: "Tokyo is not the only gateway. Osaka is reached through Kansai International Airport and Fukuoka has its own airport; see our pages for [Osaka](/destinations/asia/japan/osaka) and [Fukuoka](/destinations/asia/japan/fukuoka). Service from the United States to these cities is generally less frequent than to Tokyo, so connecting is common, and it is worth comparing a connection against flying to Tokyo and continuing by rail or on a domestic flight.",
+      },
+      {
+        type: "h2",
+        text: "Before you go",
+      },
+      {
+        type: "p",
+        text: "Entry requirements, customs rules and travel advisories are set by governments and change over time. Check the official Japanese and U.S. government sources and your airline before you travel. We arrange flights; we do not give visa or immigration advice.",
+      },
+      {
         type: "p",
         text: "When we prepare a [flight request](/flights) for Japan, we compare nonstop and connecting options, the specific aircraft and seat type on the route, and airport choice in Tokyo — not just the lowest fare.",
+      },
+    ],
+    faqs: [
+      {
+        question: "Which Tokyo airport is better for business travelers?",
+        answer:
+          "Haneda is closer to central Tokyo, which can save ground time, while Narita is farther out but well connected. Which one you use depends on the airline and route, so we confirm it as part of your quote.",
+      },
+      {
+        question: "How long is the flight from the United States to Tokyo?",
+        answer:
+          "Nonstop flights are typically 11 to 13 hours depending on the departure city. Connecting itineraries take longer.",
       },
     ],
     relatedSlugs: ["business-class-flights-to-asia-planning", "how-to-reduce-jet-lag-business-travel", "understanding-business-class-seat-types"],
@@ -1321,7 +1552,7 @@ export const blogPosts: BlogPost[] = [
     featuredImage: "https://images.unsplash.com/photo-1648737967037-96967e9151b5?q=80&w=1600&auto=format&fit=crop",
     author: "Business Flights Travel Editorial Team",
     publishedAt: "2026-07-30",
-    updatedAt: "2026-07-30",
+    updatedAt: "2026-11-20",
     category: "Practical Travel",
     tags: ["business travel packing", "long-haul flight tips", "business travel checklist"],
     seoTitle: "Business Travel Packing Guide for Long-Haul Flights | Business Flights Travel",
@@ -1355,8 +1586,37 @@ export const blogPosts: BlogPost[] = [
       },
       { type: "h2", text: "For a multi-city trip" },
       {
+        type: "h2",
+        text: "A short list you can reuse for every trip",
+      },
+      {
+        type: "ul",
+        items: [
+          "Passport and any entry documents, with a photo of each saved on your phone.",
+          "Phone, chargers and one power adapter that covers every country on your route.",
+          "Regular medication in its original packaging, in your carry-on.",
+          "One full change of clothes and the materials for your first meeting.",
+          "The address of your hotel and your first meeting, saved offline.",
+        ],
+      },
+      {
+        type: "h2",
+        text: "Adapters, chargers and liquids",
+      },
+      {
+        type: "p",
+        text: "Plug types and voltages differ between countries. Many laptop and phone chargers accept 100 to 240 volts, which is printed on the charger, so a single plug adapter is often all you need; check this for each device before you leave. Most airports also limit liquids in carry-on baggage to small containers carried in a single clear bag, so check the rules at each airport on your route.",
+      },
+      {
         type: "p",
         text: "If your itinerary covers more than one destination, packing versatile pieces that work across different climates and settings saves real hassle — see our [guide to planning a multi-city business trip](/blog/planning-a-comfortable-multi-city-business-trip) for how to think through the logistics of the whole itinerary, not just what to pack.",
+      },
+    ],
+    faqs: [
+      {
+        question: "What should never go in checked luggage?",
+        answer:
+          "Documents, medication, valuables, laptops and other electronics, and spare lithium batteries or power banks, which generally must be carried in the cabin. If a checked bag is delayed, these are the items you cannot do without.",
       },
     ],
     relatedSlugs: ["business-class-baggage-allowance-explained", "how-to-sleep-better-on-long-haul-business-class", "planning-a-comfortable-multi-city-business-trip"],
@@ -1369,7 +1629,7 @@ export const blogPosts: BlogPost[] = [
     featuredImage: "https://images.unsplash.com/photo-1517048676732-d65bc937f952?q=80&w=1600&auto=format&fit=crop",
     author: "Business Flights Travel Editorial Team",
     publishedAt: "2026-07-31",
-    updatedAt: "2026-07-31",
+    updatedAt: "2026-11-20",
     category: "Practical Travel",
     tags: ["multi-city travel", "business travel planning", "international itinerary"],
     seoTitle: "Planning a Multi-City Business Trip | Business Flights Travel",
@@ -1401,6 +1661,28 @@ export const blogPosts: BlogPost[] = [
       },
       { type: "h2", text: "Booking it as one request" },
       {
+        type: "h2",
+        text: "Start with the fixed dates",
+      },
+      {
+        type: "p",
+        text: "Write down the meetings or events that cannot move, then see what fits around them. The order that makes sense depends on where those dates fall as much as on distance: a routing that adds a day in one city can save you from landing the morning of an important meeting.",
+      },
+      {
+        type: "h2",
+        text: "Things that are easy to miss",
+      },
+      {
+        type: "ul",
+        items: [
+          "Entry requirements for every country on the route, such as visas and passport validity, which each country sets.",
+          "Time zones and any daylight-saving change that falls on your dates.",
+          "Baggage rules that differ between segments when different airlines operate them.",
+          "Hotel check-in times after an overnight arrival.",
+          "The time zone you return to, and what is waiting for you on the first day back.",
+        ],
+      },
+      {
         type: "p",
         text: "Our [flight request form](/flights) supports multi-city itineraries directly — add each segment of your trip, and a specialist reviews the whole routing together, rather than treating each flight as a separate, disconnected booking. That matters because the right cabin, connection time, and even airline can depend on how the segments fit together as a complete trip, not just each flight in isolation.",
       },
@@ -1415,6 +1697,11 @@ export const blogPosts: BlogPost[] = [
         question: "How much connection time should I build in for an international multi-city trip?",
         answer:
           "More than the airline's stated minimum, especially for a connection that involves changing terminals, re-clearing security, or crossing a border. We flag connections that are tight relative to the specific airports involved.",
+      },
+      {
+        question: "Who checks the entry requirements for each country on a multi-city trip?",
+        answer:
+          "You do. Visa and entry rules are set by each country, so check the official source for every country on your route. We arrange the flights and do not give immigration advice.",
       },
     ],
     relatedSlugs: ["how-to-reduce-jet-lag-business-travel", "corporate-travel-planning-tips", "business-travel-packing-guide-long-haul"],

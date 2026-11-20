@@ -7,7 +7,7 @@
 // http://localhost:3101. This is what section 24 of the SEO/indexing pass
 // asked for as a standing regression check, not a one-off script — rerun
 // it whenever destinations.ts/blog-posts.ts/route metadata changes.
-import { destinations, destinationPath } from "../src/data/destinations.ts";
+import { destinations, destinationPath, regionHubRegions } from "../src/data/destinations.ts";
 import { blogPosts } from "../src/data/blog-posts.ts";
 
 const BASE = process.argv[2] || "http://localhost:3101";
@@ -27,9 +27,14 @@ const STATIC_ROUTES = [
   "/terms-of-service",
 ];
 
+// Region hubs (src/app/destinations/[region]/page.tsx) are part of the sitemap, so they get the same checks as every other route.
+const hubRoutes = regionHubRoutes();
+function regionHubRoutes() {
+  return regionHubRegions().map((r) => `/destinations/${r}`);
+}
 const destinationRoutes = destinations.map((d) => destinationPath(d));
 const blogRoutes = blogPosts.map((p) => `/blog/${p.slug}`);
-const allRoutes = [...STATIC_ROUTES, ...destinationRoutes, ...blogRoutes];
+const allRoutes = [...STATIC_ROUTES, ...hubRoutes, ...destinationRoutes, ...blogRoutes];
 
 let failed = 0;
 let checked = 0;
@@ -128,7 +133,7 @@ async function checkRobots() {
 }
 
 console.log(`Checking ${allRoutes.length} routes against ${BASE} ...`);
-console.log(`(${STATIC_ROUTES.length} static, ${destinationRoutes.length} destinations, ${blogRoutes.length} blog articles)\n`);
+console.log(`(${STATIC_ROUTES.length} static, ${hubRoutes.length} region hubs, ${destinationRoutes.length} destinations, ${blogRoutes.length} blog articles)\n`);
 
 await checkRobots();
 await checkSitemap();

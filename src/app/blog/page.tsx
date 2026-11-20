@@ -6,6 +6,7 @@ import { PostCard } from "@/components/blog/PostCard";
 import { blogPosts } from "@/data/blog-posts";
 import { formatIsoDate } from "@/lib/format-date";
 import { pageMetadata } from "@/lib/seo";
+import { BreadcrumbJsonLd } from "@/components/seo/BreadcrumbJsonLd";
 
 export const metadata: Metadata = pageMetadata({
   title: "Business Travel Journal",
@@ -23,6 +24,8 @@ export default function BlogIndexPage() {
   const categories = Array.from(new Set(blogPosts.map((p) => p.category)));
 
   return (
+    <>
+      <BreadcrumbJsonLd name="Travel Journal" path="/blog" />
     <section className="mx-auto max-w-7xl px-4 py-16 sm:px-6 lg:px-8 lg:py-24">
       <Reveal>
         <p className="text-xs font-semibold tracking-[0.25em] text-[var(--color-gold-600)]">JOURNAL</p>
@@ -79,5 +82,6 @@ export default function BlogIndexPage() {
         ))}
       </div>
     </section>
+    </>
   );
 }
