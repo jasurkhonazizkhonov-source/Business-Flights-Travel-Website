@@ -1,0 +1,52 @@
+# Verification only. This workflow builds and tests the source; it NEVER deploys, never touches the VPS, Cloudflare, a database or the CRM, and uses no secret.
+# Read-only token; third-party actions are pinned to full commit SHAs (the tag each one is, is in the comment beside it).
+# What it deliberately does not run: the browser projects (they need Chromium and a long run: use `npm run test:ui` on a workstation), the Docker
+# rehearsal (`bash deploy/rehearsal/run.sh`, needs Docker), and anything that needs a database or the real CRM. See docs/PRODUCTION_REDEPLOYMENT_READINESS.md.
+name: verify
+
+on:
+  pull_request:
+  push:
+    branches: ["review/**"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+      - name: Install exactly what the lockfile says
+        run: npm ci
+      - name: Dependency audit (moderate and above)
+        run: npm audit --audit-level=moderate
+      - name: Type check
+        run: npx tsc --noEmit
+      - name: Lint
+        run: npx eslint . --quiet
+      - name: Production build (the same standalone build the Docker image makes)
+        run: npm run build
+        env:
+          NEXT_OUTPUT: standalone
+          NEXT_TELEMETRY_DISABLED: "1"
+      - name: Unit and contract tests (no browser, stand-in CRM on loopback only)
+        run: >
+          npx playwright test --project=Infrastructure --no-deps --workers=1
+          tests/crm-api-client.spec.ts tests/docker-topology.spec.ts
+      - name: Unit tests that need neither a browser nor a server
+        run: >
+          npx playwright test --project="Desktop Chrome" --workers=2
+          tests/rate-limit-hardening.spec.ts tests/rate-limit-client.spec.ts tests/email-validation.spec.ts tests/phone-validation.spec.ts
+          tests/flight-date-window.spec.ts tests/airport-suggestion.spec.ts tests/contact-visitor-context.spec.ts tests/submission-ip.spec.ts
