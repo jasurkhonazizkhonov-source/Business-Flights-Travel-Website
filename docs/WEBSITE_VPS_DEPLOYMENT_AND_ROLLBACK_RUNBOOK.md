@@ -206,7 +206,7 @@ Branch `review/website-parity-and-contact-ip-2026-11-15` (no merge to `main`, no
 git clone --branch review/website-parity-and-contact-ip-2026-11-15 --single-branch <repository URL> bft-release && cd bft-release
 npm ci                                   # exact lockfile; install scripts are limited to the two documented packages
 npm audit                                # expect: found 0 vulnerabilities
-npx tsc --noEmit && npx eslint .
+npx next typegen && npx tsc --noEmit && npx eslint . --quiet    # a fresh checkout has no generated route types: typegen first, or tsc fails with 'Cannot find name PageProps'
 NEXT_OUTPUT=standalone npm run build     # the same build the Docker image performs
 node scripts/validate-seo.mjs            # needs the built site on the port it prints; expect "0 failure(s)"
 npx playwright test --project="Desktop Chrome" --project="Mobile 320" --project="Mobile 375" --project="Mobile 390"

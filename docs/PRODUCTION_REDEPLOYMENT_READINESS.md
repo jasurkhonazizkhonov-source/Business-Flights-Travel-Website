@@ -11,7 +11,7 @@ Everything below ran **after the last source change**; results of earlier runs w
 | Check | Command (from the repository root) | Result |
 |---|---|---|
 | Dependency audit | `npm audit` | **0 vulnerabilities** |
-| Type check, lint | `npx tsc --noEmit`; `npx eslint . --quiet` | clean |
+| Type check, lint | `npx next typegen && npx tsc --noEmit`; `npx eslint . --quiet` (typegen first: see section 3, item 9) | clean |
 | Production build | `NEXT_OUTPUT=standalone npm run build` | succeeded, no warning or advisory notice |
 | SEO validation | `node scripts/validate-seo.mjs` (local build) | **223 routes, 0 failures** |
 | SEO inventory | `node scripts/audit-seo-inventory.mjs http://localhost:3101` | 0 non-200, 0 duplicate titles / descriptions / H1s, 0 broken internal links, max depth 2; 3 "problems" = the decorative `alt=""` background photo on `/`, `/about`, `/business-class` (correct HTML, counted by the script) |

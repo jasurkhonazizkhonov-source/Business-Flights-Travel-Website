@@ -32,6 +32,11 @@ jobs:
         run: npm ci
       - name: Dependency audit (moderate and above)
         run: npm audit --audit-level=moderate
+      # Next 16 generates the route types (PageProps, LayoutProps, AppRoutes) into .next/types; a fresh checkout has none, so the type check needs them first.
+      - name: Generate Next.js route types
+        run: npx next typegen
+        env:
+          NEXT_TELEMETRY_DISABLED: "1"
       - name: Type check
         run: npx tsc --noEmit
       - name: Lint
