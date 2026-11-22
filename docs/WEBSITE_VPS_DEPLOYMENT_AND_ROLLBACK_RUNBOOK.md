@@ -282,3 +282,63 @@ Liveness: `GET /api/health` (no CRM call, no detail); the container health check
 ### I. Rollback (unchanged, restated)
 
 Website-only: `deploy/rollback.sh previous` for a failed new release; the old database-backed release needs its own compose and `.env` (section 8). CRM: remove the override and unset `LEAD_INGEST_SECRET`. Cloudflare: undo each change in reverse order (E3, E2, E1).
+
+
+---
+
+## Release candidate addendum 2 (2026-11-22): checks added after the final audit
+
+Read together with addendum 1 (sections A-I above). Prepared, not executed.
+
+### J. Clock synchronisation check (before the first signed request, and whenever enquiries start failing)
+
+Signing v2 accepts a timestamp at most 120 s old and 30 s ahead of the CRM's clock, so the CRM host and the website host must both be NTP-synchronised. Read-only:
+```bash
+timedatectl status | grep -E "System clock synchronized|NTP service"      # on the VPS: expect "yes" / "active"
+date -u +%s ; docker exec <crm-container> date -u +%s ; docker exec business-flights-travel-bft-web-1 date -u +%s   # three UTC epoch seconds: they must agree within a few seconds
+```
+If they differ by more than ~20 s: fix NTP (do **not** widen the window). Symptoms of drift: every enquiry shows the generic error while `/api/health` stays green; the CRM log has `[website-signature] refused: expired` (website clock behind) or `... future` (website clock ahead); the website log has `the CRM refused the website's credential or route (HTTP 401)`. `bad_signature` instead means the two sides hold a different `LEAD_INGEST_SECRET` or company id; `replay` means a resent envelope. Details: `SECURITY_REVIEW_AND_REMAINING_LIMITATIONS.md`, section 6.
+
+### K. The preflight now requires the signing secret
+
+`deploy/preflight.sh` stops with an error when `LEAD_INGEST_SECRET` is missing from the website's `.env` (it used to warn). Set it, identical to the CRM's (32 characters or more; never typed into a shell history). Running without signing is possible only as a conscious decision: `PREFLIGHT_ALLOW_UNSIGNED=yes deploy/preflight.sh` (and the same variable in front of `deploy/deploy.sh`); do not use it for this release, because the CRM refuses unsigned requests once it has the secret.
+
+### E4. Edge rate limiting (recommended, not applied; Cloudflare change, needs your approval)
+
+The website's own limiter is per process and resets on every restart (security review, section 5). The edge rule is the reliable control.
+1. Security -> WAF -> Rate limiting rules -> Create rule, name `bft forms`. Expression: *Request Method equals POST* **and** *Header `Next-Action` exists* (that header marks a Server Action call; the three form actions are the site's only POST endpoints). Characteristic: IP. Rate: **12 requests per 10 minutes** (the website itself allows 8 per type per 10 minutes). Action: Block, duration 10 minutes (or Managed Challenge). Check the plan's limits on period and characteristics before relying on it.
+2. Second rule `bft visitor-hint`: URI Path equals `/api/visitor-hint`, 150 requests per 10 minutes per IP, Block.
+3. Verify after enabling (no secrets): submit the contact form once from your own connection (must succeed), reload `/flights` (the suggestion still appears); read the rule's events in the dashboard. Roll back by disabling the rule.
+
+### L. The live CRM test: what was verified about its safety (procedure itself: section F)
+
+Verified in the sources on 2026-11-22 (read-only; the CRM was not modified): a flight request or contact message creates the lead/inquiry and **in-app notifications for CRM staff only** (`admin-notifications.ts` inserts notification rows; no e-mail); the website's own notification e-mail is addressed to `GMAIL_SENDER_EMAIL`, the business's **own** inbox (its Reply-To is the visitor's address, so do **not** press Reply on the test e-mail); nothing is sent to the visitor's address. A newsletter sign-up creates a **marketing subscriber** record, which a later CRM campaign could pick up: use an address you own, have the CRM owner delete the subscriber afterwards, and do not run it while a campaign is scheduled to send to new subscribers. Identify every test record by the name `Release Test - do not call`, the e-mail you own, and a note field reading `RELEASE TEST - DELETE`. Approval needed from you: the three submissions; from the CRM owner: confirmation that no customer-facing automation exists for new leads and subscribers, and the deletion of the three records. Do not run the live-CRM contract spec (`tests/crm-contract-live.spec.ts`) against production: it is for a non-production CRM only and refuses a non-loopback target without explicit confirmation.
+
+### M. Docker rehearsal: status and prerequisites
+
+Status 2026-11-22: **not run**. This machine has no Docker, no Podman and no WSL distribution (`wsl.exe --status` reports WSL is not installed); nothing was installed. On a Docker machine (Docker Engine with the compose plugin, about 3 GB of free memory, no host ports used, the repository checked out at the release commit):
+```bash
+bash deploy/rehearsal/run.sh          # builds business-flights-web:rehearsal, starts a mock CRM + throw-away Postgres on isolated internal networks, ~30 checks, then removes only its own containers and networks
+```
+Success is the line `ALL CHECKS PASSED` and exit code 0; anything else is a failure to be explained. The script uses its own compose project (`bft-rehearsal`), mock secrets, no production network and no persistent volume, and never touches the live stack.
+
+### N. PostgreSQL-backed CRM tests: status
+
+Status 2026-11-22: **not run**. No PostgreSQL service, client or `DATABASE_URL` exists on this machine and none was installed. They belong to the CRM project (replay-nonce race, idempotency locks): run them there, against a disposable database that is not a shared host and never production, with that project's own documented command.
+
+### O. Verifying the release commit reproducibly
+
+`git rev-parse HEAD` on the branch is the release commit; `.github/workflows/verify.yml` runs the browser-free subset on GitHub for every push to a `review/**` branch (it never deploys). The full local verification is section B of addendum 1. After any change to `package.json` or the lockfile re-run `npm audit`; after any change under `src/`, rebuild with `NEXT_OUTPUT=standalone npm run build` before running the browser suites (they test the built server on port 3101).
+
+### P. Post-deployment smoke test (read-only, anonymous)
+
+```bash
+curl -s https://www.businessflights.travel/api/health                                  # 200, no application detail
+curl -sI https://www.businessflights.travel/ | grep -iE "strict-transport|content-security|x-frame|permissions-policy"   # HSTS max-age=63072000 (no includeSubDomains/preload), CSP, DENY, geolocation=(self)
+curl -s https://www.businessflights.travel/robots.txt | grep -E "Disallow: /(api|cdn-cgi)/|Sitemap"
+curl -s https://www.businessflights.travel/sitemap.xml | grep -c "<loc>"             # 223
+curl -sI https://www.businessflights.travel/terms | head -3                          # 308 -> /terms-of-service
+curl -sI https://www.businessflights.travel/offers | head -1                         # 404
+curl -s -H "Accept: application/json" https://www.businessflights.travel/api/visitor-hint   # {"countryCode":"..","airport":{..}}: no IP, no coordinates, Cache-Control: private, no-store
+```
+Then section F (live CRM test, with approval) and the Search Console steps in `SEO_TECHNICAL_VERIFICATION.md`.

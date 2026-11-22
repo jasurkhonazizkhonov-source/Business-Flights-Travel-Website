@@ -224,3 +224,17 @@ Googlebot receives the same text as a visitor: the content is in the server-rend
 * **Cloudflare (needs your approval, not done):** (a) a Redirect Rule so `businessflights.travel` -> `https://www.businessflights.travel` is one hop; (b) turn off *Email Address Obfuscation*; (c) confirm *Add visitor location headers*. A read-only checklist is in `PRODUCTION_REDEPLOYMENT_READINESS.md`.
 * **Google:** re-crawling and indexing are Google's decisions. After deployment: submit the sitemap, inspect a few representative URLs, and request indexing for a small number of high-priority pages only (checklist in `SEO_TECHNICAL_VERIFICATION.md`).
 * **Editorial:** the destination pages need verified, city-specific facts to become meaningfully more unique (the plan lists priorities and the exact data needed). No facts were invented in this pass.
+
+
+## 8. Re-check on 2026-11-22 (local production build of the release candidate; the live site was not used)
+
+**URLs.** Every URL in sections 1-6 was requested again from the local production build (`/flights?to=` x58, the six `noindex` URLs, the five 404 URLs, the 35 "discovered" and 21 "crawled" URLs) plus the apex host (emulated with a `Host` header), and compared with the treatment documented above: **125 of 125 URLs and the 3 apex checks behave exactly as documented** (the 58 `/flights?to=` URLs are 200 with canonical `https://www.businessflights.travel/flights`; the documented 308s and real 404s are unchanged; the 35 "discovered" URLs are 200, self-canonical, not `noindex` and in the sitemap (checked strictly), and the 21 "crawled" URLs return the status documented in section 6 (200, 308 or 404; only the status was compared for those); the apex answers `308` to the same path and query on `www`). The sitemap lists 223 URLs and `validate-seo` reports 0 failures.
+
+**Content claims re-checked** against the operators' pages (search results, not a direct page fetch; the 2026-11-20 pass read the pages themselves):
+* Oslo (Flytoget: 19 minutes, about every 10 minutes, virtually all day): **confirmed**.
+* Budapest (BKK 100E: Deák Ferenc tér via Kálvin tér, 40 minutes, every 6 to 10 minutes by day): **confirmed** (BKK gives 6-10 minutes on some weekdays and 7-10 on the others; the page's range covers both).
+* Edinburgh (tram every 7 minutes 6:30am-7pm, every 10 minutes early and late): **frequency confirmed**; the 30-minute journey figure was **not visible** in the search results (it was read on the airport's tram page on 2026-11-20); left unchanged.
+* **Munich: changed.** The airport's own pages state the S-Bahn journey to the main station slightly differently (about 40 minutes on one page, about 45 on others), and the bus's 45-minute figure could not be confirmed. The page now says "roughly 40 to 45 minutes ... its own pages state the figure slightly differently", names the Lufthansa Express Bus without a duration, and asks the reader to check the timetable for their day. Source link and check date unchanged (the claim is now weaker, not different).
+* Frankfurt, Zurich, Brussels, Singapore, Luxembourg City were not re-checked in this pass.
+
+Nothing else in this audit changed: no page was added, no redirect was added, the 58 `/flights?to=` URLs stay canonical to `/flights`, and no content was added to raise the number of indexed URLs. Indexing remains Google's decision.
