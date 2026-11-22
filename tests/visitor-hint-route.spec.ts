@@ -86,6 +86,29 @@ test.describe("behind Cloudflare (TRUSTED_PROXY=cloudflare)", () => {
     for (const feature of ["camera=()", "microphone=()", "payment=()", "usb=()"]) expect(policy).toContain(feature);
     expect(page.headers.get("content-security-policy")).toContain("connect-src 'self'");
   });
+
+  test("a client that hammers the route is answered with 429 and an empty, uncacheable body; other clients (and unidentified ones) are unaffected", async () => {
+    const as = (ip: string) => ({ ...FRANKFURT_HEADERS, "CF-Connecting-IP": ip });
+    // 120 answers are allowed per client per 10 minutes (the count is per client, not per route call from anyone).
+    const statuses: number[] = [];
+    for (let i = 0; i < 125; i++) statuses.push((await hint(server, as("203.0.113.77"))).status);
+    expect(statuses.slice(0, 120).every((s) => s === 200)).toBe(true);
+    expect(statuses.slice(120)).toEqual([429, 429, 429, 429, 429]);
+    const blocked = await hint(server, as("203.0.113.77"));
+    expect(blocked.status).toBe(429);
+    expect(blocked.text).toBe("{}");
+    expect(blocked.headers.get("cache-control")).toBe("private, no-store");
+    expect(blocked.headers.get("retry-after")).toBe("600");
+    expect(blocked.text).not.toMatch(/203\.0\.113|DE|FRA/);
+    // Another client is untouched; so is a request with no identifiable client (it has nothing to hint at, and no shared bucket to exhaust).
+    expect((await hint(server, as("203.0.113.78"))).status).toBe(200);
+    for (let i = 0; i < 130; i++) expect((await hint(server, { "CF-IPCountry": "DE" })).status).toBe(200);
+    // One IPv6 /64 is one client: a second address in the same /64 is already over the allowance, a different /64 is not.
+    for (let i = 0; i < 120; i++) await hint(server, as(`2607:f8b0:4005:1::${(i + 1).toString(16)}`));
+    expect((await hint(server, as("2607:f8b0:4005:1:ffff::9"))).status).toBe(429);
+    expect((await hint(server, as("2607:f8b0:4005:2::1"))).status).toBe(200);
+    expect(server.logs()).not.toMatch(/203\.0\.113\.7|2607:f8b0/);
+  });
 });
 
 test.describe("with no trusted proxy (a direct or unknown front end)", () => {

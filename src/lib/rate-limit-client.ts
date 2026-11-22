@@ -23,12 +23,26 @@ const WARN_EVERY_MS = 5 * 60 * 1000;
 let lastWarnAt = 0;
 
 /**
- * The rate-limit client key for a request: the canonical trusted client IP, or UNRESOLVED_CLIENT. Never any text taken from a header.
+ * The bucket for an IPv6 client is its /64 (the first four 16-bit groups), the unit one subscriber or one device is normally given: the owner of a /64
+ * can choose among 2^64 addresses, so a per-address bucket would let a single client mint a fresh allowance for every request. The result
+ * ("2001:db8:1:2::/64") is never a valid address, so it cannot collide with an IPv4 key or with UNRESOLVED_CLIENT. Input is the canonical form that
+ * normalizeIp returns (lower-case, zero-compressed, no embedded IPv4).
+ */
+export function ipv6Bucket(canonical: string): string {
+  const [head, tail] = canonical.split("::");
+  const front = head ? head.split(":") : [];
+  const back = tail === undefined ? [] : tail ? tail.split(":") : [];
+  const groups = tail === undefined ? front : [...front, ...Array(Math.max(0, 8 - front.length - back.length)).fill("0"), ...back];
+  return `${groups.slice(0, 4).join(":")}::/64`;
+}
+
+/**
+ * The rate-limit client key for a request: the trusted client IP (an IPv6 client by its /64), or UNRESOLVED_CLIENT. Never any text taken from a header.
  * The fallback is announced in the server log at most once per interval, with the value-free reason category only.
  */
 export function rateLimitClientKey(headerList: Headers, now: number = Date.now()): string {
   const resolved = resolveClientIp(headerList);
-  if (resolved.ok) return resolved.address;
+  if (resolved.ok) return resolved.address.includes(":") ? ipv6Bucket(resolved.address) : resolved.address;
   if (now - lastWarnAt >= WARN_EVERY_MS) {
     lastWarnAt = now;
     console.warn(
