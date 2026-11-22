@@ -111,7 +111,7 @@ cp <old checkout>/.env <new dir>/.env && chmod 600 <new dir>/.env
 ## 5. Update the CRM  [APPROVAL: production change, brief CRM interruption]
 
 1. Build/obtain the CRM image from the updated CRM source (the commit that contains `website-request-signature.ts`).
-2. Set `LEAD_INGEST_SECRET` in the **CRM** `.env` (same value as the website's will be). **From this moment the CRM refuses unsigned website requests** (the old website does not call these routes, so nothing live breaks). Set it only after the privacy wording decision (see the report).
+2. Set `LEAD_INGEST_SECRET` in the **CRM** `.env` (same value as the website's will be). Leave `WEBSITE_SIGNATURE_REQUIRED` **unset** for now (transitional mode: a valid v2 signature is verified, unsigned requests are still accepted); it is switched on in step 7 below, after the website is live and signing (see section Q). Set it only after the privacy wording decision (see the report).
 3. Apply Path 2 (or Path 1) from the "Network" section, recreating **only** the CRM app and the connector:
 ```bash
 cd <crm checkout>
@@ -342,3 +342,16 @@ curl -sI https://www.businessflights.travel/offers | head -1                    
 curl -s -H "Accept: application/json" https://www.businessflights.travel/api/visitor-hint   # {"countryCode":"..","airport":{..}}: no IP, no coordinates, Cache-Control: private, no-store
 ```
 Then section F (live CRM test, with approval) and the Search Console steps in `SEO_TECHNICAL_VERIFICATION.md`.
+
+### Q. Signature rollout (transitional -> strict) and secret rotation: read from the CRM source on 2026-11-22 (`website-request-signature.ts`, not modified)
+
+The CRM has two modes, chosen only by its environment: **transitional** (the default: `LEAD_INGEST_SECRET` set, `WEBSITE_SIGNATURE_REQUIRED` unset) verifies a valid v2 envelope and uses it, but **still accepts unsigned and v1 requests exactly as before**; **strict** (`WEBSITE_SIGNATURE_REQUIRED=true`, which needs a configured secret) refuses a missing, v1, invalid, expired or replayed signature with `401`. An earlier revision of this runbook said that setting the secret makes the CRM refuse unsigned requests: that is true **only in strict mode**.
+
+**Order (nothing here was executed):**
+1. Deploy the CRM from the release commit with `LEAD_INGEST_SECRET` set and `WEBSITE_SIGNATURE_REQUIRED` **unset**. Check its health. Unsigned traffic keeps working, so the CRM can go first without breaking the live website.
+2. Put the same `LEAD_INGEST_SECRET` in the website's `.env`; run `deploy/preflight.sh` (it now stops without the secret) and deploy the website.
+3. Check the clocks (section J) and that signed requests arrive: with the approved test submission (section F) the CRM log shows no `[website-signature] refused:` line and the lead has a verified IP/location.
+4. **Only then** set `WEBSITE_SIGNATURE_REQUIRED=true` on the CRM and restart it: from now on an unsigned or invalid request is a `401` (the visitor sees the generic error). This is the state in which the website cannot silently run unsigned. Do not do this before step 3 succeeded, or a mis-set secret takes the forms down.
+5. Rollback of step 4 is unsetting the flag and restarting the CRM (transitional again); rollback of the whole release is section 8.
+
+**Rotating the secret** (the CRM accepts a second, older secret for the overlap; the website holds one): (a) generate a new secret (32+ characters) in your password manager; (b) on the CRM set `LEAD_INGEST_SECRET` to the NEW value and `LEAD_INGEST_SECRET_PREVIOUS` to the OLD value, restart the CRM (both are now accepted); (c) set the NEW value in the website's `.env` and redeploy/restart the website container; (d) confirm signed requests verify (log, test submission); (e) remove `LEAD_INGEST_SECRET_PREVIOUS` from the CRM and restart. Never put either value in a shell history, a ticket or Git. A website that is still on the old secret after (e) is refused in strict mode: do (c) and (d) before (e).

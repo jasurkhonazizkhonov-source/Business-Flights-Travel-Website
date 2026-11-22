@@ -7,7 +7,7 @@
 //   CRM_API_KEY         bearer key for POST /api/v1/website/flight-inquiries, >= 32 characters           (required for flight requests)
 //   CRM_COMPANY_ID      the CRM Company id for the CRM's PUBLIC endpoints (contact inquiry, newsletter)  (required for those two forms; also needed to sign flight requests)
 //   LEAD_INGEST_SECRET  signs EVERY request (signing v2: method, path, company, exact body, one-time nonce, visitor IP / approximate location), >= 32 characters,
-//                       identical on both sides. Optional here, but a CRM that has the secret REFUSES unsigned requests, so set both or neither.
+//                       identical on both sides. Optional here, but without it requests are UNSIGNED: a CRM in strict mode (WEBSITE_SIGNATURE_REQUIRED=true) REFUSES them, a CRM in transitional mode accepts them without a verified visitor IP, so set both sides.
 //
 // None of these is ever a NEXT_PUBLIC_* variable and none is read by client code.
 

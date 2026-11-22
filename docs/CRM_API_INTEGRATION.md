@@ -174,8 +174,8 @@ canonicalMessage = "CT-WEBSITE-REQUEST-V2" LF then the fields METHOD | path | co
   behind the tunnel; never a form field, never the visitor's own `X-Forwarded-For`). `country`/`region` are codes and `city` is percent-encoded. When nothing was
   observed the request is still signed and carries no visitor facts. The newsletter call also carries the visitor IP, **only** so the CRM can rate-limit that public
   route per visitor; the CRM stores no subscriber IP.
-* **Set the secret on both sides together.** A CRM that has `LEAD_INGEST_SECRET` **refuses unsigned requests** (the visitor sees the generic failure message, nothing is
-  stored); a CRM without it records no visitor IP or location and accepts unsigned requests as before. The flight call also needs `CRM_COMPANY_ID` (the CRM's
+* **Set the secret on both sides together.** A CRM that has `LEAD_INGEST_SECRET` **and** `WEBSITE_SIGNATURE_REQUIRED=true` (strict mode) **refuses unsigned requests** (the visitor sees the generic failure message, nothing is
+  stored); with the secret but without that flag (transitional mode, the default) it verifies a valid v2 signature and still accepts unsigned requests as before, without a verified visitor IP or location; a CRM without the secret records no visitor IP or location. Rollout order and key rotation (`LEAD_INGEST_SECRET_PREVIOUS`): `WEBSITE_VPS_DEPLOYMENT_AND_ROLLBACK_RUNBOOK.md`, section Q. The flight call also needs `CRM_COMPANY_ID` (the CRM's
   `WEBSITE_API_COMPANY_ID`) once a secret is set, because the signature binds the company.
 * The two servers' clocks must agree: the CRM accepts a timestamp at most 120 seconds old and 30 seconds ahead (keep both on NTP).
 * **Deployment order:** the CRM first (a build that has v2, with its secret set), the website second. The signing code is in the website release; a website
