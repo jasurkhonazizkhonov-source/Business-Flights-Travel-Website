@@ -63,6 +63,22 @@ for (const { name, path } of PAGES) {
       // (On pages with their own primary button in view it deliberately hides itself: aria-hidden.)
       return !fab || fab.getAttribute("aria-hidden") === "true" || getComputedStyle(fab).opacity === "1";
     });
+    // The fixed sleeps above are guesses about how long the fade-ins take; under load (three browsers on a small machine) one run of the Blog index scan caught
+    // text mid-fade and reported a contrast failure that was gone on the retry. Wait for the STATE instead: no animation running, and no element with an inline
+    // opacity (what the animation library writes) left between 0 and 1. Bounded, so a page that deliberately rests at a partial inline opacity cannot hang
+    // the test: after the bound the scan runs exactly as before.
+    await page
+      .waitForFunction(
+        () =>
+          !document.getAnimations().some((a) => a.playState === "running") &&
+          [...document.querySelectorAll<HTMLElement>('[style*="opacity"]')].every((el) => {
+            const o = Number.parseFloat(getComputedStyle(el).opacity);
+            return Number.isNaN(o) || o === 0 || o === 1;
+          }),
+        undefined,
+        { timeout: 8000 },
+      )
+      .catch(() => undefined);
     const results = await new AxeBuilder({ page })
       // Best-practice rules (e.g. "region", "landmark-unique") are useful
       // guidance but not WCAG failures on their own — scoring only against

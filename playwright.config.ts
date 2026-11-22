@@ -21,6 +21,7 @@ const INFRASTRUCTURE_SPECS = [
   /vps-deployment\.spec\.ts$/,
   /docker-topology\.spec\.ts$/, // static checks of the compose files and the rehearsal project (no Docker needed)
   /visitor-hint-route\.spec\.ts$/, // standalone servers, raw HTTP
+  /http-boundaries\.spec\.ts$/, // standalone server, raw HTTP: hostile and malformed requests
 ];
 const VIEWPORT_PROJECTS = ["Desktop Chrome", "Mobile 320", "Mobile 375", "Mobile 390"];
 
