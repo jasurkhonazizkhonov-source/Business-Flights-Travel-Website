@@ -20,7 +20,13 @@ ok "required variables are present (values not shown)"
 ok "CRM_API_KEY has at least 32 characters"
 ingest="$(env_value LEAD_INGEST_SECRET)"
 if [ -z "${ingest}" ]; then
-  warn "LEAD_INGEST_SECRET is not set: requests to the CRM are NOT signed. A CRM that has this secret refuses unsigned requests (visitors see a generic error), and a CRM without it records no visitor IP or location. Set it, identical to the CRM's, on both sides together."
+  # This release's contract with the CRM is signed requests (signing v2). Without the secret the website would still send, but UNSIGNED: a CRM that has the
+  # secret refuses every enquiry (visitors see a generic error) and one without it records no visitor IP or location. That must be a decision, not an accident.
+  if [ "${PREFLIGHT_ALLOW_UNSIGNED:-}" = "yes" ]; then
+    warn "LEAD_INGEST_SECRET is not set and PREFLIGHT_ALLOW_UNSIGNED=yes was given: requests to the CRM are NOT signed (a CRM that has this secret refuses them; one without it records no visitor IP or location)."
+  else
+    die "LEAD_INGEST_SECRET is not set, so requests to the CRM would be NOT signed (no signing v2; a CRM that has the secret refuses them, one without it records no visitor IP or location). Set it, identical to the CRM's, on both sides together. Only if you knowingly run without signing: PREFLIGHT_ALLOW_UNSIGNED=yes deploy/preflight.sh"
+  fi
 elif [ "$(printf '%s' "${ingest}" | wc -c)" -lt 32 ]; then
   die "LEAD_INGEST_SECRET is shorter than 32 characters"
 else

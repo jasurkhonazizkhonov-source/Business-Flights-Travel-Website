@@ -124,7 +124,11 @@ function baseState(over: Partial<State> = {}): State {
 
 // A valid .env for the API-only website. Values are fakes: 40 and 48 characters of filler.
 const KEY40 = "k".repeat(40);
-const ENV_OK = `CRM_API_KEY=${KEY40}\nCRM_COMPANY_ID=company-1\nGMAIL_SENDER_EMAIL=a@example.com\nGMAIL_APP_PASSWORD=not-a-real-password\n`;
+const SIGNING40 = "g".repeat(40);
+// Signing is part of this release's contract with the CRM, so a valid .env carries LEAD_INGEST_SECRET (the preflight refuses to proceed without it unless
+// PREFLIGHT_ALLOW_UNSIGNED=yes is given on purpose).
+const ENV_OK = `CRM_API_KEY=${KEY40}\nCRM_COMPANY_ID=company-1\nGMAIL_SENDER_EMAIL=a@example.com\nGMAIL_APP_PASSWORD=not-a-real-password\nLEAD_INGEST_SECRET=${SIGNING40}\n`;
+const ENV_NO_SIGNING = ENV_OK.replace(`LEAD_INGEST_SECRET=${SIGNING40}\n`, "");
 
 /** A throwaway clean git checkout containing only what the scripts need, plus the stub docker. */
 function sandbox(state: State, opts: { dirty?: boolean; env?: string } = {}) {
@@ -347,11 +351,21 @@ test.describe("deploy scripts, dry-run against a stub docker", () => {
     expect(r.code, r.out).toBe(0);
     r = run("");
     expect(r.code, r.out).toBe(0);
-    expect(r.out).toMatch(/WARN: LEAD_INGEST_SECRET is not set: requests to the CRM are NOT signed/);
-    r = run("LEAD_INGEST_SECRET=short\n");
+    expect(r.out).toContain("LEAD_INGEST_SECRET is set");
+    // No secret: the website would send UNSIGNED requests. The deployment stops, unless the operator says so explicitly.
+    r = run("", ENV_NO_SIGNING);
+    expect(r.code).not.toBe(0);
+    expect(r.out).toMatch(/LEAD_INGEST_SECRET is not set, so requests to the CRM would be NOT signed/);
+    expect(r.out).toContain("PREFLIGHT_ALLOW_UNSIGNED=yes");
+    const unsigned = sandbox(baseState(), { env: ENV_NO_SIGNING });
+    r = unsigned.run("preflight.sh", [], { PREFLIGHT_ALLOW_UNSIGNED: "yes" });
+    allCalls.push(...unsigned.calls());
+    expect(r.code, r.out).toBe(0);
+    expect(r.out).toMatch(/WARN: LEAD_INGEST_SECRET is not set and PREFLIGHT_ALLOW_UNSIGNED=yes was given: requests to the CRM are NOT signed/);
+    r = run("LEAD_INGEST_SECRET=short\n", ENV_NO_SIGNING);
     expect(r.code).not.toBe(0);
     expect(r.out).toMatch(/LEAD_INGEST_SECRET is shorter than 32 characters/);
-    r = run(`LEAD_INGEST_SECRET=${"s".repeat(40)}\n`);
+    r = run(`LEAD_INGEST_SECRET=${"s".repeat(40)}\n`, ENV_NO_SIGNING);
     expect(r.code, r.out).toBe(0);
     expect(r.out).toContain("LEAD_INGEST_SECRET is set");
     expect(r.out).not.toContain("s".repeat(40));

@@ -390,6 +390,25 @@ test.describe("POST /api/v1/website/flight-inquiries against the stand-in CRM", 
     expect(crm.requests[1].visitor).toEqual({ state: "invalid", reason: "replay" });
   });
 
+  test("clock drift: a timestamp up to ~2 minutes old or ~30 seconds ahead is accepted; beyond that the CRM refuses it (401), the website does not retry and never reports success", async () => {
+    // The CRM accepts a timestamp at most 120 s old and 30 s ahead of ITS clock (website-request-signature.ts in the CRM; the stand-in enforces the same
+    // numbers). A website server whose clock is wrong by more than that has every signed request refused - which is what the operator must be able to see.
+    const info = { ip: { address: "198.51.100.77", version: "v4" as const }, capturedAt: new Date() };
+    const skewed = (seconds: number) => createRequestSigner(info, INGEST, () => Date.now() + seconds * 1000);
+    expect(await send({ sign: skewed(-100) })).toMatchObject({ status: "created" }); // the website's clock is 100 s behind: still inside the window
+    crm.reset();
+    expect(await send({ sign: skewed(20) })).toMatchObject({ status: "created" }); // 20 s ahead: inside the (smaller) future allowance
+    crm.reset();
+    expect(await send({ sign: skewed(-150) })).toMatchObject({ status: "misconfigured", httpStatus: 401, attempts: 1 });
+    expect(crm.requests[0].visitor).toEqual({ state: "invalid", reason: "expired" });
+    crm.reset();
+    expect(await send({ sign: skewed(45) })).toMatchObject({ status: "misconfigured", httpStatus: 401, attempts: 1 });
+    expect(crm.requests[0].visitor).toEqual({ state: "invalid", reason: "future" });
+    crm.reset();
+    // the widened window is NOT the remedy: a clock that is off by minutes stays refused however many times it is retried
+    expect(await send({ sign: skewed(-3600) })).toMatchObject({ status: "misconfigured", httpStatus: 401, attempts: 1 });
+  });
+
   test("no outcome ever contains the key, a customer value or the CRM's message text", async () => {
     const outcomes = [
       await send(),
