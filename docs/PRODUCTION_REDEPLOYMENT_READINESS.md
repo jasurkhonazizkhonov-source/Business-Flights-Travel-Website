@@ -60,7 +60,7 @@ Everything below ran **after the last source change**; results of earlier runs w
 | 6 | **Live VPS inspection** | Not done (read-only checks in runbook step 0 and the trust-boundary list: nothing else on the tunnel network, no other route to the origin, NTP on both hosts) | Your access on the server |
 | 7 | **Legal review** | Privacy, Cookie Policy, Terms and the location paragraph unreviewed (section 8) | Counsel |
 | 8 | **Real-user performance** | Lab only; some pages exceed 2.5 s LCP under a harsh emulation | PageSpeed Insights / CrUX / Search Console after deployment |
-| 9 | **CI workflow first run** | The workflow could not be run on this machine; its first run on GitHub is recorded below after the push | none unless it fails |
+| 9 | **CI workflow first run** | **Verified on GitHub.** The first run (commit `5a78c87`) **failed** at the type check on the Linux runner: Next 16 writes `PageProps`/`LayoutProps` into `.next/types`, a fresh checkout has none, and the check had only passed locally because an earlier build had left them. Reproduced locally by hiding `.next/types`; fixed by running `npx next typegen` first (workflow, runbook and this document now use that order). The second run (commit `d12dc65`, run 45014077398) **passed every step**: `npm ci`, `npm audit`, typegen, type check, lint, the standalone production build, and the two browser-free test steps. The workflow still does not run the browser projects, the Docker rehearsal or anything needing PostgreSQL | none unless it fails |
 
 ## 4. Environment variables (names only; values never in the repository)
 
