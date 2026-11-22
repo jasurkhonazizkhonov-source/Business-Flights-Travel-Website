@@ -135,7 +135,7 @@ export default async function DestinationPage({ params }: PageProps<"/destinatio
 
       <section className="relative overflow-hidden bg-[var(--color-navy-950)]">
         <div className="absolute inset-0">
-          <Image src={destination.heroImage} alt={`${destination.city}, ${destination.country}`} fill priority fetchPriority="high" className="object-cover opacity-45" sizes="100vw" />
+          <Image src={destination.heroImage} alt={`${destination.city}, ${destination.country}`} fill priority fetchPriority="high" className="object-cover opacity-45" sizes="100vw" quality={55} />
           {/* from-/55 (was /40): over a bright photo such as Cairo the 12px breadcrumb at the top of the hero measured
               4.3:1 (4.5:1 needed); the text block lower down already cleared 4.8:1. */}
           <div className="absolute inset-0 bg-gradient-to-b from-[var(--color-navy-950)]/55 via-[var(--color-navy-950)]/80 to-[var(--color-navy-950)]" />

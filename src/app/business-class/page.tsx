@@ -78,6 +78,7 @@ export default function BusinessClassPage() {
             priority
             className="object-cover opacity-60"
             sizes="100vw"
+            quality={55}
           />
           {/* The photo used to sit at ~5-10% visibility (opacity 35 under an 85% overlay) while still being loaded as the priority image;
               it now reads as a photograph, with the overlay doing the contrast work (measured over the pixels, see the audit report). */}

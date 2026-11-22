@@ -154,6 +154,7 @@ export default function AboutPage() {
             priority
             className="object-cover opacity-60"
             sizes="100vw"
+            quality={55}
           />
           <div className="absolute inset-0 bg-gradient-to-b from-[var(--color-navy-950)]/45 via-[var(--color-navy-950)]/72 to-[var(--color-navy-950)]" />
         </div>

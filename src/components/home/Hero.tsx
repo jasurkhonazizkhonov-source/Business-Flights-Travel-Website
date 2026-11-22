@@ -15,6 +15,7 @@ export function Hero() {
           fetchPriority="high"
           className="object-cover opacity-60"
           sizes="100vw"
+          quality={55}
         />
         {/* Text sits directly on the photo, so the overlay is sized from measured contrast (the pixels behind each
             text block, text alpha included): at the previous 35%/55%/70%-image values the 12px kicker was 2.2:1 and the

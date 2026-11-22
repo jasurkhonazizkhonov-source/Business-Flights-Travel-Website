@@ -78,6 +78,11 @@ const nextConfig: NextConfig = {
     // during development — swap for licensed/company-owned photography via
     // the `heroImage` fields in src/data/destinations.ts and src/data/blog-posts.ts.
     remotePatterns: [{ protocol: "https", hostname: "images.unsplash.com" }],
+    // Next 16 only serves qualities on this allowlist (anything else is coerced to the nearest entry; the raw endpoint answers 400). 75 is the
+    // default every image uses. 55 is for the decorative hero photos that are shown dimmed (opacity 45-60% under a navy scrim, alt=""): at that
+    // visibility the extra bytes of quality 75 cannot be seen, and the hero is the Largest Contentful Paint element on those pages, so on a slow
+    // connection its transfer time is the page's LCP (measured in docs/SEO_TECHNICAL_VERIFICATION.md, section 14).
+    qualities: [55, 75],
   },
   async headers() {
     return [{ source: "/:path*", headers: securityHeaders }];
