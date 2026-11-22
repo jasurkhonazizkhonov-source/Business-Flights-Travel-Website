@@ -19,7 +19,7 @@ Everything below ran on the working tree that became the release commit, **after
 | Infrastructure (standalone servers, stand-in CRM, raw HTTP) | `npm run test:infra` | **208 passed, 0 failed, 0 flaky, 6 skipped** (the opt-in live-CRM contract spec: **not run**) (11.5 min) |
 | New this task | `tests/http-boundaries.spec.ts` (7), `tests/structure-integrity.spec.ts` (223 routes), `tests/rate-limit-hardening.spec.ts`, `csp-violations.spec.ts`, `layout-stability.spec.ts` (earlier in the day) | all passing inside the runs above |
 | Secret scan of the commit set | pattern scan of every changed and new file | **14 files scanned (everything this commit adds or changes), 0 hits, no `.env` file**; values never printed |
-| GitHub Actions on the release commit | `.github/workflows/verify.yml` | GITHUB_CI_RESULT |
+| GitHub Actions on the release commit | `.github/workflows/verify.yml` | **Passed on every step on commit `bb0a896`** (the last commit that changed code or tests; run 45034759874): `npm ci`, `npm audit`, typegen, type check, lint, the standalone production build, and the two browser-free test steps. Earlier history: the first run of the workflow failed (a fresh checkout has no generated route types), was fixed, and has passed on every run since. The documentation-only commit that records this result starts its own run |
 | CRM tests | not re-run (the CRM was not touched); last recorded: 4,499 passed, 0 failed, 1,089 skipped (need PostgreSQL) | **Not run** (separate project) |
 | Docker rehearsal | `bash deploy/rehearsal/run.sh` | **Not run**: no Docker, Podman or WSL distribution (re-checked) |
 | PostgreSQL-backed tests | the CRM's own suite | **Not run**: no PostgreSQL, no `DATABASE_URL` |
