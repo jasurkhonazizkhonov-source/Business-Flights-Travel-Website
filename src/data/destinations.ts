@@ -481,7 +481,7 @@ export const destinations: Destination[] = [
     bestTimeToVisit: "Business travel is consistent year-round; late spring through early autumn pairs well with any personal time added on.",
     airportInfo: "MUC (Munich Airport) is Germany's second-busiest airport and a major Lufthansa hub.",
     airportAccess:
-      "Munich Airport is linked to the city by the S-Bahn lines S1 and S8, which the airport says take approximately 40 minutes to the main railway station (Hauptbahnhof). The airport also lists a Lufthansa Express Bus to the Central Station, with a journey time of 45 minutes. Check the timetable for the day you travel.",
+      "Munich Airport is linked to the city by the S-Bahn lines S1 and S8, which the airport gives as roughly 40 to 45 minutes to the main railway station (Hauptbahnhof); its own pages state the figure slightly differently. The airport also lists a Lufthansa Express Bus to the Central Station. Check the timetable and journey time for the day you travel.",
     sources: [
       { label: "Munich Airport — bus and train connections", url: "https://www.munich-airport.com/public-transport-260822" },
     ],
