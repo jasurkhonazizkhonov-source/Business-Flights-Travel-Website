@@ -201,7 +201,10 @@ export function AirportAutocomplete({
           {label}
         </label>
       ) : (
-        <div className="mb-1.5 flex items-center justify-between gap-2">
+        // Between about 640 and 800 px the From column is so narrow that this row holds one or two lines depending on what is in it (the helper button, then the
+        // "Suggested" chip once an airport is suggested), and the fields below follow it by 16 px each time it changes. Reserving the two-line height for exactly that
+        // range keeps the form still; outside it the contents fit one line in every state (measured at 10 px steps, docs/SEO_TECHNICAL_VERIFICATION.md section 15).
+        <div className="mb-1.5 flex items-center justify-between gap-2 sm:max-[819px]:min-h-8">
           <label id={labelId} className="block text-xs font-semibold tracking-wide text-[var(--color-navy-700)]">
             {label}
           </label>

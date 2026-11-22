@@ -147,6 +147,21 @@ test.describe("departure airport suggestion (approximate, server-derived)", () =
     await expect(phoneCountry(page)).toHaveValue("ZZ"); // "International": no country from a junk code
   });
 
+  test("markup inside an otherwise well-formed answer is shown as text, never parsed: no element is created and nothing runs", async ({ page }) => {
+    const markup = "<img src=x onerror=\"window.__injected=1\"><b id=injected>";
+    await page.route("**/api/visitor-hint", (route) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ countryCode: "DE", airport: { iata: "FRA", city: `Frankfurt ${markup}`, name: `Frankfurt Main ${markup}`, country: `Germany ${markup}` } }) }),
+    );
+    await openFlightForm(page);
+    await expect(suggestedTag(page)).toBeVisible();
+    await page.waitForTimeout(800);
+    expect(await page.evaluate(() => (window as unknown as { __injected?: number }).__injected)).toBeUndefined();
+    await expect(page.locator("#injected")).toHaveCount(0);
+    expect(await page.locator("form img[src='x']").count()).toBe(0);
+    // The text is there, literally (React escaped it), so the visitor can see and replace it like any other value.
+    expect(await fromField(page).inputValue()).toContain("<img");
+  });
+
   test("the suggestion does not move the layout: the From, To and date fields stay level at every width, and nothing overflows sideways", async ({ page }) => {
     await mockHint(page, { countryCode: "DE", airport: FRANKFURT }, 800);
     await openFlightForm(page);
@@ -257,18 +272,21 @@ test.describe("the device's own location (explicit permission only)", () => {
   test("permission granted but the visitor already chose an airport: the automatic result does not overwrite it", async ({ browser }) => {
     const context = await browser.newContext({ permissions: ["geolocation"], geolocation: { latitude: 48.14, longitude: 11.58 } });
     const page = await context.newPage();
-    // Delay the device answer so the visitor's choice comes first.
+    // Hold the device's answer until the visitor has made their choice (an ordering, not a clock: a slow machine cannot reorder it), then release it.
     await page.addInitScript(() => {
       const original = navigator.geolocation.getCurrentPosition.bind(navigator.geolocation);
+      const w = window as unknown as { __releaseDevice: () => void };
+      const gate = new Promise<void>((resolve) => (w.__releaseDevice = resolve));
       navigator.geolocation.getCurrentPosition = (ok, err, options) => {
-        setTimeout(() => original(ok, err, options), 4000);
+        void gate.then(() => original(ok, err, options));
       };
     });
     await mockHint(page, {});
     await openFlightForm(page);
     await chooseAirport(page, fromField(page), "London Heathrow", "LHR");
     await expect(fromField(page)).toHaveValue("London (LHR)");
-    await page.waitForTimeout(5500);
+    await page.evaluate(() => (window as unknown as { __releaseDevice: () => void }).__releaseDevice());
+    await page.waitForTimeout(1500); // the device answer arrives and is handled in this time
     await expect(fromField(page)).toHaveValue("London (LHR)");
     await context.close();
   });

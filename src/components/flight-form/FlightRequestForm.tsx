@@ -198,8 +198,8 @@ export function FlightRequestForm({
         {device.status === "unsupported" && (
           // Server render and the first client render (before the browser's permission state is read): hold the button's place, invisible and out of
           // the accessibility tree and tab order, so that when it appears (about 300 ms later) the label row does not grow by a line and push the
-          // whole form down. Where the label and the button share one line this changes nothing; between roughly 768 and 1023 px the button wraps
-          // to a second line, which is exactly the 16 px this reserves (measured: layout shift 0.0064 -> 0).
+          // whole form down. Where the label and the button share one line this changes nothing; between about 640 and 800 px the button wraps
+          // to a second line (the label row reserves that height itself in AirportAutocomplete, which is what keeps the form still when the suggestion arrives).
           <span aria-hidden="true" className="invisible -my-1 inline-flex select-none items-center gap-1 px-1.5 py-1 text-[11px] font-medium leading-4">
             <MapPin size={12} aria-hidden="true" />
             Use my location

@@ -128,6 +128,7 @@ test.describe("validation behaves exactly as before (contact form)", () => {
   });
 
   test("a submit that arrives BEFORE the library has loaded waits for it, then validates exactly the same way", async ({ page }) => {
+    test.setTimeout(60_000); // this test makes the validator's chunks deliberately slow (1.5 s, 6 s) and waits up to 30 s inside: its whole-test budget must be larger than its own waits
     await delayPhoneChunks(page);
     await page.goto("/contact");
     await waitForFormHydrated(page, "form:has(#c-phone)");
@@ -140,6 +141,7 @@ test.describe("validation behaves exactly as before (contact form)", () => {
   });
 
   test("a valid number submitted before the library has loaded is accepted once it arrives (no phone error)", async ({ page }) => {
+    test.setTimeout(60_000); // this test makes the validator's chunks deliberately slow (1.5 s, 6 s) and waits up to 30 s inside: its whole-test budget must be larger than its own waits
     await delayPhoneChunks(page);
     await page.goto("/contact");
     await waitForFormHydrated(page, "form:has(#c-phone)");
@@ -150,6 +152,7 @@ test.describe("validation behaves exactly as before (contact form)", () => {
   });
 
   test("if the library can never be loaded the form is not stuck: the server's own validation answers with the same message", async ({ page }) => {
+    test.setTimeout(60_000); // this test makes the validator's chunks deliberately slow (1.5 s, 6 s) and waits up to 30 s inside: its whole-test budget must be larger than its own waits
     await page.route("**/_next/static/chunks/*.js", async (route) => {
       // A chunk request can still be in flight when the test ends (the page keeps loading while the assertions finish); without this guard
       // Playwright reports "route.fetch: Test ended" as the test's failure, which made this spec fail intermittently under load. The handler
@@ -198,6 +201,7 @@ for (const route of ["/", "/flights"]) {
     });
 
     test("a submit before the library has loaded waits for it and then validates the same way", async ({ page }) => {
+      test.setTimeout(60_000); // this test makes the validator's chunks deliberately slow (1.5 s, 6 s) and waits up to 30 s inside: its whole-test budget must be larger than its own waits
       await delayPhoneChunks(page);
       await page.goto(route);
       await waitForFormHydrated(page, "form:has(#phone)");
