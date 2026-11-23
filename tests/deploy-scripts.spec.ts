@@ -369,6 +369,20 @@ test.describe("deploy scripts, dry-run against a stub docker", () => {
     expect(r.code, r.out).toBe(0);
     expect(r.out).toContain("LEAD_INGEST_SECRET is set");
     expect(r.out).not.toContain("s".repeat(40));
+    // The optional edge proof: off while absent or empty; a value that is set but too short is refused (the application would fail closed on it); a good one is accepted and never printed.
+    r = run("");
+    expect(r.out).not.toContain("EDGE_PROOF_SECRET");
+    r = run("EDGE_PROOF_SECRET=\n");
+    expect(r.code, r.out).toBe(0);
+    expect(r.out).not.toContain("EDGE_PROOF_SECRET");
+    r = run(`EDGE_PROOF_SECRET=${"e".repeat(23)}\n`);
+    expect(r.code).not.toBe(0);
+    expect(r.out).toMatch(/EDGE_PROOF_SECRET is set but shorter than 24 characters/);
+    expect(r.out).not.toContain("e".repeat(23));
+    r = run(`EDGE_PROOF_SECRET=${"e".repeat(40)}\n`);
+    expect(r.code, r.out).toBe(0);
+    expect(r.out).toContain("EDGE_PROOF_SECRET is set");
+    expect(r.out).not.toContain("e".repeat(40));
     r = run("CRM_API_URL=ftp://compass-crm\n");
     expect(r.code).not.toBe(0);
     expect(r.out).toMatch(/CRM_API_URL must start with http:\/\/ or https:\/\//);

@@ -31,8 +31,8 @@ export function SegmentRow({
   showRemove?: boolean;
   /** Round trip, first leg only: the chosen return date (ISO), shown as a highlighted range when the departure calendar is opened. */
   returnDate?: string;
-  /** First segment only: the "Suggested" tag / "use my location" control for the origin field (see FlightRequestForm). */
-  fromExtras?: { labelAction: React.ReactNode; describedBy?: string };
+  /** First segment only: the "Suggested" tag, its spoken note and the typing signal for the origin field (see FlightRequestForm). */
+  fromExtras?: { labelAction: React.ReactNode; describedBy?: string; onEdit?: () => void };
 }) {
   return (
     <div className="relative grid grid-cols-1 gap-3 rounded-2xl border border-[var(--color-navy-950)]/8 bg-[var(--color-cream-50)]/60 p-3 sm:grid-cols-[1fr_1fr_1fr] sm:p-3.5">
@@ -59,6 +59,7 @@ export function SegmentRow({
           onClear={() => onChange({ ...segment, from: null })}
           labelAction={fromExtras?.labelAction}
           describedBy={fromExtras?.describedBy}
+          onEdit={fromExtras?.onEdit}
         />
       </div>
       <div id={`field-segments.${index}.to`}>

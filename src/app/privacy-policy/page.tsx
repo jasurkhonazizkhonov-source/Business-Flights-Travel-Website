@@ -59,7 +59,9 @@ export default function PrivacyPolicyPage() {
         </p>
         <p>
           When you submit a flight request, our server also records the IP address your request came from and an approximate
-          location (such as city, region, country and time zone) derived from that address by Cloudflare. They are stored with your
+          location (such as city, region, country and time zone) derived from that address by Cloudflare; where Cloudflare supplies only the
+          country, our CRM may complete it from an IP-location database kept on our own server (the address is not sent to another company
+          for this). They are stored with your
           request in our CRM and included in the internal notification email about it, which may also show approximate map
           coordinates; they are visible to authorized staff. When you send a message through the contact form, our server likewise
           records the IP address and the same approximate location (city, region, country and time zone, but not map coordinates)
@@ -69,12 +71,14 @@ export default function PrivacyPolicyPage() {
           place.
         </p>
         <p>
-          To save you typing, our forms may suggest a phone country code and a departure airport. These suggestions use the same
-          kind of approximate, connection-based location (a country and, where available, the position of your network connection),
-          which our server reads from the request and uses only to make the suggestion; the suggestion itself is not stored. If you
-          choose &quot;Use my location&quot;, your browser asks for your permission first; if you allow it, your device&apos;s
-          position is used in your browser only to find a nearby airport and is not sent to us or stored by us. You can change or
-          ignore any suggestion.
+          To save you typing, our forms may suggest a phone country code. This suggestion uses the country that Cloudflare derives
+          from your connection, which our server reads from the request and uses only to make the suggestion; the suggestion itself
+          is not stored. On the flight request form your browser may also ask for your permission to use your device&apos;s
+          location, so that we can fill in a nearby major airport as your departure airport. If you allow it, your device&apos;s
+          position is used in your browser only to find that airport: it is not sent to us, not stored by us and not recorded with
+          your request (only the airport you submit is). If you decline, or your device cannot provide a location, no airport is
+          suggested and you can search for yours as usual; your browser remembers your choice and you can change it in its
+          settings. You can change or ignore any suggestion.
         </p>
       </LegalSection>
 

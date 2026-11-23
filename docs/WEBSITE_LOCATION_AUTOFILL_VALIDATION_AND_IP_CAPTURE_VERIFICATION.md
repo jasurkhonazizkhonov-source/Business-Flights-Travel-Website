@@ -8,6 +8,8 @@ Legend used for evidence: **VERIFIED-LOCAL** (ran here against the real code), *
 
 ## 1. Executive summary
 
+**Superseded in part (2026-11-23): the "Use my location" button and the network-derived departure-airport suggestion described below were removed; the departure airport now comes only from the device's own location, requested when the flight request form opens. Current behaviour: `DEVICE_LOCATION_DEPARTURE_AIRPORT.md`. The validation, date-window and IP-capture parts of this report are unchanged.**
+
 **Decision: READY FOR FURTHER DEPLOYMENT PREPARATION. NOT READY FOR PRODUCTION DEPLOYMENT.** The code of this task is finished and tested locally; the blockers for production are unchanged from the previous report (the Docker rehearsal has never run; the live VPS state, the live CRM version and live authentication are unverified; a real-PostgreSQL run of the replay store is missing; legal review is outstanding) plus two new items (the CRM must be redeployed first because of the flight-route limiter fix, and the Cloudflare "visitor location headers" setting must be confirmed). Details in sections 21, 22 and 24.
 
 What was done:

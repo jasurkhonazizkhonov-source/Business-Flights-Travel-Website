@@ -172,6 +172,7 @@ test.describe("buildFlightRequestNotificationEmail — HTML + text content", () 
     const withExtras: FlightRequestNotificationInput = {
       ...BASE,
       flexibleDates: true,
+      dateFlexibilityDays: 2,
       preferredAirline: "Air France",
       budget: 8500,
       budgetCurrency: "USD",
@@ -179,12 +180,14 @@ test.describe("buildFlightRequestNotificationEmail — HTML + text content", () 
     };
     const { html, text } = buildFlightRequestNotificationEmail(withExtras);
     expect(html).toContain("Additional Information");
-    expect(html).toContain("Flexible Dates");
+    expect(html).toContain("Date Flexibility");
+    expect(html).toContain("± 2 days around the chosen dates");
     expect(html).toContain("Air France");
     expect(html).toContain("USD 8,500");
     expect(html).toContain("Prefers aisle seat.");
     expect(html).toContain("Traveling for a wedding.");
-    expect(text).toContain("Flexible Dates: Yes");
+    expect(text).toContain("Date Flexibility: ± 2 days around the chosen dates");
+    expect(text).not.toContain("Flexible Dates: Yes");
     expect(text).toContain("Preferred Airline: Air France");
     expect(text).toContain("Approximate Budget: USD 8,500");
     expect(text).toContain("Prefers aisle seat.\nTraveling for a wedding.");
@@ -826,9 +829,9 @@ test.describe("one-way vs round-trip and traveler combinations", () => {
     expect(five).toContain("Total Travelers: 5\nAdults: 2\nChildren: 2\nInfants: 1");
   });
   test("every submitted, non-empty piece of the request is present in BOTH parts", () => {
-    const full: FlightRequestNotificationInput = { ...BASE, flexibleDates: true, preferredAirline: "Air France", budget: 4200, budgetCurrency: "AUD", notes: "Window seat", adults: 2, children: 1, infants: 1, tripType: "ROUND_TRIP", returnDate: "2026-11-05", cabinClass: "FIRST" };
+    const full: FlightRequestNotificationInput = { ...BASE, flexibleDates: true, dateFlexibilityDays: 3, preferredAirline: "Air France", budget: 4200, budgetCurrency: "AUD", notes: "Window seat", adults: 2, children: 1, infants: 1, tripType: "ROUND_TRIP", returnDate: "2026-11-05", cabinClass: "FIRST" };
     const { html, text } = buildFlightRequestNotificationEmail(full);
-    for (const part of ["Jayan Grondin", "jayan@example.com", "+33783905717", "JFK", "CDG", "John F. Kennedy International Airport", "Saturday, October 24, 2026", "Thursday, November 5, 2026", "Air France", "AUD 4,200", "Window seat", "First Class", "Children", "Infants", "Flexible Dates"]) {
+    for (const part of ["Jayan Grondin", "jayan@example.com", "+33783905717", "JFK", "CDG", "John F. Kennedy International Airport", "Saturday, October 24, 2026", "Thursday, November 5, 2026", "Air France", "AUD 4,200", "Window seat", "First Class", "Children", "Infants", "Date Flexibility", "± 3 days"]) {
       expect(html, `html is missing ${part}`).toContain(part);
       expect(text, `text is missing ${part}`).toContain(part);
     }

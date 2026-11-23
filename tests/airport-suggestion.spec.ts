@@ -156,10 +156,10 @@ test.describe("what the server reads for the suggestion (src/lib/visitor-hint.ts
   const cfHeaders = () =>
     new Headers({ "cf-ipcountry": "DE", "cf-iplatitude": "50.1109", "cf-iplongitude": "8.6821", "cf-ipcity": "Frankfurt am Main", "cf-connecting-ip": "203.0.113.9" });
 
-  test("behind Cloudflare: the country and a position are read; the IP address and city are not part of the result", async () => {
+  test("behind Cloudflare: only the country is read; the IP address, city and position are not part of the result (the departure airport comes from the device, never from the network)", async () => {
     const hint = await withEnv("cloudflare", () => readVisitorHint(cfHeaders()));
-    expect(hint).toEqual({ countryCode: "DE", latitude: 50.11, longitude: 8.68 }); // rounded to 2 decimals (about 1 km)
-    expect(JSON.stringify(hint)).not.toMatch(/203\.0\.113|Frankfurt/);
+    expect(hint).toEqual({ countryCode: "DE" });
+    expect(JSON.stringify(hint)).not.toMatch(/203\.0\.113|Frankfurt|50\.1|8\.6|latitude|longitude/);
   });
 
   test("with no trusted proxy the Cloudflare headers are NOT believed (anyone could send them to an exposed origin)", async () => {

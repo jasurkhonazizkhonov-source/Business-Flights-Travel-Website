@@ -1,8 +1,8 @@
 "use client";
 
-import { useRef, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import { m, AnimatePresence } from "framer-motion";
-import { Plus, CheckCircle2, AlertTriangle, Loader2, MapPin } from "lucide-react";
+import { Plus, CheckCircle2, AlertTriangle, Loader2 } from "lucide-react";
 import { PhoneNumberField } from "@/components/forms/PhoneNumberField";
 import { FieldError } from "@/components/forms/FieldError";
 import { SegmentRow, type SegmentState } from "./SegmentRow";
@@ -16,7 +16,16 @@ import type { AirportOption, FlightRequestInput } from "@/lib/validations/flight
 // @/lib/validations/flight-request, so this client component's bundle
 // doesn't pull in zod and the full validation schema — see the comment in
 // flight-request-options.ts.
-import { TRIP_TYPES, BUDGET_CURRENCIES, DEFAULT_BUDGET_CURRENCY, type BudgetCurrency } from "@/lib/validations/flight-request-options";
+import {
+  TRIP_TYPES,
+  BUDGET_CURRENCIES,
+  DEFAULT_BUDGET_CURRENCY,
+  DATE_FLEXIBILITY_DAYS,
+  DATE_FLEXIBILITY_LABEL,
+  DEFAULT_DATE_FLEXIBILITY_DAYS,
+  type BudgetCurrency,
+  type DateFlexibilityDays,
+} from "@/lib/validations/flight-request-options";
 import { cn } from "@/lib/cn";
 import { PRIMARY_CTA_LABEL } from "@/lib/constants";
 import { checkEmail, emailProblemMessage } from "@/lib/validate";
@@ -49,7 +58,7 @@ const FLIGHT_PHONE_MESSAGES = {
 };
 
 /** Where the first flight's origin came from: nothing yet, an automatic suggestion (approximate network location / the device), or the visitor. */
-type OriginSource = "none" | "approximate" | "device" | "user";
+type OriginSource = "none" | "device" | "user";
 
 function without(errors: FormErrors, key: string): FormErrors {
   const rest = { ...errors };
@@ -60,8 +69,13 @@ function without(errors: FormErrors, key: string): FormErrors {
 export function FlightRequestForm({
   compact = false,
   initialDestination = null,
+  locateOn = "interaction",
 }: {
   compact?: boolean;
+  /** When the browser is asked for the visitor's location, to suggest a departure airport (once per form): "open" = as soon as the form is on screen (the
+   * /flights page, whose whole purpose is this form); "interaction" = on the visitor's first use of the form (the home-page form, so that people who only
+   * browse the home page are never prompted). */
+  locateOn?: "open" | "interaction";
   /** Pre-fills the first segment's "To" field — e.g. arriving from a
    * destination page's "Get a Flight Quote to Paris" link. The customer
    * can still change it; nothing here locks the field. */
@@ -72,7 +86,8 @@ export function FlightRequestForm({
   const [returnDate, setReturnDate] = useState("");
   const [passengers, setPassengers] = useState({ adults: 1, children: 0, infants: 0 });
   const [cabinClass, setCabinClass] = useState<FlightRequestInput["cabinClass"]>("BUSINESS");
-  const [flexibleDates, setFlexibleDates] = useState(false);
+  // Kept here, in the form, not in the collapsible section below: closing "Add preferences" unmounts its fields but never loses the choice.
+  const [dateFlexibilityDays, setDateFlexibilityDays] = useState<DateFlexibilityDays>(DEFAULT_DATE_FLEXIBILITY_DAYS);
   const [preferredAirline, setPreferredAirline] = useState("");
   const [budget, setBudget] = useState("");
   const [budgetCurrency, setBudgetCurrency] = useState<BudgetCurrency>(DEFAULT_BUDGET_CURRENCY);
@@ -95,7 +110,9 @@ export function FlightRequestForm({
   const [submissionId] = useState(() => globalThis.crypto?.randomUUID?.());
   const [showMore, setShowMore] = useState(false);
   const [originSource, setOriginSource] = useState<OriginSource>("none");
-  const [hintHandled, setHintHandled] = useState(false);
+  // Set (in the event handler, so it is true the moment the visitor acts) as soon as the visitor types in the From field or chooses an airport for it.
+  // From then on a location result - however late - is ignored.
+  const fromTakenRef = useRef(false);
 
   const [errors, setErrors] = useState<FormErrors>({});
   const [, startTransition] = useTransition();
@@ -124,7 +141,10 @@ export function FlightRequestForm({
   function updateSegment(index: number, next: SegmentState) {
     // Any change the visitor makes to the first origin (choosing an airport, or editing the text away from the current one) makes it theirs:
     // automatic suggestions never touch it again.
-    if (index === 0 && next.from !== segments[0]?.from) setOriginSource("user");
+    if (index === 0 && next.from !== segments[0]?.from) {
+      fromTakenRef.current = true;
+      setOriginSource("user");
+    }
     setSegments((prev) => prev.map((s, i) => (i === index ? next : s)));
     // Round trip: moving the departure past an already chosen return date would leave a return BEFORE the departure
     // (the calendar cannot offer one, and validation would reject it), so the stale return date is cleared and re-asked.
@@ -142,82 +162,42 @@ export function FlightRequestForm({
 
   const firstDeparture = segments[0]?.departureDate ? new Date(`${segments[0].departureDate}T00:00:00`) : todayFloor();
 
-  // --- automatic departure-airport suggestions -------------------------------------------------------------------------------------------------
-  // Source 1 (preferred): the device's own position, only when the visitor allows it (a click, or a permission they already granted).
-  // Source 2: the server's approximate, network-derived location. Neither ever replaces an airport the visitor chose: a suggestion is only
-  // placed while the origin is empty or still an earlier suggestion. The one exception is the visitor's own click on "Use my location".
-  function placeSuggestedOrigin(airport: AirportOption, source: "approximate" | "device", force: boolean) {
-    if (!force && originSource === "user") return;
-    if (!force && source === "approximate" && originSource === "device") return; // the device's position outranks the network's estimate
+  // --- the departure airport from the device's location --------------------------------------------------------------------------------------
+  // The browser is asked for the visitor's position ONCE (useDeviceAirport): on /flights when the form opens, on the home page when the visitor first uses
+  // the form. If they allow it, the nearest MAJOR airport fills an EMPTY From field and is labelled "Suggested". It never replaces anything: not an airport
+  // the visitor chose, not text they have started typing (fromTakenRef), not a destination-equal airport. If they decline, or the position cannot be had, or
+  // no major airport is near, nothing is suggested and nothing is said: the From field simply works as it always did.
+  function placeDeviceOrigin(airport: AirportOption) {
+    if (fromTakenRef.current || segments[0]?.from) return;
     if (segments[0]?.to?.iata === airport.iata) return; // never suggest departing from the place the visitor wants to go to
-    setSegments((prev) => prev.map((seg, i) => (i === 0 ? { ...seg, from: airport } : seg)));
-    setOriginSource(source);
+    setSegments((prev) => prev.map((seg, i) => (i === 0 && !seg.from ? { ...seg, from: airport } : seg)));
+    setOriginSource("device");
   }
-  const hint = useVisitorHint();
-  if (hint && !hintHandled) {
-    // Adjusting state during render (React's documented pattern for reacting to a value that arrived) - once, when the answer comes in.
-    setHintHandled(true);
-    if (hint.airport && originSource === "none" && !segments[0]?.from) placeSuggestedOrigin(hint.airport, "approximate", false);
-  }
-  const device = useDeviceAirport((airport, how) => placeSuggestedOrigin(airport, "device", how === "requested"));
+  const hint = useVisitorHint(); // the country only, for the phone prefix
+  const device = useDeviceAirport(placeDeviceOrigin);
+  const startDevice = device.start;
+  useEffect(() => {
+    if (locateOn === "open") startDevice();
+  }, [locateOn, startDevice]);
+  // The first use of the form (a click, a tap or the keyboard arriving in a field) asks, for the forms that wait for one. start() acts only once.
+  const askOnFirstUse = locateOn === "interaction" ? startDevice : undefined;
 
-  const suggestionNote =
-    originSource === "approximate"
-      ? "Suggested from your approximate location. You can change it."
-      : originSource === "device"
-        ? "Suggested from your device's location. You can change it."
-        : "";
-  const locationNote =
-    device.status === "locating"
-      ? "Finding your location"
-      : device.status === "denied"
-        ? "Location access is off. Please type your departure city."
-        : device.status === "timeout" || device.status === "unavailable"
-          ? "We couldn't get your location. Please type your departure city."
-          : device.status === "none-nearby"
-            ? "No major airport found near you. Please type your departure city."
-            : "";
-  const showLocateButton = device.status === "idle" || device.status === "locating" || device.status === "found" || device.status === "timeout" || device.status === "unavailable";
+  // Spoken (not shown) when the airport is filled in, so that assistive technology reports the change; the "Suggested" tag is the visible cue.
+  const suggestionNote = originSource === "device" && segments[0]?.from ? `Departure airport set to ${segments[0].from.city} (${segments[0].from.iata}) from your device's location. You can change it.` : "";
   const originExtras = {
     describedBy: suggestionNote ? "origin-suggestion-note" : undefined,
+    onEdit: () => {
+      fromTakenRef.current = true;
+    },
     labelAction: (
       <span className="flex items-center gap-2">
         <span id="origin-suggestion-note" role="status" className="sr-only">
-          {suggestionNote || locationNote}
+          {suggestionNote}
         </span>
-        {(originSource === "approximate" || originSource === "device") && (
+        {originSource === "device" && (
           <span aria-hidden="true" className="inline-flex h-4 items-center rounded-full bg-[var(--color-gold-400)]/25 px-2 text-[11px] font-semibold leading-4 text-[var(--color-navy-800)]">
             Suggested
           </span>
-        )}
-        {locationNote && device.status !== "locating" && (
-          <span aria-hidden="true" className="text-[11px] leading-4 text-[var(--color-navy-950)]/65">
-            Location unavailable
-          </span>
-        )}
-        {device.status === "unsupported" && (
-          // Server render and the first client render (before the browser's permission state is read): hold the button's place, invisible and out of
-          // the accessibility tree and tab order, so that when it appears (about 300 ms later) the label row does not grow by a line and push the
-          // whole form down. Where the label and the button share one line this changes nothing; between about 640 and 800 px the button wraps
-          // to a second line (the label row reserves that height itself in AirportAutocomplete, which is what keeps the form still when the suggestion arrives).
-          <span aria-hidden="true" className="invisible -my-1 inline-flex select-none items-center gap-1 px-1.5 py-1 text-[11px] font-medium leading-4">
-            <MapPin size={12} aria-hidden="true" />
-            Use my location
-          </span>
-        )}
-        {showLocateButton && (
-          <button
-            type="button"
-            onClick={device.request}
-            disabled={device.status === "locating"}
-            aria-label="Use my current location to suggest a departure airport"
-            // Visually as tall as the label text, with a 24px-tall hit area (WCAG 2.5.8): the vertical padding is cancelled by negative margins,
-            // so the label row, and the grid row it sits in, do not grow.
-            className="-my-1 inline-flex items-center gap-1 rounded-full px-1.5 py-1 text-[11px] font-medium leading-4 text-[var(--color-navy-700)] underline decoration-dotted underline-offset-2 hover:text-[var(--color-gold-600)] disabled:opacity-70"
-          >
-            <MapPin size={12} aria-hidden="true" />
-            {device.status === "locating" ? "Locating…" : originSource === "none" ? "Use my location" : null}
-          </button>
         )}
       </span>
     ),
@@ -348,7 +328,7 @@ export function FlightRequestForm({
       adults: passengers.adults,
       children: passengers.children,
       infants: passengers.infants,
-      flexibleDates,
+      dateFlexibilityDays,
       preferredAirline: preferredAirline || undefined,
       budget: budget ? Number(budget) : undefined,
       budgetCurrency: budget ? budgetCurrency : undefined,
@@ -405,6 +385,8 @@ export function FlightRequestForm({
   return (
     <form
       onSubmit={handleSubmit}
+      onFocusCapture={askOnFirstUse}
+      onPointerDownCapture={askOnFirstUse}
       // Without this, the browser's own native constraint validation (e.g.
       // the type="email" field's built-in format check) intercepts the
       // submit event before this handler ever runs — silently blocking
@@ -508,15 +490,37 @@ export function FlightRequestForm({
             className="overflow-hidden"
           >
             <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
-              <label className="flex items-center gap-2 rounded-xl border border-[var(--color-navy-950)]/12 bg-white px-3.5 py-3 text-sm sm:col-span-3">
-                <input
-                  type="checkbox"
-                  checked={flexibleDates}
-                  onChange={(e) => setFlexibleDates(e.target.checked)}
-                  className="h-4 w-4 rounded border-[var(--color-navy-950)]/30 accent-[var(--color-navy-900)]"
-                />
-                My dates are flexible (± a few days)
-              </label>
+              {/* One mutually exclusive choice (native radios: arrow keys move and select, Tab leaves the group). The inputs are visually hidden and the
+                  labels are the targets; the focus ring and the selected colour are on the label. Default: exact dates. */}
+              <fieldset className="rounded-xl border border-[var(--color-navy-950)]/12 bg-white px-3.5 pb-3 pt-2 sm:col-span-3">
+                <legend className="px-1 text-xs font-semibold tracking-wide text-[var(--color-navy-700)]">Date flexibility</legend>
+                <div className="mt-1 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                  {DATE_FLEXIBILITY_DAYS.map((days) => {
+                    const selected = dateFlexibilityDays === days;
+                    return (
+                      <label
+                        key={days}
+                        className={cn(
+                          "flex min-h-11 cursor-pointer items-center justify-center rounded-lg border px-3 py-2 text-center text-sm font-medium transition-colors focus-within:ring-2 focus-within:ring-[var(--color-gold-400)]/55",
+                          selected
+                            ? "border-[var(--color-navy-900)] bg-[var(--color-navy-900)] text-white"
+                            : "border-[var(--color-navy-950)]/12 bg-white text-[var(--color-navy-900)] hover:border-[var(--color-navy-700)]",
+                        )}
+                      >
+                        <input
+                          type="radio"
+                          name="dateFlexibility"
+                          value={days}
+                          checked={selected}
+                          onChange={() => setDateFlexibilityDays(days)}
+                          className="sr-only"
+                        />
+                        {DATE_FLEXIBILITY_LABEL[days]}
+                      </label>
+                    );
+                  })}
+                </div>
+              </fieldset>
               <div>
                 <label htmlFor="preferredAirline" className="mb-1.5 block text-xs font-semibold tracking-wide text-[var(--color-navy-700)]">
                   Preferred Airline (optional)
@@ -714,6 +718,7 @@ function SuccessPanel({
     returnDate?: string;
     passengers: number;
     cabinClass: string;
+    dateFlexibility?: string;
   };
 }) {
   return (
@@ -742,6 +747,12 @@ function SuccessPanel({
           <>
             <dt className="text-[var(--color-navy-950)]/65">Return</dt>
             <dd className="font-medium text-[var(--color-navy-950)]">{summary.returnDate}</dd>
+          </>
+        )}
+        {summary.dateFlexibility && (
+          <>
+            <dt className="text-[var(--color-navy-950)]/65">Date flexibility</dt>
+            <dd className="font-medium text-[var(--color-navy-950)]">{summary.dateFlexibility}</dd>
           </>
         )}
         <dt className="text-[var(--color-navy-950)]/65">Travelers</dt>

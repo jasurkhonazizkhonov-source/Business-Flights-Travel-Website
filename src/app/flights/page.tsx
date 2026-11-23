@@ -67,7 +67,7 @@ export default async function FlightsPage({ searchParams }: PageProps<"/flights"
             </Reveal>
           </div>
           <Reveal delay={0.1} className="mx-auto mt-10 max-w-4xl">
-            <FlightRequestForm initialDestination={initialDestination} />
+            <FlightRequestForm initialDestination={initialDestination} locateOn="open" />
           </Reveal>
         </div>
       </section>

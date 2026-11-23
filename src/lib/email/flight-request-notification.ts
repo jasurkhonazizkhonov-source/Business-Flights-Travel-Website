@@ -15,6 +15,7 @@
 // sender and recipient, so this is simply the one address the feature needs
 // to resolve and gate on; see sendFlightRequestNotification() below.
 import type { Mailer } from "@/lib/email/mailer";
+import { describeDateFlexibility, type DateFlexibilityDays } from "@/lib/validations/flight-request-options";
 import { cleanEnvValue, isPlausibleEmail } from "@/lib/email/smtp-helpers";
 import { SITE_NAME, SITE_URL, CONTACT_PHONE_DISPLAY, CONTACT_EMAIL, COMPANY_ADDRESS } from "@/lib/constants";
 import type { ApproximateLocation } from "@/lib/ip-geo";
@@ -48,7 +49,10 @@ export interface FlightRequestNotificationInput {
   adults: number;
   children: number;
   infants: number;
+  /** Legacy Boolean: true only says "flexible". Superseded by dateFlexibilityDays when that is present. */
   flexibleDates: boolean;
+  /** The customer's choice: 0 = exact dates, 1-3 = days either side. Absent/null for a request that carried only the legacy Boolean. */
+  dateFlexibilityDays?: DateFlexibilityDays | null;
   preferredAirline?: string;
   budget?: number;
   /** ISO 4217 code the customer chose for `budget`. Never converted; absent => the amount is shown flagged as having no currency. */
@@ -256,7 +260,10 @@ function buildSections(input: FlightRequestNotificationInput): Section[] {
     dates.push({ label: "Departure Date", value: formatIsoDateLong(input.segments[0].departureDate) });
     if (input.tripType === "ROUND_TRIP" && input.returnDate) dates.push({ label: "Return Date", value: formatIsoDateLong(input.returnDate) });
   }
-  if (input.flexibleDates) dates.push({ label: "Flexible Dates", value: "Yes — the traveler can shift dates for a better fare" });
+  // The choice in words ("± 2 days around the chosen dates" / "Exact dates (no flexibility)"), never a bare Yes. A request that carries neither the choice
+  // nor the legacy flag shows no row, as before.
+  if (typeof input.dateFlexibilityDays === "number") dates.push({ label: "Date Flexibility", value: describeDateFlexibility(input.dateFlexibilityDays) });
+  else if (input.flexibleDates) dates.push({ label: "Date Flexibility", value: describeDateFlexibility(null) });
   sections.push({ title: "Travel Dates", rows: dates });
 
   const travelers: Row[] = [

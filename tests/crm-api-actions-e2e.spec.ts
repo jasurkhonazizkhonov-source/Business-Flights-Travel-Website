@@ -32,7 +32,7 @@ const flightInput = (over: Record<string, unknown> = {}) => ({
   adults: 2,
   children: 1,
   infants: 0,
-  flexibleDates: true,
+  dateFlexibilityDays: 3,
   ...CUSTOMER,
   website: "",
   renderedAt: Date.now() - 10_000,
@@ -123,10 +123,35 @@ test.describe("the forms against a configured website and a stand-in CRM (produc
     expect(r.json).toMatchObject({
       firstName: "Zelda", lastName: "Quillfeather", phone: "+14155552671", email: "zelda.q@example.org", tripType: "ROUND_TRIP",
       departureAirportIata: "JFK", arrivalAirportIata: "CDG", returnDate: futureDate(40), cabinClass: "BUSINESS", adults: 2, children: 1, infants: 0,
-      datesFlexible: true, preferredAirline: "Lufthansa", approximateBudget: 3200, budgetCurrency: "EUR", additionalNotes: "Window seats",
+      datesFlexible: true, dateFlexibilityDays: 3, preferredAirline: "Lufthansa", approximateBudget: 3200, budgetCurrency: "EUR", additionalNotes: "Window seats",
     });
     for (const forbidden of ["website", "renderedAt", "submissionId", "companyId"]) expect(r.json).not.toHaveProperty(forbidden);
     expect(crm.leadCount()).toBe(1);
+  });
+
+  test("flight request: every date-flexibility choice reaches the CRM as the choice (0-3) next to the Boolean; a legacy checkbox is kept without an invented number; anything else is refused before the CRM", async () => {
+    for (const days of [0, 1, 2, 3]) {
+      crm.reset();
+      const text = await call("submitFlightRequest", [flightInput({ dateFlexibilityDays: days })]);
+      expect(text, `choice ${days}`).toMatch(/"ok":true/);
+      expect(crm.requests).toHaveLength(1);
+      expect(crm.requests[0].json).toMatchObject({ datesFlexible: days > 0, dateFlexibilityDays: days });
+    }
+    // A form bundle cached in a tab from before the four choices existed: it can only send the old Boolean.
+    crm.reset();
+    await call("submitFlightRequest", [flightInput({ dateFlexibilityDays: undefined, flexibleDates: true })]);
+    expect(crm.requests[0].json).toMatchObject({ datesFlexible: true });
+    expect(crm.requests[0].json).not.toHaveProperty("dateFlexibilityDays");
+    crm.reset();
+    await call("submitFlightRequest", [flightInput({ dateFlexibilityDays: undefined, flexibleDates: false })]);
+    expect(crm.requests[0].json).toMatchObject({ datesFlexible: false, dateFlexibilityDays: 0 });
+    // Not one of the four: the server refuses and the CRM is never called.
+    for (const bad of [4, -1, 1.5, "2", 99]) {
+      crm.reset();
+      const text = await call("submitFlightRequest", [flightInput({ dateFlexibilityDays: bad })]);
+      expect(text, `value ${JSON.stringify(bad)}`).toMatch(/"ok":false/);
+      expect(crm.requests, `value ${JSON.stringify(bad)} must not reach the CRM`).toHaveLength(0);
+    }
   });
 
   test("flight request: the visitor's IP and location reach the CRM ONLY as a signed context built from Cloudflare's headers, never from the forged ones", async () => {

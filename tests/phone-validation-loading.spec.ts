@@ -1,4 +1,4 @@
-import { test, expect, type Page } from "@playwright/test";
+import { test, expect, type Page, type Route } from "@playwright/test";
 
 // The phone-number validator (libphonenumber-js and its metadata, ~120 KB) is loaded ON DEMAND - not with the page - on /, /contact and /flights
 // (src/lib/phone-validator.ts). These tests pin both halves of that: the library really is out of the initial JavaScript, and validation still behaves
@@ -57,15 +57,33 @@ async function dismissConsent(page: Page) {
 async function delayPhoneChunks(page: Page) {
   await page.route("**/_next/static/chunks/*.js", async (route) => {
     try {
-      const response = await route.fetch();
-      const body = await response.text();
+      const { response, body } = await fetchChunk(route);
       if (body.includes(MARKER)) await new Promise((resolve) => setTimeout(resolve, body.includes("PhoneInput") ? 6000 : 1500));
       await route.fulfill({ response, body });
     } catch {
-      await route.abort().catch(() => undefined); // the test (and its page) has already ended
+      // The fetch failed twice (or the test and its page have already ended). Never abort here: an aborted chunk is a ChunkLoadError, the page
+      // that needs it never hydrates, and the test then fails 30 s later for a reason that has nothing to do with phone validation.
+      await route.continue().catch(() => undefined);
     }
   });
 }
+
+// route.fetch() goes through Playwright's own HTTP client, which reuses keep-alive sockets; under load the connection can fail at the moment it is
+// reused. Found by trace: "ChunkLoadError ... ERR_FAILED" after the handler aborted that chunk (a few failures in a hundred runs with three workers).
+// A browser would simply retry; so does this helper, once.
+async function fetchChunk(route: Route) {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const response = await route.fetch();
+      return { response, body: await response.text() };
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError;
+}
+
 // For tests that are not about loading order: wait until the field has been upgraded, so the value cannot be re-parsed under the test.
 async function waitForRichPhone(page: Page) {
   await page.locator(".PhoneInput").first().waitFor({ timeout: 30000 });
@@ -158,12 +176,11 @@ test.describe("validation behaves exactly as before (contact form)", () => {
       // Playwright reports "route.fetch: Test ended" as the test's failure, which made this spec fail intermittently under load. The handler
       // behaves exactly as before for every chunk that completes during the test.
       try {
-        const response = await route.fetch();
-        const body = await response.text();
-        if (body.includes(MARKER)) return await route.abort();
+        const { response, body } = await fetchChunk(route);
+        if (body.includes(MARKER)) return await route.abort(); // the one chunk this test makes unloadable, on purpose
         return await route.fulfill({ response, body });
       } catch {
-        await route.abort().catch(() => undefined); // the test (and its page) has already ended
+        await route.continue().catch(() => undefined); // the fetch failed twice, or the test (and its page) has already ended: never abort a chunk the page needs
       }
     });
     await page.goto("/contact");

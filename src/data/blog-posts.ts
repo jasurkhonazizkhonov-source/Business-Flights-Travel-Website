@@ -184,7 +184,7 @@ export const blogPosts: BlogPost[] = [
       {
         type: "ul",
         items: [
-          "Give a date range instead of a single fixed day where your trip allows it — the request form's \"my dates are flexible\" option flags this to your specialist.",
+          "Give a date range instead of a single fixed day where your trip allows it — the request form's date-flexibility choice (exact dates, or ± 1, 2 or 3 days) tells your specialist how far you can move.",
           "Consider one-stop options on the same alliance, not just nonstop — a specialist can compare both without you running separate searches.",
           "Ask about fare rules, not just price — a lower fare with no changes allowed can cost more overall if your plans have any chance of shifting.",
         ],

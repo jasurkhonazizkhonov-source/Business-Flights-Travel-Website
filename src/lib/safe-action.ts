@@ -91,7 +91,8 @@ export function isFlightResult(value: unknown): value is SubmitFlightRequestResu
       typeof s.departureDate === "string" &&
       (s.returnDate === undefined || typeof s.returnDate === "string") &&
       typeof s.passengers === "number" &&
-      typeof s.cabinClass === "string"
+      typeof s.cabinClass === "string" &&
+      (s.dateFlexibility === undefined || typeof s.dateFlexibility === "string")
     );
   }
   return value.ok === false && typeof value.error === "string" && validFieldErrors(value.fieldErrors);

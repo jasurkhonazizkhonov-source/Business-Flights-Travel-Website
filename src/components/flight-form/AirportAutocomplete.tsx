@@ -23,6 +23,7 @@ export function AirportAutocomplete({
   onClear,
   labelAction,
   describedBy,
+  onEdit,
 }: {
   label: string;
   value: AirportOption | null;
@@ -35,10 +36,12 @@ export function AirportAutocomplete({
    * while showing something else (or nothing). If the text is later put back to exactly that airport's label, `onChange` re-selects it.
    */
   onClear?: () => void;
-  /** Content for the right-hand end of the label row (a "Suggested" tag, a "use my location" button). It must not be taller than the label. */
+  /** Content for the right-hand end of the label row (the "Suggested" tag). It must not be taller than the label. */
   labelAction?: React.ReactNode;
-  /** id of extra descriptive text (for example "suggested from your approximate location"), joined to the input's aria-describedby. */
+  /** id of extra descriptive text (for example "departure airport set from your device's location"), joined to the input's aria-describedby. */
   describedBy?: string;
+  /** Called whenever the visitor types in the field (not on focus alone): the signal that an automatic suggestion must leave this field alone. */
+  onEdit?: () => void;
 }) {
   const [query, setQuery] = useState(labelFor(value));
   const [results, setResults] = useState<AirportOption[]>([]);
@@ -201,10 +204,10 @@ export function AirportAutocomplete({
           {label}
         </label>
       ) : (
-        // Between about 640 and 800 px the From column is so narrow that this row holds one or two lines depending on what is in it (the helper button, then the
-        // "Suggested" chip once an airport is suggested), and the fields below follow it by 16 px each time it changes. Reserving the two-line height for exactly that
-        // range keeps the form still; outside it the contents fit one line in every state (measured at 10 px steps, docs/SEO_TECHNICAL_VERIFICATION.md section 15).
-        <div className="mb-1.5 flex items-center justify-between gap-2 sm:max-[819px]:min-h-8">
+        // Between 640 and about 670 px the From column is too narrow for the label AND the "Suggested" tag: the row would grow by a line the moment the tag
+        // appears and push the form down 16 px. Reserving two lines for 640-689 px (margin included) keeps the form still; outside that band the tag fits on the
+        // label's line (measured at 10 px steps from 300 to 1500 px: docs/DEVICE_LOCATION_DEPARTURE_AIRPORT.md, tests/layout-stability.spec.ts).
+        <div className="mb-1.5 flex items-center justify-between gap-2 sm:max-[689px]:min-h-8">
           <label id={labelId} className="block text-xs font-semibold tracking-wide text-[var(--color-navy-700)]">
             {label}
           </label>
@@ -228,6 +231,7 @@ export function AirportAutocomplete({
           onFocus={() => setOpen(true)}
           onChange={(e) => {
             const next = e.target.value;
+            onEdit?.();
             setQuery(next);
             setOpen(true);
             if (value && next !== labelFor(value)) {

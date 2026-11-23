@@ -1,31 +1,18 @@
 import { useEffect, useState } from "react";
-import type { AirportOption } from "@/lib/validations/flight-request";
-
-// The visitor's approximate, server-derived hint (country code and nearest major airport) - see src/app/api/visitor-hint/route.ts. Fetched ONCE per
+// The visitor's approximate, server-derived hint (the country code, for the phone prefix; no airport: that comes only from the device's own position) - see src/app/api/visitor-hint/route.ts. Fetched ONCE per
 // page load, after the page has loaded and gone idle (never competing with first paint), shared by every form on the page, and sanitised here
 // again because it is data from the network. A failed or empty answer is simply "no hint": the forms then behave exactly as they do without one.
 
-export type VisitorHint = { countryCode?: string; airport?: AirportOption };
+export type VisitorHint = { countryCode?: string };
 
 const EMPTY: VisitorHint = {};
 let pending: Promise<VisitorHint> | null = null;
-
-function text(value: unknown, max: number): string | undefined {
-  return typeof value === "string" && value.length > 0 && value.length <= max ? value : undefined;
-}
 
 export function sanitizeHint(raw: unknown): VisitorHint {
   if (!raw || typeof raw !== "object") return EMPTY;
   const data = raw as Record<string, unknown>;
   const hint: VisitorHint = {};
   if (typeof data.countryCode === "string" && /^[A-Z]{2}$/.test(data.countryCode)) hint.countryCode = data.countryCode;
-  const a = data.airport as Record<string, unknown> | undefined;
-  if (a && typeof a === "object" && typeof a.iata === "string" && /^[A-Z]{3}$/.test(a.iata)) {
-    const city = text(a.city, 120);
-    const name = text(a.name, 120);
-    const country = text(a.country, 120);
-    if (city && name && country) hint.airport = { iata: a.iata, city, name, country };
-  }
   return hint;
 }
 

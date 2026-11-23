@@ -59,7 +59,7 @@ const faqs = [
   {
     question: "My travel dates are flexible — can you search around that?",
     answer:
-      "Yes. Check \"My dates are flexible\" on the request form and mention your acceptable date range in the notes — a wider window often finds better business-class availability and pricing than a single fixed date.",
+      "Yes. Under \"Add preferences\" on the request form, choose how far your dates can move — exact dates, or ± 1, 2 or 3 days — and mention a wider range in the notes if you have one. A wider window often finds better business-class availability and pricing than a single fixed date.",
   },
   {
     question: "How does payment work?",

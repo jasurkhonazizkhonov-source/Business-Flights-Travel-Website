@@ -49,9 +49,9 @@ jobs:
       - name: Unit and contract tests (no browser, stand-in CRM on loopback only)
         run: >
           npx playwright test --project=Infrastructure --no-deps --workers=1
-          tests/crm-api-client.spec.ts tests/docker-topology.spec.ts
+          tests/crm-api-client.spec.ts tests/docker-topology.spec.ts tests/edge-proof.spec.ts
       - name: Unit tests that need neither a browser nor a server
         run: >
           npx playwright test --project="Desktop Chrome" --workers=2
-          tests/rate-limit-hardening.spec.ts tests/rate-limit-client.spec.ts tests/email-validation.spec.ts tests/phone-validation.spec.ts
+          tests/date-flexibility-logic.spec.ts tests/rate-limit-hardening.spec.ts tests/rate-limit-client.spec.ts tests/email-validation.spec.ts tests/phone-validation.spec.ts
           tests/flight-date-window.spec.ts tests/airport-suggestion.spec.ts tests/contact-visitor-context.spec.ts tests/submission-ip.spec.ts

@@ -167,9 +167,9 @@ If the old compose references a tag that no longer exists locally, set `APP_VERS
 
 Each is read-only or uses a visit/submission the operator makes on purpose; none needs the production database.
 
-1. `curl -s -H 'Accept: application/json' https://<site>/api/visitor-hint` from a normal connection: expect HTTP 200, `Cache-Control: private, no-store`, a JSON object with a `countryCode` and (if the Managed Transform is on) an `airport`; **no IP address, city or coordinates** in the body.
+1. `curl -s -H 'Accept: application/json' https://<site>/api/visitor-hint` from a normal connection: expect HTTP 200, `Cache-Control: private, no-store`, a JSON object with a `countryCode` and **nothing else** (no airport, no IP address, no city, no coordinates).
 2. `curl -sI https://<site>/flights`: the `Permissions-Policy` header must contain `geolocation=(self)` and still deny `camera`, `microphone`, `payment`, `usb`.
-3. In a browser: open `/flights`; the departure field should be suggested (labelled "Suggested") and the phone country code pre-selected; change both by hand and confirm the change is kept. "Use my location" must ask the browser for permission **only when clicked**.
+3. In a browser: open `/flights`; the browser asks for permission to use your location (once). Allow it: the departure field is filled with the nearest **major** airport and labelled "Suggested"; the phone country code is pre-selected from the connection; change both by hand and confirm the change is kept. Decline it (use a second profile or reset the site permission): the departure field stays empty, nothing is said, and the airport search works as usual; reload and confirm the browser does not ask again. There is **no "Use my location" button**. On the home page the browser must **not** ask when the page loads; it asks only when you first click or tab into the quote form.
 4. The calendars must stop 11 calendar months after today; a flight request for a day beyond it must be refused with "Flights can be requested up to 11 months ahead."
 5. After the CRM is redeployed with the flight-route limiter: nothing to do for a normal visitor; an operator can confirm the code `rate_limited` only by exceeding 20 requests in 15 minutes from one signed visitor, which should NOT be tried against production.
 
@@ -247,11 +247,11 @@ The app's own apex rule (`next.config.ts`) stays as a harmless fallback; it simp
 **E2. Email Address Obfuscation (analysis: `SECURITY_REVIEW_AND_REMAINING_LIMITATIONS.md`, section 9; switching it off is optional).**
 If you decide to switch it off: Scrape Shield -> Email Address Obfuscation -> off. Verify: `curl -s https://www.businessflights.travel/contact | grep -c "email-protection"` returns `0` and the page shows a plain `mailto:` link (Cloudflare may cache HTML briefly; purge the page cache or wait if the old markup persists). Search Console may keep listing `/cdn-cgi/l/email-protection` for a while; `robots.txt` already disallows `/cdn-cgi/`. If you decide to keep it on: do nothing and ignore that URL in the report. Do not turn off any other Scrape Shield feature as part of this.
 
-**E3. "Add visitor location headers" (needed for the nearest-airport suggestion; the country-code suggestion and the phone prefix only need the free `CF-IPCountry` header).**
-1. Rules -> Managed Transforms -> **Add visitor location headers**: on. This adds the location request headers the website reads server-side (`cf-iplatitude`, `cf-iplongitude`, `cf-ipcity`, `cf-region`, `cf-region-code`, `cf-timezone`); coordinates are only used on the server to choose an airport and are **never** returned to the browser.
-2. Verify from a normal connection (no secrets): `curl -s -H "Accept: application/json" https://www.businessflights.travel/api/visitor-hint` -> HTTP 200, `Cache-Control: private, no-store`, body contains `countryCode` and (once the transform is on) `airport`, and **no** IP, city or coordinates. Check from two different networks if you can: the answers must differ, proving the response is not cached across visitors.
+**E3. "Add visitor location headers" (optional since 2026-11-23: no suggestion needs it any more; the country-code suggestion needs only the free `CF-IPCountry` header). It still supplies the city, region, time zone and coordinates that are recorded with a submission and shown in the internal notification e-mail.**
+1. If you want the city, region and time zone recorded with submissions: Rules -> Managed Transforms -> **Add visitor location headers**: on. This adds the location request headers the website reads server-side for the CRM capture (`cf-iplatitude`, `cf-iplongitude`, `cf-ipcity`, `cf-region`, `cf-region-code`, `cf-timezone`); coordinates are never returned to the browser and never used for a suggestion.
+2. Verify from a normal connection (no secrets): `curl -s -H "Accept: application/json" https://www.businessflights.travel/api/visitor-hint` -> HTTP 200, `Cache-Control: private, no-store`, body contains `countryCode` only: **no** airport, IP, city or coordinates, with the transform on or off. Check from two different networks if you can: the answers must differ, proving the response is not cached across visitors.
 3. Caching: make sure no Cache Rule or Page Rule caches `/api/visitor-hint` (the response is `private, no-store`; Cloudflare honours that by default).
-4. Rollback: switch the transform off; the site then suggests the country only and the departure field stays empty.
+4. Rollback: switch the transform off; the site is unaffected (the city, region and time zone are then simply not recorded with submissions).
 
 ### F. Post-deployment live CRM verification (procedure only; it creates real records, so it needs your explicit approval and the CRM owner's help)
 
@@ -339,7 +339,7 @@ curl -s https://www.businessflights.travel/robots.txt | grep -E "Disallow: /(api
 curl -s https://www.businessflights.travel/sitemap.xml | grep -c "<loc>"             # 223
 curl -sI https://www.businessflights.travel/terms | head -3                          # 308 -> /terms-of-service
 curl -sI https://www.businessflights.travel/offers | head -1                         # 404
-curl -s -H "Accept: application/json" https://www.businessflights.travel/api/visitor-hint   # {"countryCode":"..","airport":{..}}: no IP, no coordinates, Cache-Control: private, no-store
+curl -s -H "Accept: application/json" https://www.businessflights.travel/api/visitor-hint   # {"countryCode":".."} and nothing else: no airport, no IP, no coordinates, Cache-Control: private, no-store
 ```
 Then section F (live CRM test, with approval) and the Search Console steps in `SEO_TECHNICAL_VERIFICATION.md`.
 

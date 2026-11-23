@@ -22,6 +22,8 @@ const INFRASTRUCTURE_SPECS = [
   /docker-topology\.spec\.ts$/, // static checks of the compose files and the rehearsal project (no Docker needed)
   /visitor-hint-route\.spec\.ts$/, // standalone servers, raw HTTP
   /http-boundaries\.spec\.ts$/, // standalone server, raw HTTP: hostile and malformed requests
+  /date-flexibility-e2e\.spec\.ts$/, // standalone server + browser + stub CRM: the flexibility choice reaches the CRM
+  /edge-proof\.spec\.ts$/, // pure decision tests + a standalone server with the optional edge proof on
 ];
 const VIEWPORT_PROJECTS = ["Desktop Chrome", "Mobile 320", "Mobile 375", "Mobile 390"];
 

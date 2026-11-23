@@ -22,10 +22,19 @@
 //     one in dev: there is no proxy hop to read.
 // An explicit TRUSTED_PROXY (including "none") always wins.
 //
+// OPTIONAL edge proof (EDGE_PROOF_SECRET, off unless set). TRUSTED_PROXY=cloudflare says "the origin is reachable only through Cloudflare / its Tunnel", and
+// that is a property of the NETWORK. If something else can reach the origin directly - another container on the tunnel's Docker network, say - it can send
+// any CF-Connecting-IP and CF-IPCountry it likes. With EDGE_PROOF_SECRET set, those headers are believed only on a request that also carries the same secret
+// in "x-bft-edge-proof", which a Cloudflare request-header rule adds at the edge (docs/IP_AND_LOCATION_CAPTURE.md). A direct caller does not know the
+// secret, so its forged headers are ignored. The secret is compared in constant time and is never logged. A secret that is set but too short is a
+// misconfiguration and fails CLOSED (nothing is believed), because a guessable proof would be worse than none.
+//
 // A resolved value that is not a valid IPv4/IPv6 address, or that is in a
 // private/reserved range (a leaked internal hop, or a dev machine talking to
 // itself — never a real customer), is treated as "could not be determined"
 // rather than stored. Header values are never logged.
+
+import { createHash, timingSafeEqual } from "node:crypto";
 
 const IPV4_RE = /^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$/;
 
@@ -103,6 +112,29 @@ export function isPrivateOrReservedIp(ip: string): boolean {
 export type TrustedProxyMode = "none" | "vercel" | "cloudflare" | "nginx" | "generic";
 const VALID_MODES: ReadonlySet<string> = new Set(["vercel", "cloudflare", "nginx", "generic"]);
 
+export const EDGE_PROOF_HEADER = "x-bft-edge-proof";
+export const MIN_EDGE_PROOF_SECRET_LENGTH = 24;
+
+/** The configured edge-proof secret, or undefined when the feature is off. */
+function edgeProofSecret(): string | undefined {
+  const raw = process.env.EDGE_PROOF_SECRET;
+  if (raw === undefined) return undefined;
+  const value = raw.trim();
+  return value === "" ? undefined : value;
+}
+
+/** True when the request proves it came through the edge that adds the secret; always true when no secret is configured (the feature is off). */
+export function edgeProofAccepted(headerList: Headers): boolean {
+  const secret = edgeProofSecret();
+  if (secret === undefined) return true;
+  if (secret.length < MIN_EDGE_PROOF_SECRET_LENGTH) return false; // misconfigured: fail closed
+  const presented = headerList.get(EDGE_PROOF_HEADER);
+  if (!presented) return false;
+  const a = createHash("sha256").update(presented).digest();
+  const b = createHash("sha256").update(secret).digest();
+  return timingSafeEqual(a, b); // equal-length digests: no length leak, constant-time comparison
+}
+
 export function trustedProxyMode(): TrustedProxyMode {
   const raw = process.env.TRUSTED_PROXY?.trim().toLowerCase();
   if (raw === "none") return "none";
@@ -160,9 +192,19 @@ function candidateHeaderValues(mode: Exclude<TrustedProxyMode, "none">, headerLi
   return out;
 }
 
+/**
+ * The proxy mode that applies to THIS request: the configured one, except that in cloudflare mode with an edge-proof secret configured a request that does not
+ * carry the proof is treated as coming from no trusted proxy at all. Use this, not trustedProxyMode(), wherever a request header is about to be believed.
+ */
+export function effectiveProxyMode(headerList: Headers): TrustedProxyMode {
+  const mode = trustedProxyMode();
+  if (mode === "cloudflare" && !edgeProofAccepted(headerList)) return "none";
+  return mode;
+}
+
 export type ClientIpResult =
   | { ok: true; address: string; version: IpVersion }
-  | { ok: false; reason: "no_trusted_proxy" | "no_header" | "invalid" | "private_or_reserved" };
+  | { ok: false; reason: "no_trusted_proxy" | "edge_not_proven" | "no_header" | "invalid" | "private_or_reserved" };
 
 /**
  * The originating client IP from trusted request headers, with the reason
@@ -170,8 +212,8 @@ export type ClientIpResult =
  * log). Never guesses: an unknown IP is reported as unknown.
  */
 export function resolveClientIp(headerList: Headers): ClientIpResult {
-  const mode = trustedProxyMode();
-  if (mode === "none") return { ok: false, reason: "no_trusted_proxy" };
+  const mode = effectiveProxyMode(headerList);
+  if (mode === "none") return { ok: false, reason: trustedProxyMode() === "cloudflare" ? "edge_not_proven" : "no_trusted_proxy" };
 
   const candidates = candidateHeaderValues(mode, headerList);
   if (candidates.length === 0) return { ok: false, reason: "no_header" };

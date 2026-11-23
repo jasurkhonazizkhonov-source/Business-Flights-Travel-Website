@@ -2,7 +2,7 @@ import { test, expect } from "@playwright/test";
 import { standaloneBuildPresent, startStandalone, type StandaloneServer } from "./support/standalone-server";
 
 // GET /api/visitor-hint on the PRODUCTION (standalone) build: what the server tells the visitor's own browser so the forms can suggest a phone country
-// code and a departure airport (src/app/api/visitor-hint/route.ts, src/lib/visitor-hint.ts). It is derived only from the proxy in front of the app that
+// code (src/app/api/visitor-hint/route.ts, src/lib/visitor-hint.ts). It is derived only from the proxy in front of the app that
 // the operator declared trusted; it contains no IP address, no city and no coordinates; and it must never be cached or shared between visitors.
 //
 // Needs `NEXT_OUTPUT=standalone npm run build` first; otherwise skipped (never "passed"). Every server is started by this spec.
@@ -28,23 +28,20 @@ test.describe("behind Cloudflare (TRUSTED_PROXY=cloudflare)", () => {
   });
   test.beforeEach(() => server.assertAlive());
 
-  test("a visitor near Frankfurt gets Germany and the Frankfurt airport - nothing else", async () => {
+  test("a visitor near Frankfurt gets Germany - and nothing else: no airport, no city, no position, no address", async () => {
     const r = await hint(server, FRANKFURT_HEADERS);
     expect(r.status).toBe(200);
-    expect(JSON.parse(r.text)).toEqual({ countryCode: "DE", airport: { iata: "FRA", city: "Frankfurt am Main", name: "Frankfurt Main Airport", country: "Germany" } });
-    // The response carries no IP address, no city of the visitor's network, no coordinates.
-    expect(r.text).not.toMatch(/203\.0\.113|50\.11|8\.68|latitude|longitude|"ip"/i);
+    expect(JSON.parse(r.text)).toEqual({ countryCode: "DE" });
+    // The departure airport is suggested only from the device's own position (if the visitor allows it), never from the network: the response carries
+    // no airport, no IP address, no city of the visitor's network and no coordinates, whatever position the platform supplied.
+    expect(r.text).not.toMatch(/203\.0\.113|50\.11|8\.68|latitude|longitude|"ip"|airport|iata|Frankfurt/i);
   });
 
-  test("the answer follows the visitor's position: Munich, Würzburg (no airport of its own), and a visitor in the United States", async () => {
-    const munich = JSON.parse((await hint(server, { "CF-IPCountry": "DE", "CF-IPLatitude": "48.1371", "CF-IPLongitude": "11.5754" })).text);
-    expect(munich.airport.iata).toBe("MUC");
-    const wuerzburg = JSON.parse((await hint(server, { "CF-IPCountry": "DE", "CF-IPLatitude": "49.7913", "CF-IPLongitude": "9.9534" })).text);
-    expect(wuerzburg.countryCode).toBe("DE");
-    expect(["NUE", "FRA"]).toContain(wuerzburg.airport.iata); // a major airport by distance, never one of the small fields next door
-    const sf = JSON.parse((await hint(server, { "CF-IPCountry": "US", "CF-IPLatitude": "37.7749", "CF-IPLongitude": "-122.4194" })).text);
-    expect(sf.countryCode).toBe("US");
-    expect(["SFO", "OAK"]).toContain(sf.airport.iata);
+  test("a position supplied by the platform never changes the answer: Munich, a visitor in the United States, the middle of an ocean", async () => {
+    for (const [country, lat, lon] of [["DE", "48.1371", "11.5754"], ["US", "37.7749", "-122.4194"], ["PF", "-30", "-130"]] as const) {
+      const body = JSON.parse((await hint(server, { "CF-IPCountry": country, "CF-IPLatitude": lat, "CF-IPLongitude": lon })).text);
+      expect(body, country).toEqual({ countryCode: country });
+    }
   });
 
   test("a country without a position gives the country only; no usable data gives an empty answer", async () => {
@@ -52,8 +49,6 @@ test.describe("behind Cloudflare (TRUSTED_PROXY=cloudflare)", () => {
     expect(JSON.parse((await hint(server, { "CF-IPCountry": "XX" })).text)).toEqual({});
     expect(JSON.parse((await hint(server, { "CF-IPCountry": "T1" })).text)).toEqual({});
     expect(JSON.parse((await hint(server, {})).text)).toEqual({});
-    // A position in the middle of an ocean, far from any major airport: the country still, but no airport.
-    expect(JSON.parse((await hint(server, { "CF-IPCountry": "PF", "CF-IPLatitude": "-30", "CF-IPLongitude": "-130" })).text)).toEqual({ countryCode: "PF" });
   });
 
   test("junk values are ignored, not echoed", async () => {

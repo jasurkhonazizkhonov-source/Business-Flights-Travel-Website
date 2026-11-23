@@ -33,6 +33,13 @@ elif [ "$(printf '%s' "${ingest}" | wc -c)" -lt 32 ]; then
 else
   ok "LEAD_INGEST_SECRET is set (every request to the CRM is signed, signing v2; visitor IP / location travel inside the signature)"
 fi
+# OPTIONAL edge proof (docs/IP_AND_LOCATION_CAPTURE.md section 6). Off while empty. A value that is set but too short is refused by the application (it fails closed: no visitor IP
+# or location would be believed), so it is caught here instead of in production.
+edge_proof="$(env_value EDGE_PROOF_SECRET)"
+if [ -n "${edge_proof}" ]; then
+  [ "$(printf '%s' "${edge_proof}" | wc -c)" -ge 24 ] || die "EDGE_PROOF_SECRET is set but shorter than 24 characters (the application would believe no visitor IP or location at all)"
+  ok "EDGE_PROOF_SECRET is set (Cloudflare headers are believed only on requests that carry it; make sure the Cloudflare request-header rule is in place)"
+fi
 CRM_URL="$(env_or_default CRM_API_URL http://compass-crm:3000)"
 case "${CRM_URL}" in
   http://*|https://*) ok "CRM_API_URL is an http(s) URL" ;;

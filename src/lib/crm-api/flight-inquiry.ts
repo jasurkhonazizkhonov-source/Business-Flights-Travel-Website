@@ -1,4 +1,5 @@
 import type { FlightRequestInput } from "@/lib/validations/flight-request";
+import { resolveDateFlexibility, type DateFlexibilityDays } from "@/lib/validations/flight-request-options";
 
 // Maps the website's VALIDATED flight request onto the body of the CRM's POST /api/v1/website/flight-inquiries
 // (the CRM's docs/WEBSITE_LEAD_API.md, "Body fields"; schema: flightInquiryBase in its src/server/lead-intake.ts).
@@ -7,7 +8,7 @@ import type { FlightRequestInput } from "@/lib/validations/flight-request";
 // website-only fields (honeypot `website`, `renderedAt`, `submissionId` - which travels in the Idempotency-Key header) are therefore
 // never sent, and neither is anything the CRM owns (companyId, source, status, assignment, priority, IP).
 //
-// Differences in NAME between the website and the CRM: flexibleDates -> datesFlexible, budget -> approximateBudget, notes -> additionalNotes,
+// Differences in NAME between the website and the CRM: flexibleDates (legacy) -> datesFlexible, dateFlexibilityDays (the same name on both sides), budget -> approximateBudget, notes -> additionalNotes,
 // segments[i].from.iata -> segments[i].departureAirportIata (the CRM resolves airports itself from the IATA code).
 //
 // The body is a pure function of the validated input, so a retry of the same submission produces byte-identical JSON: the CRM stores a
@@ -29,6 +30,8 @@ export type FlightInquiryBody = {
   children: number;
   infants: number;
   datesFlexible: boolean;
+  /** 0 = exact dates, 1-3 = days either side. Absent only for a legacy "flexible" request that never said how many days. */
+  dateFlexibilityDays?: DateFlexibilityDays;
   preferredAirline?: string;
   approximateBudget?: number;
   budgetCurrency?: string;
@@ -38,6 +41,7 @@ export type FlightInquiryBody = {
 /** `phoneE164` is the website's own normalised number (src/lib/phone.ts); the CRM validates it again with its normal rule. */
 export function buildFlightInquiryBody(data: FlightRequestInput, phoneE164: string): FlightInquiryBody {
   const first = data.segments[0];
+  const flexibility = resolveDateFlexibility(data);
   const body: FlightInquiryBody = {
     firstName: data.firstName,
     lastName: data.lastName,
@@ -50,8 +54,10 @@ export function buildFlightInquiryBody(data: FlightRequestInput, phoneE164: stri
     adults: data.adults,
     children: data.children,
     infants: data.infants,
-    datesFlexible: data.flexibleDates,
+    datesFlexible: flexibility.flexible,
   };
+  // The choice itself, not just whether there was one: the CRM keeps it (Lead.dateFlexibilityDays) and shows "± 2 days" or "Exact dates".
+  if (flexibility.days !== null) body.dateFlexibilityDays = flexibility.days;
   if (data.email) body.email = data.email;
   // A return date only means something for a round trip.
   if (data.tripType === "ROUND_TRIP" && data.returnDate) body.returnDate = data.returnDate;

@@ -118,11 +118,14 @@ test.describe("notice under the flight-request button", () => {
       expect(await res.text()).toContain("Privacy Policy");
       expect(await notice.locator("a").count()).toBe(1);
 
-      // No checkbox was added: none in the form until the optional preferences are opened, and then only the existing "flexible dates" one.
+      // No checkbox exists at all (the old "dates are flexible" checkbox became the four-choice radio group), and the choices appear only when the optional
+      // preferences are opened.
       expect(await form.locator('input[type="checkbox"]').count()).toBe(0);
+      expect(await form.locator('input[name="dateFlexibility"]').count()).toBe(0);
       await form.getByRole("button", { name: /Add preferences/ }).click();
-      expect(await form.locator('input[type="checkbox"]').count()).toBe(1);
-      await expect(form.getByLabel(/My dates are flexible/)).toBeVisible();
+      expect(await form.locator('input[type="checkbox"]').count()).toBe(0);
+      await expect(form.getByRole("radiogroup", { name: "Date flexibility" }).or(form.getByRole("group", { name: "Date flexibility" }))).toBeVisible();
+      expect(await form.locator('input[name="dateFlexibility"]').count()).toBe(4);
     });
   }
 

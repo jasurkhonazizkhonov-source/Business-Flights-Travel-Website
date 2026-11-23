@@ -14,6 +14,7 @@ import { captureSubmissionInfo } from "@/lib/submission-info";
 import { gmailMailer } from "@/lib/email/mailer";
 import { postFlightInquiry } from "@/lib/crm-api/client";
 import { buildFlightInquiryBody } from "@/lib/crm-api/flight-inquiry";
+import { DATE_FLEXIBILITY_LABEL, resolveDateFlexibility } from "@/lib/validations/flight-request-options";
 import { createRequestSigner } from "@/lib/crm-api/visitor-context";
 import { crmApiConfig } from "@/server/crm-api";
 
@@ -27,6 +28,8 @@ export type SubmitFlightRequestResult =
         returnDate?: string;
         passengers: number;
         cabinClass: string;
+        /** The date flexibility the customer chose, in the form's own words ("Exact dates", "± 2 days"); absent when the request did not say. */
+        dateFlexibility?: string;
       };
     }
   | { ok: false; error: string; fieldErrors?: Record<string, string> };
@@ -140,6 +143,7 @@ export async function submitFlightRequest(input: FlightRequestInput): Promise<Su
     return friendlyError();
   }
 
+  const flexibility = resolveDateFlexibility(data);
   const route = `${canonicalFrom.city} (${canonicalFrom.iata}) → ${canonicalTo.city} (${canonicalTo.iata})`;
   const summary = {
     tripType: data.tripType,
@@ -148,6 +152,7 @@ export async function submitFlightRequest(input: FlightRequestInput): Promise<Su
     returnDate: data.returnDate,
     passengers: data.adults + data.children + data.infants,
     cabinClass: data.cabinClass,
+    ...(flexibility.days !== null ? { dateFlexibility: DATE_FLEXIBILITY_LABEL[flexibility.days] } : flexibility.flexible ? { dateFlexibility: "Flexible" } : {}),
   };
   // Never the address itself - only whether one was captured and, if not, the value-free reason (see src/lib/client-ip.ts).
   const ipStatus = submissionInfo.ip ? "captured" : `unavailable (${ipUnavailable ?? "unknown"})`;
@@ -179,7 +184,8 @@ export async function submitFlightRequest(input: FlightRequestInput): Promise<Su
           adults: data.adults,
           children: data.children,
           infants: data.infants,
-          flexibleDates: data.flexibleDates,
+          flexibleDates: flexibility.flexible,
+          dateFlexibilityDays: flexibility.days,
           preferredAirline: data.preferredAirline,
           budget: data.budget,
           budgetCurrency: data.budgetCurrency,

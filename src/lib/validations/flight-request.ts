@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { TRIP_TYPES, CABIN_CLASSES, BUDGET_CURRENCIES } from "./flight-request-options";
+import { TRIP_TYPES, CABIN_CLASSES, BUDGET_CURRENCIES, DATE_FLEXIBILITY_DAYS } from "./flight-request-options";
 import { checkEmail, emailProblemMessage } from "@/lib/email-validation";
 import { PAST_MESSAGE, TOO_FAR_MESSAGE, dateProblem, parseIsoDate, serverDateWindow } from "@/lib/flight-date-window";
 
@@ -77,7 +77,12 @@ export function createFlightRequestSchema(now: () => Date = () => new Date()) {
       adults: z.number().int().min(1).max(9),
       children: z.number().int().min(0).max(8),
       infants: z.number().int().min(0).max(8),
-      flexibleDates: z.boolean().default(false),
+      // How far the dates can move: exactly one of 0 (exact), 1, 2 or 3 days either side. Optional so a bundle cached from before this choice existed still
+      // validates; see resolveDateFlexibility() in flight-request-options.ts for how its absence is read.
+      dateFlexibilityDays: z.union([z.literal(DATE_FLEXIBILITY_DAYS[0]), z.literal(DATE_FLEXIBILITY_DAYS[1]), z.literal(DATE_FLEXIBILITY_DAYS[2]), z.literal(DATE_FLEXIBILITY_DAYS[3])]).optional(),
+      // LEGACY: what a form bundle from before the four choices sends (a checkbox). The current form never sends it; it is only read when
+      // dateFlexibilityDays is absent. Not a second control: nothing in the UI sets it.
+      flexibleDates: z.boolean().optional(),
       preferredAirline: z.string().max(120).optional().or(z.literal("")),
       budget: z.number().positive().max(1_000_000).optional(),
       // The currency the customer chose for `budget` — never converted. Optional

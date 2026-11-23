@@ -18,7 +18,7 @@ import type { AddressInfo } from "node:net";
 
 export const STUB_ALLOWED_FIELDS = [
   "firstName", "lastName", "phone", "email", "tripType", "departureAirportIata", "arrivalAirportIata", "departureDate", "returnDate", "segments",
-  "cabinClass", "adults", "children", "infants", "datesFlexible", "preferredAirline", "approximateBudget", "budgetCurrency", "additionalNotes",
+  "cabinClass", "adults", "children", "infants", "datesFlexible", "dateFlexibilityDays", "preferredAirline", "approximateBudget", "budgetCurrency", "additionalNotes",
 ] as const;
 const TRIP_TYPES = ["ONE_WAY", "ROUND_TRIP", "MULTI_CITY"];
 const CABINS = ["ECONOMY", "PREMIUM_ECONOMY", "BUSINESS", "FIRST"];
@@ -144,6 +144,9 @@ function validateFlightBody(body: Record<string, unknown>): Issue[] {
   int("children", 0, 20);
   int("infants", 0, 20);
   if (body.datesFlexible !== undefined && typeof body.datesFlexible !== "boolean") issues.push({ path: "datesFlexible", message: "Expected boolean" });
+  // The CRM's own rule (src/server/lead-intake.ts): an integer 0-3, and it must agree with datesFlexible when both are present.
+  if (body.dateFlexibilityDays !== undefined && !(Number.isInteger(body.dateFlexibilityDays) && (body.dateFlexibilityDays as number) >= 0 && (body.dateFlexibilityDays as number) <= 3)) issues.push({ path: "dateFlexibilityDays", message: "Expected an integer between 0 and 3" });
+  if (typeof body.datesFlexible === "boolean" && typeof body.dateFlexibilityDays === "number" && body.datesFlexible !== body.dateFlexibilityDays > 0) issues.push({ path: "dateFlexibilityDays", message: "Does not agree with datesFlexible" });
   str("preferredAirline", 0, 200, false);
   if (body.approximateBudget !== undefined && (typeof body.approximateBudget !== "number" || body.approximateBudget <= 0)) issues.push({ path: "approximateBudget", message: "Expected a positive number" });
   if (body.budgetCurrency !== undefined && !/^[A-Za-z]{3}$/.test(String(body.budgetCurrency))) issues.push({ path: "budgetCurrency", message: "Invalid" });
