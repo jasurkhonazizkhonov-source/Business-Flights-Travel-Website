@@ -34,14 +34,14 @@ export default function ContactPage() {
             <div className="rounded-2xl bg-[var(--color-cream-100)] p-6">
               <Phone className="h-6 w-6 text-[var(--color-navy-800)]" />
               <h2 className="mt-3 font-display text-lg font-semibold text-[var(--color-navy-950)]">Call Us</h2>
-              <a href={`tel:${CONTACT_PHONE_DISPLAY.replace(/[^+\d]/g, "")}`} className="mt-1 block text-sm text-[var(--color-navy-950)]/75 hover:text-[var(--color-gold-600)]">
+              <a href={`tel:${CONTACT_PHONE_DISPLAY.replace(/[^+\d]/g, "")}`} className="mt-1 block py-1.5 text-sm text-[var(--color-navy-950)]/75 hover:text-[var(--color-gold-600)]">
                 {CONTACT_PHONE_DISPLAY}
               </a>
             </div>
             <div className="rounded-2xl bg-[var(--color-cream-100)] p-6">
               <Mail className="h-6 w-6 text-[var(--color-navy-800)]" />
               <h2 className="mt-3 font-display text-lg font-semibold text-[var(--color-navy-950)]">Email Us</h2>
-              <a href={`mailto:${CONTACT_EMAIL}`} className="mt-1 block text-sm text-[var(--color-navy-950)]/75 hover:text-[var(--color-gold-600)]">
+              <a href={`mailto:${CONTACT_EMAIL}`} className="mt-1 block py-1.5 text-sm text-[var(--color-navy-950)]/75 hover:text-[var(--color-gold-600)]">
                 {CONTACT_EMAIL}
               </a>
             </div>
@@ -50,7 +50,7 @@ export default function ContactPage() {
               <p className="mt-1 text-sm text-[var(--color-navy-950)]/65">Skip the message and request a fare directly.</p>
               <Link
                 href="/flights"
-                className="mt-4 inline-flex items-center gap-1.5 rounded-full bg-[var(--color-navy-950)] px-5 py-2.5 text-sm font-semibold text-white hover:bg-[var(--color-gold-600)]"
+                className="mt-4 inline-flex min-h-11 items-center gap-1.5 rounded-full bg-[var(--color-navy-950)] px-5 py-2.5 text-sm font-semibold text-white hover:bg-[var(--color-gold-600)]"
               >
                 {PRIMARY_CTA_LABEL} <ArrowRight size={15} />
               </Link>

@@ -103,6 +103,31 @@ test.describe("edge proof on: only a request that carries the secret is believed
     });
   });
 
+  test("the proof vouches for the SOURCE, not the content: a proven request with a bad, private, multiple or malformed address still yields no client IP", () => {
+    on(() => {
+      const proven = (ip: string, extra: Record<string, string> = {}) => new Headers({ "CF-Connecting-IP": ip, [EDGE_PROOF_HEADER]: SECRET, ...extra });
+      expect(resolveClientIp(proven("203.0.113.5, 198.51.100.1"))).toEqual({ ok: false, reason: "invalid" }); // two values: never "the first one"
+      expect(resolveClientIp(proven("10.0.0.7"))).toEqual({ ok: false, reason: "private_or_reserved" });
+      expect(resolveClientIp(proven("not-an-ip"))).toEqual({ ok: false, reason: "invalid" });
+      expect(resolveClientIp(proven("203.0.113.5 junk"))).toEqual({ ok: false, reason: "invalid" }); // (a NUL byte cannot even be put in a header)
+      expect(resolveClientIp(proven("2001:4860:4860::8888"))).toMatchObject({ ok: true, version: "v6" });
+      expect(resolveClientIp(proven("::ffff:203.0.113.9"))).toEqual({ ok: true, address: "203.0.113.9", version: "v4" }); // one real client, one string
+      // Cloudflare's Class E stand-in: the real IPv6 is read from CF-Connecting-IPv6 only in that exact case (and only with the proof)
+      expect(resolveClientIp(proven("240.1.2.3", { "CF-Connecting-IPv6": "2001:4860:4860::8844" }))).toMatchObject({ ok: true, address: "2001:4860:4860::8844" });
+      expect(resolveClientIp(new Headers({ "CF-Connecting-IP": "240.1.2.3", "CF-Connecting-IPv6": "2001:4860:4860::8844" })).ok).toBe(false); // no proof: not believed
+    });
+  });
+
+  test("a repeated or reflected proof header is not accepted, and no other forwarded header can stand in for it", () => {
+    on(() => {
+      // two copies of the header are joined by the platform as "a, a": that is not the secret
+      expect(edgeProofAccepted(forged({ [EDGE_PROOF_HEADER]: `${SECRET}, ${SECRET}` }))).toBe(false);
+      for (const name of ["x-forwarded-for", "x-real-ip", "forwarded", "x-edge-proof", "cf-ray", "cf-visitor", "authorization"]) {
+        expect(edgeProofAccepted(forged({ [name]: SECRET })), name).toBe(false);
+      }
+    });
+  });
+
   test("the proof is only about the Cloudflare mode: a Vercel or unset deployment is not changed by it", () => {
     withEnv({ TRUSTED_PROXY: "none", EDGE_PROOF_SECRET: SECRET }, () => {
       expect(resolveClientIp(forged({ [EDGE_PROOF_HEADER]: SECRET }))).toEqual({ ok: false, reason: "no_trusted_proxy" });
@@ -192,5 +217,16 @@ test.describe("a real production server with the edge proof on (stub CRM)", () =
     crm.reset();
     const proven = await submit(cf({ "CF-Connecting-IP": "203.0.113.201", [EDGE_PROOF_HEADER]: SECRET }));
     expect(proven.visitor).toMatchObject({ state: "verified", ip: "203.0.113.201", country: "FR", city: "Paris" });
+  });
+
+  test("the secret is never reflected: not in any response body or header of the public routes, whether or not the request carries it", async () => {
+    for (const headers of [cf(), cf({ [EDGE_PROOF_HEADER]: SECRET }), cf({ [EDGE_PROOF_HEADER]: "wrong-" + SECRET })]) {
+      for (const route of ["/api/health", "/api/visitor-hint", "/contact", "/does-not-exist"]) {
+        const res = await fetch(`${server.origin}${route}`, { headers });
+        const text = await res.text();
+        expect(text, `${route} body`).not.toContain(SECRET);
+        expect(JSON.stringify([...res.headers.entries()]), `${route} headers`).not.toContain(SECRET);
+      }
+    }
   });
 });

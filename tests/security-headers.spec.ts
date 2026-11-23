@@ -12,7 +12,7 @@ test.describe("security headers", () => {
       expect(res.status()).toBe(200);
       const h = res.headers();
       const csp = h["content-security-policy"] ?? "";
-      for (const directive of ["default-src 'self'", "frame-ancestors 'none'", "base-uri 'self'", "form-action 'self'", "object-src 'none'", "img-src 'self' data:", "font-src 'self' data:"]) {
+      for (const directive of ["default-src 'self'", "frame-ancestors 'none'", "base-uri 'self'", "form-action 'self'", "object-src 'none'", "img-src 'self' data:", "font-src 'self' data:", "script-src-attr 'none'"]) {
         expect(csp, directive).toContain(directive);
       }
       // No third-party origin is allowed anywhere in the policy (the site loads nothing from another host).

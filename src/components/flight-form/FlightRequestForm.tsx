@@ -385,6 +385,8 @@ export function FlightRequestForm({
   return (
     <form
       onSubmit={handleSubmit}
+      // On narrow screens the fixed "Best Deals" pill steps aside while this form is on screen, so it never sits over a field (FloatingDealsButton).
+      data-hide-floating-cta-small
       onFocusCapture={askOnFirstUse}
       onPointerDownCapture={askOnFirstUse}
       // Without this, the browser's own native constraint validation (e.g.
@@ -406,7 +408,7 @@ export function FlightRequestForm({
             type="button"
             onClick={() => changeTripType(t)}
             className={cn(
-              "min-h-9 flex-1 whitespace-nowrap rounded-full px-2.5 py-2 text-xs font-semibold tracking-wide transition-colors sm:flex-none sm:px-4 sm:text-sm",
+              "min-h-11 flex-1 whitespace-nowrap rounded-full px-2.5 py-2 text-xs font-semibold tracking-wide transition-colors sm:min-h-9 pointer-coarse:min-h-11 sm:flex-none sm:px-4 sm:text-sm",
               tripType === t ? "bg-[var(--color-navy-950)] text-white shadow" : "text-[var(--color-navy-800)] hover:text-[var(--color-navy-950)]",
             )}
           >
@@ -476,7 +478,7 @@ export function FlightRequestForm({
       <button
         type="button"
         onClick={() => setShowMore((v) => !v)}
-        className="mt-2 inline-flex min-h-8 items-center text-xs font-semibold text-[var(--color-navy-700)] underline decoration-dotted underline-offset-4 hover:text-[var(--color-gold-600)]"
+        className="mt-2 inline-flex min-h-11 items-center sm:min-h-8 pointer-coarse:min-h-11 text-xs font-semibold text-[var(--color-navy-700)] underline decoration-dotted underline-offset-4 hover:text-[var(--color-gold-600)]"
       >
         {showMore ? "Hide additional preferences" : "Add preferences (airline, budget, notes)"}
       </button>

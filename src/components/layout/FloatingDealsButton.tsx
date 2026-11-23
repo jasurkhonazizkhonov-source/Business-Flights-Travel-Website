@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { PhoneCall } from "lucide-react";
 import { m } from "framer-motion";
+import { usePathname } from "next/navigation";
 import { CONTACT_PHONE_DISPLAY, CONTACT_PHONE_E164 } from "@/lib/constants";
 
 // Persistent, viewport-fixed CTA — stays visible while scrolling. Kept
@@ -59,26 +60,42 @@ export function FloatingDealsButton() {
     return () => observer.disconnect();
   }, []);
 
+  // This component lives in the root layout, so it is NOT remounted when the visitor navigates to another page: the elements to avoid have to be looked up again
+  // on every route change, or a page reached by a link (rather than a fresh load) never gets its own button/form protected.
+  const pathname = usePathname();
   useEffect(() => {
-    const targets = document.querySelectorAll<HTMLElement>("[data-hide-floating-cta]");
-    if (targets.length === 0) return;
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        for (const entry of entries) {
-          if (entry.isIntersecting) intersecting.current.add(entry.target);
-          else intersecting.current.delete(entry.target);
-        }
-        setCoversCta(intersecting.current.size > 0);
-      },
-      // A little extra margin at the bottom so the pill steps aside slightly
-      // before the button it would otherwise cover is even fully in view.
-      { rootMargin: "0px 0px -72px 0px", threshold: 0 },
-    );
-
-    targets.forEach((el) => observer.observe(el));
-    return () => observer.disconnect();
-  }, []);
+    // Below the `lg` breakpoint a whole form (marked `data-hide-floating-cta-small`) is also an area to avoid: on a phone or a small tablet this fixed pill
+    // otherwise sits over the right-hand end of the field being filled in. From `lg` up the pill is unchanged (only `data-hide-floating-cta` elements count).
+    const small = window.matchMedia("(max-width: 1023.98px)");
+    let observer: IntersectionObserver | undefined;
+    const attach = () => {
+      observer?.disconnect();
+      intersecting.current.clear();
+      setCoversCta(false);
+      const selector = small.matches ? "[data-hide-floating-cta], [data-hide-floating-cta-small]" : "[data-hide-floating-cta]";
+      const targets = document.querySelectorAll<HTMLElement>(selector);
+      if (targets.length === 0) return;
+      observer = new IntersectionObserver(
+        (entries) => {
+          for (const entry of entries) {
+            if (entry.isIntersecting) intersecting.current.add(entry.target);
+            else intersecting.current.delete(entry.target);
+          }
+          setCoversCta(intersecting.current.size > 0);
+        },
+        // A little extra margin at the bottom so the pill steps aside slightly
+        // before the button it would otherwise cover is even fully in view.
+        { rootMargin: "0px 0px -72px 0px", threshold: 0 },
+      );
+      targets.forEach((el) => observer!.observe(el));
+    };
+    attach();
+    small.addEventListener("change", attach);
+    return () => {
+      small.removeEventListener("change", attach);
+      observer?.disconnect();
+    };
+  }, [pathname]);
 
   return (
     // A landmark of its own: this fixed link sits outside <main>/<header>/<footer>, so without one

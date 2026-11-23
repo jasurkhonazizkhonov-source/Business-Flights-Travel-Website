@@ -49,7 +49,7 @@ function Stepper({
           disabled={value <= min}
           onClick={() => onChange(Math.max(min, value - 1))}
           aria-label={`Decrease ${label}`}
-          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-[var(--color-navy-950)]/15 text-[var(--color-navy-900)] transition-colors hover:bg-[var(--color-cream-100)] disabled:opacity-30"
+          className="flex h-11 w-11 shrink-0 items-center sm:h-10 sm:w-10 pointer-coarse:h-11 pointer-coarse:w-11 justify-center rounded-full border border-[var(--color-navy-950)]/15 text-[var(--color-navy-900)] transition-colors hover:bg-[var(--color-cream-100)] disabled:opacity-30"
         >
           <Minus size={15} />
         </button>
@@ -59,7 +59,7 @@ function Stepper({
           disabled={value >= max}
           onClick={() => onChange(Math.min(max, value + 1))}
           aria-label={`Increase ${label}`}
-          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-[var(--color-navy-950)]/15 text-[var(--color-navy-900)] transition-colors hover:bg-[var(--color-cream-100)] disabled:opacity-30"
+          className="flex h-11 w-11 shrink-0 items-center sm:h-10 sm:w-10 pointer-coarse:h-11 pointer-coarse:w-11 justify-center rounded-full border border-[var(--color-navy-950)]/15 text-[var(--color-navy-900)] transition-colors hover:bg-[var(--color-cream-100)] disabled:opacity-30"
         >
           <Plus size={15} />
         </button>

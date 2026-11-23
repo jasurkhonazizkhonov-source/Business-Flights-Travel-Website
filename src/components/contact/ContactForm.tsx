@@ -197,7 +197,7 @@ export function ContactForm() {
   }
 
   return (
-    <form onSubmit={handleSubmit} noValidate className="rounded-2xl border border-[var(--color-navy-950)]/8 bg-white p-6 sm:p-7">
+    <form onSubmit={handleSubmit} noValidate data-hide-floating-cta-small className="rounded-2xl border border-[var(--color-navy-950)]/8 bg-white p-6 sm:p-7">
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <div id="field-firstName">
           <label htmlFor="c-firstName" className="mb-1.5 block text-xs font-semibold tracking-wide text-[var(--color-navy-700)]">

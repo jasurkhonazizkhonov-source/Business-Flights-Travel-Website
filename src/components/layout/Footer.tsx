@@ -169,11 +169,11 @@ export function Footer() {
         <div className="mt-8 flex flex-col gap-4 border-t border-white/10 pt-8 text-xs text-[var(--color-cream-100)]/65">
           <nav aria-label="Legal" className="flex flex-wrap gap-x-6 gap-y-2">
             {LEGAL_LINKS.map((link) => (
-              <Link key={link.href} href={link.href} className="py-1.5 hover:text-[var(--color-cream-100)]/90">
+              <Link key={link.href} href={link.href} className="py-2.5 hover:text-[var(--color-cream-100)]/90">
                 {link.label}
               </Link>
             ))}
-            <CookieSettingsLink className="py-1.5 hover:text-[var(--color-cream-100)]/90" />
+            <CookieSettingsLink className="py-2.5 hover:text-[var(--color-cream-100)]/90" />
           </nav>
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <p>© {new Date().getFullYear()} Business Flights Travel. All rights reserved.</p>

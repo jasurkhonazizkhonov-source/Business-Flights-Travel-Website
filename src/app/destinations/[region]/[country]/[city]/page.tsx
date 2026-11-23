@@ -143,9 +143,9 @@ export default async function DestinationPage({ params }: PageProps<"/destinatio
         <div className="relative mx-auto max-w-5xl px-4 py-16 sm:px-6 sm:py-24 lg:px-8 lg:py-32">
           <Reveal>
             <nav aria-label="Breadcrumb" className="flex flex-wrap items-center gap-1 text-xs text-white/60">
-              <Link href="/destinations" className="hover:text-white">Destinations</Link>
+              <Link href="/destinations" className="-my-1.5 inline-block py-1.5 hover:text-white">Destinations</Link>
               <span aria-hidden="true">/</span>
-              <Link href={regionPath(destination.region)} className="hover:text-white">{regionLabel(destination.region)}</Link>
+              <Link href={regionPath(destination.region)} className="-my-1.5 inline-block py-1.5 hover:text-white">{regionLabel(destination.region)}</Link>
               <span aria-hidden="true">/</span>
               <span>{destination.country}</span>
               <span aria-hidden="true">/</span>
@@ -210,7 +210,7 @@ export default async function DestinationPage({ params }: PageProps<"/destinatio
                 <p className="mt-3 leading-relaxed text-[var(--color-navy-950)]/75">{sharedRoutingOnly ? SHARED_ROUTING_NOTE : destination.flyingFromUS}</p>
                 {sharedRoutingOnly && (
                   <p className="mt-2 text-sm">
-                    <Link href="/how-it-works" className="font-medium text-[var(--color-navy-800)] underline decoration-dotted underline-offset-2 hover:text-[var(--color-gold-600)]">
+                    <Link href="/how-it-works" className="-my-1.5 inline-block py-1.5 font-medium text-[var(--color-navy-800)] underline decoration-dotted underline-offset-2 hover:text-[var(--color-gold-600)]">
                       See how a flight request works
                     </Link>
                   </p>
@@ -336,7 +336,7 @@ export default async function DestinationPage({ params }: PageProps<"/destinatio
                     if (!post) return null;
                     return (
                       <li key={slug}>
-                        <Link href={`/blog/${slug}`} className="text-sm text-[var(--color-navy-800)] underline decoration-dotted underline-offset-2 hover:text-[var(--color-gold-600)]">
+                        <Link href={`/blog/${slug}`} className="inline-block py-1 text-sm text-[var(--color-navy-800)] underline decoration-dotted underline-offset-2 hover:text-[var(--color-gold-600)]">
                           {post.title}
                         </Link>
                       </li>

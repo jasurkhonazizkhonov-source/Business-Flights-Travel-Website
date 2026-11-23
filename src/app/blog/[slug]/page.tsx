@@ -108,7 +108,7 @@ export default async function BlogPostPage({ params }: PageProps<"/blog/[slug]">
       <article className="mx-auto max-w-3xl px-4 py-16 sm:px-6 lg:px-8 lg:py-24">
         <Reveal>
           <nav aria-label="Breadcrumb" className="text-xs text-[var(--color-navy-950)]/65">
-            <Link href="/blog" className="hover:text-[var(--color-navy-950)]">Blog</Link> <span className="mx-1">/</span> {post.category}
+            <Link href="/blog" className="-my-1.5 inline-block py-1.5 hover:text-[var(--color-navy-950)]">Blog</Link> <span className="mx-1">/</span> {post.category}
           </nav>
           <p className="mt-4 text-xs font-semibold tracking-[0.2em] text-[var(--color-gold-600)]">{post.category.toUpperCase()}</p>
           <h1 className="mt-3 text-[clamp(1.75rem,4vw,2.5rem)] font-display font-semibold leading-tight text-[var(--color-navy-950)]">{post.title}</h1>

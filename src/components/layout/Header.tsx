@@ -66,7 +66,7 @@ export function Header({ navMenuRegions }: { navMenuRegions: NavMenuRegion[] }) 
       )}
     >
       <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6 lg:h-20 lg:px-8">
-        <Link href="/" className="shrink-0" aria-label="Business Flights Travel — home">
+        <Link href="/" className="inline-flex min-h-11 shrink-0 items-center" aria-label="Business Flights Travel — home">
           <Logo
             variant="navy"
             className="h-7 sm:h-8 lg:h-9"
@@ -107,7 +107,7 @@ export function Header({ navMenuRegions }: { navMenuRegions: NavMenuRegion[] }) 
 
         <button
           type="button"
-          className="-mr-2 inline-flex items-center justify-center rounded-md p-2 text-[var(--color-navy-950)] lg:hidden"
+          className="-mr-2.5 inline-flex items-center justify-center rounded-md p-2.5 text-[var(--color-navy-950)] lg:hidden"
           aria-label={mobileOpen ? "Close menu" : "Open menu"}
           aria-expanded={mobileOpen}
           onClick={() => setMobileOpen((v) => !v)}

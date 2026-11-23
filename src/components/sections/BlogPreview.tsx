@@ -18,7 +18,7 @@ export function BlogPreview() {
               Business travel guides &amp; insights
             </h2>
           </div>
-          <Link href="/blog" className="inline-flex shrink-0 items-center gap-1.5 text-sm font-semibold text-[var(--color-navy-800)] hover:text-[var(--color-gold-600)]">
+          <Link href="/blog" className="inline-flex min-h-11 shrink-0 items-center gap-1.5 text-sm font-semibold text-[var(--color-navy-800)] hover:text-[var(--color-gold-600)]">
             Visit the blog <ArrowRight size={16} />
           </Link>
         </div>

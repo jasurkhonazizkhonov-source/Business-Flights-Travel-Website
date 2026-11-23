@@ -95,7 +95,7 @@ export default function DestinationsPage() {
                   <p className="mt-2 text-sm">
                     <Link
                       href={`/destinations/${region.slug}`}
-                      className="font-semibold text-[var(--color-navy-900)] underline decoration-dotted underline-offset-2 hover:text-[var(--color-gold-600)]"
+                      className="-my-1.5 inline-block py-1.5 font-semibold text-[var(--color-navy-900)] underline decoration-dotted underline-offset-2 hover:text-[var(--color-gold-600)]"
                     >
                       Browse {region.label} by country
                     </Link>

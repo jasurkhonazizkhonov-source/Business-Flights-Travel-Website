@@ -28,6 +28,10 @@ const isDev = process.env.NODE_ENV !== "production";
 const csp = [
   "default-src 'self'",
   `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ""}`,
+  // 'unsafe-inline' above is needed for Next's inline framework scripts (docs/SECURITY_REVIEW_AND_REMAINING_LIMITATIONS.md), but it ALSO allows inline event-handler
+  // attributes (onclick="..."), which nothing here uses (0 on all 223 pages, measured). Refusing them closes the most common way an injected attribute turns into
+  // script, without touching hydration.
+  "script-src-attr 'none'",
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data:",
   "font-src 'self' data:",

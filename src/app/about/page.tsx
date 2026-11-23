@@ -353,7 +353,7 @@ export default function AboutPage() {
                 <p className="mt-1 text-sm leading-relaxed text-[var(--color-navy-950)]/70">{COMPANY_ADDRESS}</p>
                 <a
                   href={`tel:${CONTACT_PHONE_E164}`}
-                  className="mt-1 inline-block text-sm text-[var(--color-navy-950)]/70 hover:text-[var(--color-gold-600)]"
+                  className="mt-1 inline-block py-1.5 text-sm text-[var(--color-navy-950)]/70 hover:text-[var(--color-gold-600)]"
                 >
                   {CONTACT_PHONE_DISPLAY}
                 </a>

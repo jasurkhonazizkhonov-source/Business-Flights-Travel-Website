@@ -186,6 +186,19 @@ test.describe("Floating call button", () => {
     if (size) await page.setViewportSize({ width: size.width, height: Math.min(size.height, 640) });
     await page.goto("/flights");
     const fab = page.locator('a.fixed[href^="tel:"]');
+    if (size && size.width < 1024) {
+      // Below 1024 px the pill steps aside for the WHOLE form (FloatingDealsButton, data-hide-floating-cta-small: on a phone it otherwise sat over the field
+      // being filled in), so it is already hidden at load and the popup can never be covered by it. What matters here is that it STAYS hidden with the popup
+      // open and comes back once the form is out of view (the rest of the behaviour is in mobile-usability.spec.ts).
+      await expect(fab).toHaveAttribute("aria-hidden", "true", { timeout: 15000 });
+      await page.getByRole("button", { name: /travelers & cabin/i }).click();
+      await expect(fab).toHaveAttribute("aria-hidden", "true");
+      expect(await fab.evaluate((el) => getComputedStyle(el).pointerEvents)).toBe("none");
+      await page.getByRole("button", { name: /travelers & cabin/i }).click(); // toggle closed
+      await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+      await expect(fab).toHaveAttribute("aria-hidden", "false", { timeout: 15000 });
+      return;
+    }
     await expect(fab).toHaveAttribute("aria-hidden", "false", { timeout: 15000 });
     await page.getByRole("button", { name: /travelers & cabin/i }).click();
     await expect(fab).toHaveAttribute("aria-hidden", "true");
@@ -216,8 +229,15 @@ test.describe("Floating call button", () => {
       return Math.min(x.right, y.right) > Math.max(x.left, y.left) && Math.min(x.bottom, y.bottom) > Math.max(x.top, y.top);
     });
     expect(overlap).toBe(false);
-    // A short window puts the submit button below the fold: the pill is available again.
+    // Below 1024 px the pill also steps aside for the rest of the form (it used to sit over the fields), so at 768 px a short window that merely puts the submit
+    // button below the fold does NOT bring it back while form fields are still on screen: it returns once the form is out of view.
     await page.setViewportSize({ width: 768, height: 640 });
+    await page.evaluate(() => window.scrollTo(0, 0));
+    await expect(fab).toHaveAttribute("aria-hidden", "true");
+    await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+    await expect(fab).toHaveAttribute("aria-hidden", "false", { timeout: 15000 });
+    // The original rule, unchanged on a desktop: from 1024 px the pill is back as soon as the submit button is below the fold.
+    await page.setViewportSize({ width: 1280, height: 640 });
     await page.evaluate(() => window.scrollTo(0, 0));
     await expect(fab).toHaveAttribute("aria-hidden", "false", { timeout: 15000 });
   });

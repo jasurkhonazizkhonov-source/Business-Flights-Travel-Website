@@ -150,8 +150,9 @@ export function CookieConsent() {
           aria-label="Cookie notice"
           className="fixed inset-x-0 bottom-0 z-50 border-t border-[var(--color-navy-950)]/10 bg-white/97 px-4 py-3 shadow-[0_-12px_32px_-12px_rgba(10,26,48,0.25)] backdrop-blur sm:px-6 sm:py-4"
         >
-          <div className="mx-auto flex max-w-7xl flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex items-start gap-3 sm:max-w-2xl">
+          {/* Side by side only from 768 px: between 640 and about 700 px the three buttons left the text a column so narrow that the notice filled over half of the screen (and 88% of a landscape phone). */}
+          <div className="mx-auto flex max-w-7xl flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div className="flex items-start gap-3 md:max-w-2xl">
               <Cookie size={20} className="mt-0.5 shrink-0 text-[var(--color-gold-600)]" aria-hidden="true" />
               <p className="text-[0.8125rem] leading-snug text-[var(--color-navy-950)]/80 sm:text-sm sm:leading-relaxed">
                 We don&apos;t use advertising or tracking cookies — only what&apos;s required to run this site. If we ever add optional
@@ -162,7 +163,7 @@ export function CookieConsent() {
                 .
               </p>
             </div>
-            <div className="flex shrink-0 flex-wrap gap-2.5 sm:flex-nowrap">
+            <div className="flex shrink-0 flex-wrap gap-2.5 md:flex-nowrap">
               <button
                 type="button"
                 onClick={() => setPreferencesOpen(true)}

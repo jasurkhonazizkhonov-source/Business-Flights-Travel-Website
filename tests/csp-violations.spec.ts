@@ -73,3 +73,29 @@ test.describe("browser flows under the real policy", () => {
     expect(seen).toEqual([]);
   });
 });
+
+// script-src still allows inline script (Next's framework payload needs it), but NOT inline event-handler attributes: nothing in the app uses them, so refusing
+// them costs nothing and stops an injected onclick="..." / onerror="..." from becoming script. (script-src-attr 'none' in next.config.ts.)
+test.describe("inline event-handler attributes are refused", () => {
+  test("a handler attribute added to the page does not run and is reported as a policy violation", async ({ page }) => {
+    await page.goto("/contact");
+    const result = await page.evaluate(async () => {
+      const violations: string[] = [];
+      document.addEventListener("securitypolicyviolation", (e) => violations.push(e.effectiveDirective));
+      const w = window as unknown as { __ran?: boolean };
+      w.__ran = false;
+      const button = document.createElement("button");
+      button.setAttribute("onclick", "window.__ran = true");
+      document.body.appendChild(button);
+      button.click();
+      const image = document.createElement("img");
+      image.setAttribute("onerror", "window.__ran = true");
+      image.setAttribute("src", "/definitely-missing-image.png");
+      document.body.appendChild(image);
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      return { ran: w.__ran, violations };
+    });
+    expect(result.ran).toBe(false);
+    expect(result.violations).toContain("script-src-attr");
+  });
+});

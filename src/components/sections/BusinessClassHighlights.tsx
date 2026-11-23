@@ -45,7 +45,7 @@ export function BusinessClassHighlights() {
           </dl>
           <Link
             href="/business-class"
-            className="mt-8 inline-flex items-center gap-1.5 text-sm font-semibold text-[var(--color-navy-900)] hover:text-[var(--color-gold-600)]"
+            className="mt-8 inline-flex min-h-11 items-center gap-1.5 text-sm font-semibold text-[var(--color-navy-900)] hover:text-[var(--color-gold-600)]"
           >
             Learn more about our business-class service <ArrowRight size={16} />
           </Link>

@@ -89,7 +89,7 @@ export default async function RegionHubPage({ params }: PageProps<"/destinations
         <div className="mx-auto max-w-5xl px-4 py-14 sm:px-6 sm:py-20 lg:px-8">
           <Reveal>
             <nav aria-label="Breadcrumb" className="flex flex-wrap items-center gap-1 text-xs text-white/70">
-              <Link href="/destinations" className="hover:text-white">Destinations</Link>
+              <Link href="/destinations" className="-my-1.5 inline-block py-1.5 hover:text-white">Destinations</Link>
               <span aria-hidden="true">/</span>
               <span className="text-white/90">{label}</span>
             </nav>
