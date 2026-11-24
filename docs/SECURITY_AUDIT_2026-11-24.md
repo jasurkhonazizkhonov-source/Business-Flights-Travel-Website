@@ -1,0 +1,48 @@
+# Security audit and privacy review: website (2026-11-24)
+
+Scope: the Business Flights Travel website (`Travel Agency Website-updated`), its link to the Compass-Tools CRM, and the privacy statements the site makes. Method: code reading, the test suites named below, a full-history secret scan of both repositories, `npm audit`, header and cookie probes of the local production build, Lighthouse. **Nothing was tested against production, a real Cloudflare zone, or customer data.** This is an engineering review, **not legal advice**; the privacy section lists items for counsel and makes no legal claim.
+
+## 1. Findings
+
+| # | Area | Finding | Severity | Status |
+|---|---|---|---|---|
+| F1 | Scripts / XSS | `script-src` still allowed `'unsafe-inline'`, so any injected inline script would run. | High (defence in depth) | **Fixed**: per-response nonce (`src/proxy.ts`, `src/lib/csp.ts`), `script-src-attr 'none'`, `frame-src`/`worker-src 'none'`. 21 tests on real production servers, including a hostile-injection test. Run-time kill switch `CSP_SCRIPT_MODE=compat`. See `CSP_HARDENING.md`. |
+| F2 | Styles | `style-src 'unsafe-inline'` remains (about 5,900 inline `style=""` attributes; Sonner injects a `<style>` without a nonce). | Low | **Open, documented**: a design-system change, not a header change. Style injection cannot execute code. |
+| F3 | Client IP / rate limits | A forged `X-Forwarded-For` could rotate the rate-limit key (fixed earlier in 10fe079). Remaining gap: the trusted-proxy headers can still be set by anyone who reaches the origin directly. | Medium | **Prepared, not activated**: the optional edge proof (`x-bft-edge-proof` = `EDGE_PROOF_SECRET`) gets an `EDGE_PROOF_MODE` of `observe` (log only, never lock anyone out) then `enforce`; `/api/edge-check`; `deploy/check-edge-proof.sh`; `EDGE_PROOF_ACTIVATION_RUNBOOK.md`. **Activation needs the Cloudflare rule, which needs someone with Cloudflare access.** |
+| F4 | Rate limiter store | An attacker could fill the per-process store with junk keys to evict real counters. | Medium | **Fixed**: bounded store (50,000 keys), eviction removes the keys with the fewest hits first, so a flood of one-hit keys cannot push out an abuser's counter. Tests in `rate-limit-hardening.spec.ts`. |
+| F5 | Rate limiter, unresolved IP | When no client IP can be resolved every such visitor shared one bucket (a fixed-size shared bucket is a lockout lever). | Medium | **Fixed**: shared bucket with a 5x allowance (`UNRESOLVED_ALLOWANCE_MULTIPLIER`), so unresolved traffic neither locks out nor bypasses. |
+| F6 | Rate limiter, many instances | The website limiter is per process: N website containers allow N times the limit. | Low (one container is deployed) | **Documented limitation**, tested (`rate-limit-topology.spec.ts` starts three servers). The CRM has a database-backed atomic limiter shared by all its instances and is the cross-instance layer; the website deliberately has no database. A new Redis was not added: one container does not justify one. |
+| F7 | Logging | Error text from the CRM client could carry request fragments. | Low | **Fixed**: only an error kind is logged (`src/lib/safe-error.ts`); no body, header, IP or key. |
+| F8 | Caching of nonce pages | Next marks dynamic pages `no-store`, which Chrome refuses to keep in the back/forward cache (found by Lighthouse: `bf-cache` failed on every page after F1). | Low (performance) | **Fixed**: `private, no-cache, max-age=0, must-revalidate` from the proxy; `bf-cache` passes on all six measured pages; tests assert private, not shared-cacheable, not fresh. |
+| F9 | Contract drift website to CRM | The CRM endpoint is strict (unknown field is a 400); a payload change on either side would fail only in production. | Medium | **Fixed**: shared fixtures. `tests/crm-contract-fixtures.spec.ts` (website) and `website-payload-contract.test.ts` (CRM, commit 3b469bf, local) validate the same bytes. |
+| F10 | HSTS | `max-age=63072000` without `includeSubDomains` or `preload`. | Informational | **Left as is**: adding either is irreversible for the domain and affects subdomains this review cannot see. Decision for the owner. |
+| F12 | HTTP methods | Because pages are now rendered per request (F1), they answered `PUT`/`DELETE`/`PATCH`/`OPTIONS` with the page (a prerendered page answered 405). Found by `http-boundaries.spec.ts`. | Low | **Fixed**: the proxy answers 405 (`Allow: GET, HEAD, POST`) to those methods on every non-API path. `POST` stays (it is how a server action reaches its page; a plain POST renders the page and changes nothing). `TRACE` is refused with a generic 500 and never echoed: the framework cannot build a Request for TRACE, which was already so for the API routes. Optional hardening: a Cloudflare WAF custom rule blocking `http.request.method eq "TRACE"`. |
+| F11 | Phone calendar usability | The date picker overflowed narrow phones and had small targets. | Low (a11y) | **Fixed**: full-width popover on phones, 44 px day buttons from 360 px, 38 px at 320 px; overflow audits clean at all required sizes. |
+
+## 2. What was checked and found sound
+
+* **Secrets in history.** All commits of both repositories were scanned (every added line) for private keys, cloud and platform tokens, JWTs, credentials in connection strings, and `*SECRET/PASSWORD/TOKEN/API_KEY` assignments. 26 pattern hits in the website history and 42 in the CRM history; all were reviewed with the values masked. **Every hit is a synthetic value**: unit-test fixtures, the throwaway Docker rehearsal and CI-smoke files, regular expressions, or values derived at run time (`Buffer.alloc(32, n)`). No live-looking credential was found. Limits: a pattern scan (no tool such as gitleaks was installed, and none was added), so an unusual secret format could be missed; the scan does not cover places outside git (the VPS, Cloudflare, GitHub secrets). The values were never printed.
+* **Dependencies.** `npm audit` (production and all): 0 vulnerabilities, Next.js 16.4.6.
+* **Cookies.** The website sets none (probed on `/`, `/flights`, the API routes; no `Set-Cookie`). The visitor's cookie choice is in `localStorage`.
+* **CORS.** No `Access-Control-*` header is sent, including for a request with a hostile `Origin`; server actions are same-origin only and exactly three exist (static scan + build manifest, `server-action-surface.spec.ts`).
+* **Headers** (production build): `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: strict-origin-when-cross-origin`, `Permissions-Policy` (camera, microphone, payment, usb off; geolocation self), HSTS, the nonce CSP, no `X-Powered-By`, no `Server` version.
+* **Signing and replay.** Requests to the CRM are signed (v2), carry an `Idempotency-Key`, and the CRM refuses a reused signature (separate audit documents).
+* **Errors.** Public forms return generic messages; the CRM client never echoes upstream text.
+
+## 3. Privacy statements: items for counsel
+
+Not legal conclusions. Each item is a place where the **site's text and its behaviour were compared**; counsel should decide whether the text is sufficient for the jurisdictions served.
+
+1. **Newsletter and rate limiting.** The privacy policy now states that the visitor's IP address is held briefly in memory to limit repeated submissions (added this session). Counsel: whether "legitimate interests" is the basis and whether the retention wording is adequate.
+2. **IP capture on submissions.** The CRM stores the visitor IP and a derived location for submissions (`IP_AND_LOCATION_CAPTURE.md`). Counsel: lawful basis, retention period, access controls, and whether the form needs a notice at the point of collection beyond the policy.
+3. **Location prefill.** The form can ask the browser for the visitor's position (consent prompt by the browser) and uses a server-side hint. Counsel: wording of the consent and what is stored when the visitor declines.
+4. **Cookie consent.** The site sets no cookies and uses `localStorage` for the choice. Counsel: whether the banner is required in the target markets given that no tracking is loaded.
+5. **Processors and transfers.** Cloudflare (edge), the VPS host, the CRM and its email provider handle the data. Counsel: processor agreements and cross-border transfer mechanisms. These facts live outside the code.
+6. **Data subject requests.** The code offers no self-service access or deletion; requests go to the contact address. Counsel: whether a documented process is needed.
+
+## 4. Not verified here (honest limits)
+
+* No real Cloudflare zone, Rocket Loader setting, or production hostname was examined; the edge-proof activation and the nonce CSP behind Cloudflare are **untested in the real path** (runbook steps and the `compat` switch cover it).
+* No real phone, no NVDA/JAWS/VoiceOver session, no real on-screen keyboard. Playwright emulation, axe and the Lighthouse accessibility audit stand in; they do not replace those checks.
+* Firefox could not be launched on this Windows machine (the browser fails to start: a side-by-side configuration error from the OS, not from the site). WebKit (Safari's engine) ran. Installing the missing system runtime needs administrator approval and was not done.
+* The CRM commit (3b469bf and its neighbours) exists **locally only**: the CRM's push URL is deliberately disabled (`DISABLED-NO-PUSH`) and was not bypassed.
