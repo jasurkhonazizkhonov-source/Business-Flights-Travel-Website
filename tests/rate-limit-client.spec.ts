@@ -204,9 +204,10 @@ test.describe("the three public actions use the helper and keep their thresholds
   for (const [file, prefix, , limit] of ACTIONS) {
     test(`${file}: key from rateLimitClientKey(headerList), prefix "${prefix}", threshold ${limit}, no X-Forwarded-For read`, () => {
       const code = read(file).split("\n").filter((l) => !l.trim().startsWith("//")).join("\n");
-      expect(code).toContain('import { rateLimitClientKey } from "@/lib/rate-limit-client";');
+      expect(code).toContain('import { limitFor, rateLimitClientKey } from "@/lib/rate-limit-client";');
       expect(code).toContain("const ip = rateLimitClientKey(headerList);");
-      expect(code).toContain(`checkRateLimit(\`${prefix}:\${ip}\`, ${limit})`);
+      // The threshold is the base for an attributed client; limitFor widens it only for the shared "unresolved" bucket (tested above), never per request.
+      expect(code).toContain(`checkRateLimit(\`${prefix}:\${ip}\`, limitFor(${limit}, ip))`);
       expect(code).not.toMatch(/x-forwarded-for/i);
       expect(code).not.toMatch(/\|\|\s*"unknown"/);
     });

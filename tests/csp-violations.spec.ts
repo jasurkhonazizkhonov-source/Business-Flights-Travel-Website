@@ -1,8 +1,9 @@
 import { test, expect, type Page } from "@playwright/test";
 
-// The Content-Security-Policy in next.config.ts keeps 'unsafe-inline' for scripts and styles. These tests pin WHY, and what the page is allowed to do under it:
-//  * script-src: every executable inline script is Next.js's own framework payload (the flight data and the bootstrap), which differs on every page, so a
-//    hash list or nonce is impossible without rendering every page per request (docs/SECURITY_REVIEW_AND_REMAINING_LIMITATIONS.md, section 3);
+// The Content-Security-Policy (src/lib/csp.ts, set per request by src/proxy.ts; the nonce itself is tested in csp-nonce.spec.ts) keeps 'unsafe-inline' for STYLES only. These tests pin
+// why, and what the page is allowed to do under it:
+//  * script-src: every executable inline script is Next.js's own framework payload (the flight data and the bootstrap), which differs on every page, so it can only be
+//    allowed by a per-response nonce (which is what the policy now uses: no 'unsafe-inline' for scripts), and nothing else is inline (docs/CSP_HARDENING.md);
 //  * style-src: the toast library (sonner) inserts a <style> element when the toaster mounts, so narrowing style-src would unstyle the toasts;
 //  * and nothing ELSE inline exists: no inline <style> in the server HTML, no event-handler attribute, no javascript: URL - so the broad directive is not
 //    carrying anything the application did not put there itself.

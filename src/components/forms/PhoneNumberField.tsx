@@ -224,7 +224,14 @@ export function PhoneNumberField({
       {countryNotice && (
         <p role="status" id={`${id}-country-notice`} className="mt-1.5 text-xs text-[var(--color-navy-800)]">
           {countryNotice.text}{" "}
-          <button type="button" onClick={restorePreviousNumber} className="font-semibold underline underline-offset-2 hover:text-[var(--color-gold-600)]">
+          <button
+            type="button"
+            onClick={restorePreviousNumber}
+            // Safari does not focus a button when it is clicked, so pressing this one would first BLUR the phone control: the blur validation (onBlurValue) would show or remove an
+            // error message, the layout would shift under the pointer and the click would be lost. Keeping the press from moving focus avoids that; the keyboard is unaffected.
+            onMouseDown={(event) => event.preventDefault()}
+            className="font-semibold underline underline-offset-2 hover:text-[var(--color-gold-600)]"
+          >
             Restore it
           </button>
         </p>

@@ -4,7 +4,8 @@ import { randomUUID } from "node:crypto";
 import { headers } from "next/headers";
 import { after } from "next/server";
 import { checkRateLimit } from "@/lib/rate-limit";
-import { rateLimitClientKey } from "@/lib/rate-limit-client";
+import { limitFor, rateLimitClientKey } from "@/lib/rate-limit-client";
+import { describeError } from "@/lib/safe-error";
 import { isSpamSubmission } from "@/lib/anti-spam";
 import { checkPhoneNumber, phoneProblemMessage } from "@/lib/phone";
 import { findAirportByIata } from "@/data/airports";
@@ -47,7 +48,7 @@ async function afterResponse(task: () => Promise<unknown>, label: string): Promi
   try {
     after(task);
   } catch (err) {
-    console.error(`[submitFlightRequest] after() is unavailable for ${label}; running it before responding instead`, err);
+    console.error(`[submitFlightRequest] after() is unavailable for ${label}; running it before responding instead (${describeError(err)})`);
     await task();
   }
 }
@@ -63,7 +64,7 @@ export async function submitFlightRequest(input: FlightRequestInput): Promise<Su
   const headerList = await headers();
   const ip = rateLimitClientKey(headerList);
 
-  const { allowed } = checkRateLimit(`flight-request:${ip}`, 8);
+  const { allowed } = checkRateLimit(`flight-request:${ip}`, limitFor(8, ip));
   if (!allowed) {
     return friendlyError("You've submitted several requests recently. Please wait a few minutes and try again, or contact us directly.");
   }
@@ -197,7 +198,7 @@ export async function submitFlightRequest(input: FlightRequestInput): Promise<Su
         },
         { mailer: gmailMailer },
       ).catch((err) => {
-        console.error("[submitFlightRequest] internal notification email failed", err);
+        console.error(`[submitFlightRequest] internal notification email failed (${describeError(err)})`);
       }),
     "internal notification",
   );

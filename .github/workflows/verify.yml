@@ -46,10 +46,13 @@ jobs:
         env:
           NEXT_OUTPUT: standalone
           NEXT_TELEMETRY_DISABLED: "1"
-      - name: Unit and contract tests (no browser, stand-in CRM on loopback only)
+      - name: Install the browser (the CSP spec proves the site hydrates and an injected script does not run)
+        run: npx playwright install --with-deps chromium
+      - name: Unit and contract tests (stand-in CRM on loopback only; the CSP spec starts production servers and one browser)
         run: >
           npx playwright test --project=Infrastructure --no-deps --workers=1
           tests/crm-api-client.spec.ts tests/docker-topology.spec.ts tests/edge-proof.spec.ts tests/server-action-surface.spec.ts tests/rate-limit-topology.spec.ts
+          tests/csp-nonce.spec.ts tests/crm-contract-fixtures.spec.ts
       - name: Unit tests that need neither a browser nor a server
         run: >
           npx playwright test --project="Desktop Chrome" --workers=2

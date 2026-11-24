@@ -82,15 +82,15 @@ test.describe("Server Actions", () => {
 test.describe("API routes", () => {
   const routes = files.filter((f) => /\/route\.ts$/.test(f.replace(/\\/g, "/")));
 
-  test("exactly /api/health and /api/visitor-hint exist", () => {
-    expect(routes.map(rel).sort()).toEqual(["src/app/api/health/route.ts", "src/app/api/visitor-hint/route.ts"]);
+  test("exactly /api/health, /api/visitor-hint and /api/edge-check exist", () => {
+    expect(routes.map(rel).sort()).toEqual(["src/app/api/edge-check/route.ts", "src/app/api/health/route.ts", "src/app/api/visitor-hint/route.ts"]);
   });
 
-  test("both are read-only: GET is the only method exported", () => {
+  test("all are read-only: GET is the only method exported", () => {
     for (const f of routes) expect(exportedNames(read(f)).filter((n) => /^(GET|POST|PUT|PATCH|DELETE|OPTIONS|HEAD)$/.test(n)), rel(f)).toEqual(["GET"]);
   });
 
-  test("neither echoes a request header or a secret into its answer", () => {
+  test("none echoes a request header or a secret into its answer", () => {
     for (const f of routes) {
       const text = read(f);
       expect(text, rel(f)).not.toMatch(/process\.env\.(CRM_|LEAD_|GMAIL_|EDGE_)/);

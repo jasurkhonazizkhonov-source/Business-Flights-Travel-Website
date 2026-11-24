@@ -383,6 +383,32 @@ test.describe("deploy scripts, dry-run against a stub docker", () => {
     expect(r.code, r.out).toBe(0);
     expect(r.out).toContain("EDGE_PROOF_SECRET is set");
     expect(r.out).not.toContain("e".repeat(40));
+    // The two-step activation: a mode needs a secret, only the two documented words are accepted (a misspelling would silently mean enforce), observe is announced.
+    const secret = `EDGE_PROOF_SECRET=${"e".repeat(40)}\n`;
+    r = run(`${secret}EDGE_PROOF_MODE=observe\n`);
+    expect(r.code, r.out).toBe(0);
+    expect(r.out).toContain("EDGE_PROOF_MODE=observe: nothing is refused yet");
+    expect(r.out).not.toContain("e".repeat(40));
+    r = run(`${secret}EDGE_PROOF_MODE=enforce\n`);
+    expect(r.code, r.out).toBe(0);
+    r = run(`${secret}EDGE_PROOF_MODE=obsrve\n`);
+    expect(r.code).not.toBe(0);
+    expect(r.out).toMatch(/EDGE_PROOF_MODE must be empty, 'observe' or 'enforce'/);
+    r = run("EDGE_PROOF_MODE=observe\n");
+    expect(r.code).not.toBe(0);
+    expect(r.out).toMatch(/EDGE_PROOF_MODE is set but EDGE_PROOF_SECRET is empty/);
+    // The CSP script mode: strict (or empty) is the intended setting; compat is the kill switch and is announced; anything else is refused.
+    for (const ok of ["CSP_SCRIPT_MODE=\n", "CSP_SCRIPT_MODE=strict\n"]) {
+      r = run(ok);
+      expect(r.code, r.out).toBe(0);
+      expect(r.out).not.toMatch(/CSP_SCRIPT_MODE/);
+    }
+    r = run("CSP_SCRIPT_MODE=compat\n");
+    expect(r.code, r.out).toBe(0);
+    expect(r.out).toMatch(/CSP_SCRIPT_MODE=compat: scripts are allowed inline again/);
+    r = run("CSP_SCRIPT_MODE=compact\n");
+    expect(r.code).not.toBe(0);
+    expect(r.out).toMatch(/CSP_SCRIPT_MODE must be empty, 'strict' or 'compat'/);
     r = run("CRM_API_URL=ftp://compass-crm\n");
     expect(r.code).not.toBe(0);
     expect(r.out).toMatch(/CRM_API_URL must start with http:\/\/ or https:\/\//);

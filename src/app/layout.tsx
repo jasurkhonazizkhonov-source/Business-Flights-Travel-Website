@@ -41,6 +41,10 @@ const playfair = Playfair_Display({
 });
 
 // Browser UI colour (mobile address bar) matches the cream page and header.
+// Every page is rendered per request: the Content-Security-Policy carries a nonce that is fresh for each response (src/proxy.ts, docs/CSP_HARDENING.md), and Next can only
+// stamp a nonce on its inline scripts while it renders. The pages' content is unchanged; they are no longer prerendered HTML files.
+export const dynamic = "force-dynamic";
+
 export const viewport: Viewport = {
   themeColor: "#fbf9f5",
   colorScheme: "light",

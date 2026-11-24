@@ -45,8 +45,21 @@ function load(): Promise<(PhoneValidatorState & { state: "ready" }) | null> {
   return inflight;
 }
 
-/** Starts (or joins) the one load. Never rejects: resolves to the validator, or null when it could not be loaded (a later call retries). */
-export function loadPhoneValidator(): Promise<PhoneValidator | null> {
+/** How long a submit waits for the validator before giving up on it for that submission (the load itself carries on; the server stays the authority). */
+export const VALIDATOR_WAIT_MS = 8000;
+
+/**
+ * Starts (or joins) the one load. Never rejects: resolves to the validator, or null when it could not be loaded (a later call retries) or, for a request that
+ * stalls instead of failing (a hung connection, a browser that never reports an aborted script), when it has not arrived within VALIDATOR_WAIT_MS, so a submit is
+ * never left waiting forever; the format check is then skipped for that submission exactly as when the chunk fails, and the server validates the number.
+ */
+export function loadPhoneValidator(waitMs: number = VALIDATOR_WAIT_MS): Promise<PhoneValidator | null> {
   if (current.state === "ready") return Promise.resolve(current.isValid);
-  return load().then((ready) => ready?.isValid ?? null);
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(null), waitMs);
+    load().then((ready) => {
+      clearTimeout(timer);
+      resolve(ready?.isValid ?? null);
+    });
+  });
 }

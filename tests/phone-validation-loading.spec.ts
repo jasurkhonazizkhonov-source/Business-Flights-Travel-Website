@@ -102,7 +102,16 @@ async function waitForFormHydrated(page: Page, formSelector: string) {
 }
 
 async function setPhone(page: Page, selector: string, value: string) {
-  await page.locator(selector).fill(value);
+  const field = page.locator(selector);
+  // WebKit: Playwright's fill() sets the value programmatically and, about two runs in five, the phone library's controlled input ends up empty (measured: fill left the field
+  // empty in 3 of 8 runs; typing the same number key by key passed 20 of 20, which is how a visitor enters it). So WebKit types; every other engine keeps fill().
+  if (page.context().browser()?.browserType().name() === "webkit") {
+    await field.fill("");
+    await field.click();
+    await field.pressSequentially(value, { delay: 20 });
+    return;
+  }
+  await field.fill(value);
 }
 async function pressInPhone(page: Page, selector: string, key: string) {
   await page.locator(selector).press(key);
@@ -184,6 +193,10 @@ test.describe("validation behaves exactly as before (contact form)", () => {
       }
     });
     await page.goto("/contact");
+    // Fill only once React has taken the form over: a value typed into the server-rendered form before hydration is discarded when React attaches its (empty) state, which is what
+    // happened in WebKit (the form was then submitted empty and the error asserted below was a different one). Hydration, not the validator, is what is awaited here: the validator's
+    // chunk is the one this test makes unloadable.
+    await waitForFormHydrated(page, "form:has(#c-phone)");
     await page.fill("#c-firstName", "Phone");
     await page.fill("#c-lastName", "Fallback");
     await page.fill("#c-email", "phone-fallback@example.test");

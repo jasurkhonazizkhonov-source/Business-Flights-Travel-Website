@@ -17,12 +17,13 @@ function trigger(page: Page, label: "Departure Date" | "Return Date") {
 function calendar(page: Page, label: "Departure Date" | "Return Date") {
   return page.getByRole("dialog", { name: label });
 }
-// The calendar popovers are always mounted and toggled with `inert` + opacity, so Playwright sees them as "visible" even when closed.
+// The calendar popovers are always mounted and toggled with `inert` + opacity, so Playwright sees them as "visible" even when closed. On a phone a closed one is also
+// display:none (so it can never widen the page), which removes it from the accessibility tree: the role lookup then finds nothing. Both are "closed"; neither is reachable.
 async function expectOpen(dialog: Locator) {
   await expect(dialog).not.toHaveAttribute("inert", "");
 }
 async function expectClosed(dialog: Locator) {
-  await expect(dialog).toHaveAttribute("inert", "");
+  await expect.poll(async () => (await dialog.count()) === 0 || (await dialog.getAttribute("inert")) !== null, { message: "the calendar is closed: inert, or not rendered at all" }).toBe(true);
 }
 function enabledDays(dialog: Locator) {
   return dialog.locator(".rdp-day_button:not([disabled])");

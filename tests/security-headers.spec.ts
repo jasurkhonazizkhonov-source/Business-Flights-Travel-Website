@@ -12,9 +12,15 @@ test.describe("security headers", () => {
       expect(res.status()).toBe(200);
       const h = res.headers();
       const csp = h["content-security-policy"] ?? "";
-      for (const directive of ["default-src 'self'", "frame-ancestors 'none'", "base-uri 'self'", "form-action 'self'", "object-src 'none'", "img-src 'self' data:", "font-src 'self' data:", "script-src-attr 'none'"]) {
+      for (const directive of ["default-src 'self'", "frame-ancestors 'none'", "base-uri 'self'", "form-action 'self'", "object-src 'none'", "img-src 'self' data:", "font-src 'self' data:", "script-src-attr 'none'", "frame-src 'none'", "worker-src 'none'"]) {
         expect(csp, directive).toContain(directive);
       }
+      // Scripts: a per-response nonce and NO 'unsafe-inline' (src/proxy.ts, docs/CSP_HARDENING.md); styles keep 'unsafe-inline' (documented).
+      const scriptSrc = csp.split("; ").find((d) => d.startsWith("script-src "))!;
+      expect(scriptSrc).toMatch(/^script-src 'self' 'nonce-[A-Za-z0-9+/=]{20,}'$/);
+      expect(scriptSrc).not.toContain("unsafe-inline");
+      expect(csp).not.toContain("unsafe-eval");
+      expect(csp).toContain("style-src 'self' 'unsafe-inline'");
       // No third-party origin is allowed anywhere in the policy (the site loads nothing from another host).
       expect(csp).not.toMatch(/https?:\/\//);
       expect(csp).not.toContain("*");

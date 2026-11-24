@@ -2,6 +2,7 @@ import { test, expect } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { standaloneBuildPresent, startStandalone, type StandaloneServer } from "./support/standalone-server";
+import { limitFor, UNRESOLVED_CLIENT } from "../src/lib/rate-limit-client";
 
 // The three public form actions, called for real over HTTP on the standalone server exactly as the browser calls them (a server-action POST),
 // with TRUSTED_PROXY=cloudflare - the VPS configuration. The CRM is not involved: every request here ends at the rate limiter, the honeypot
@@ -108,7 +109,8 @@ test.describe("rate limits on the real public actions (standalone server, TRUSTE
       expect(await call(c, { "CF-Connecting-IP": "198.51.100.11", "X-Forwarded-For": "203.0.113.1" })).toMatch(c.allowedMarker);
     });
 
-    test(`${c.name}: no usable trusted IP (missing / malformed / private / multi-value) -> ONE shared bucket with the same threshold, however the headers are rotated`, async () => {
+    test(`${c.name}: no usable trusted IP (missing / malformed / private / multi-value) -> ONE shared bucket (with the documented larger allowance), however the headers are rotated`, async () => {
+      const shared = limitFor(c.limit, UNRESOLVED_CLIENT); // the base allowance times UNRESOLVED_ALLOWANCE_MULTIPLIER: the whole site's allowance if attribution is ever lost
       const variants: Array<Record<string, string>> = [
         {}, // header missing
         { "CF-Connecting-IP": "not-an-ip" },
@@ -118,10 +120,10 @@ test.describe("rate limits on the real public actions (standalone server, TRUSTE
         { "CF-Connecting-IP": "::1" },
       ];
       const out: string[] = [];
-      for (let i = 0; i < c.limit + 4; i++) out.push(await call(c, { ...variants[i % variants.length], "X-Forwarded-For": `203.0.113.${i + 100}` }));
+      for (let i = 0; i < shared + 4; i++) out.push(await call(c, { ...variants[i % variants.length], "X-Forwarded-For": `203.0.113.${(i % 150) + 100}` }));
       const allowed = out.filter((t) => c.allowedMarker.test(t) && !c.blockedMarker.test(t)).length;
       const blocked = out.filter((t) => c.blockedMarker.test(t)).length;
-      expect(allowed, "exactly the threshold in total across every malformed variant").toBe(c.limit);
+      expect(allowed, "exactly the shared threshold in total across every malformed variant").toBe(shared);
       expect(blocked).toBe(4);
       // the spoofer cannot pick a bucket: this is still the same exhausted one
       expect(await call(c, { "X-Forwarded-For": "203.0.113.250" })).toMatch(c.blockedMarker);

@@ -19,6 +19,19 @@ import { resolveClientIp } from "@/lib/client-ip";
 /** The one fixed bucket for requests whose client IP cannot be established from the trusted path. Not a valid IP, so it cannot collide with one. */
 export const UNRESOLVED_CLIENT = "unresolved";
 
+/**
+ * Requests the trusted proxy path could not attribute to a client all share ONE bucket (so rotating a forged address gains nothing), and that bucket gets a larger
+ * allowance than a single client: if attribution is ever lost for ALL traffic (a mis-routed tunnel, an edge proof set before its Cloudflare rule exists), real
+ * visitors then share it, and the base allowance of one client would lock the whole site out after a handful of submissions. The same factor the CRM applies to its own
+ * "unattributed" website traffic (src/server/website-signature-guard.ts WEBSITE_UNATTRIBUTED_RATE_MULTIPLIER), so the two layers degrade in step.
+ */
+export const UNRESOLVED_ALLOWANCE_MULTIPLIER = 5;
+
+/** The allowance for this client key: the base for an attributed client, the larger shared allowance for the unresolved bucket. */
+export function limitFor(base: number, clientKey: string): number {
+  return clientKey === UNRESOLVED_CLIENT ? base * UNRESOLVED_ALLOWANCE_MULTIPLIER : base;
+}
+
 const WARN_EVERY_MS = 5 * 60 * 1000;
 let lastWarnAt = 0;
 

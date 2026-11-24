@@ -48,7 +48,7 @@ export default function PrivacyPolicyPage() {
           <li>Any message you send us through the contact form</li>
         </ul>
         <p>
-          If you subscribe to our newsletter, we collect only the email address you provide, along with the date you subscribed.
+          If you subscribe to our newsletter, we collect only the email address you provide, along with the date you subscribed. To limit abuse of the sign-up form, our systems also use your IP address briefly, as a short-lived counter of recent attempts that expires and is removed automatically; it is not recorded with your subscription.
         </p>
         <h3>Information collected automatically</h3>
         <p>

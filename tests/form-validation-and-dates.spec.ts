@@ -223,7 +223,8 @@ for (const scenario of [
       await expect(dialog.getByText(`Flights can be requested until ${scenario.note}.`)).toBeVisible();
       // The last enabled day really can be chosen.
       await dayButton(dialog, scenario.lastEnabled).click();
-      await expect(dialog).toHaveAttribute("inert", "");
+      // Closed: inert, or (on a phone) display:none, which removes it from the accessibility tree so the role lookup finds nothing.
+      await expect.poll(async () => (await dialog.count()) === 0 || (await dialog.getAttribute("inert")) !== null, { message: "the calendar closes after a day is chosen" }).toBe(true);
       await expect(trigger(page, "Departure Date")).toContainText(String(scenario.lastEnabled));
     });
 

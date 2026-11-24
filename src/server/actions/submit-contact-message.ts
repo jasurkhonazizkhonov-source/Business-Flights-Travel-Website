@@ -3,7 +3,7 @@
 import { createHash } from "node:crypto";
 import { headers } from "next/headers";
 import { checkRateLimit } from "@/lib/rate-limit";
-import { rateLimitClientKey } from "@/lib/rate-limit-client";
+import { limitFor, rateLimitClientKey } from "@/lib/rate-limit-client";
 import { isSpamSubmission } from "@/lib/anti-spam";
 import { checkPhoneNumber, phoneProblemMessage } from "@/lib/phone";
 import { contactMessageSchema, type ContactMessageInput } from "@/lib/validations/contact";
@@ -41,7 +41,7 @@ export async function submitContactMessage(input: ContactMessageInput): Promise<
   const headerList = await headers();
   const ip = rateLimitClientKey(headerList);
 
-  const { allowed } = checkRateLimit(`contact-message:${ip}`, 8);
+  const { allowed } = checkRateLimit(`contact-message:${ip}`, limitFor(8, ip));
   if (!allowed) {
     return friendlyError("You've sent several messages recently. Please wait a few minutes and try again.");
   }

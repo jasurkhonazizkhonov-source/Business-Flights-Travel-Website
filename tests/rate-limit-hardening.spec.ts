@@ -100,3 +100,26 @@ test.describe("IPv6 clients are limited by /64", () => {
     expect(() => new URL(`http://[${b}]/`)).toThrow();
   });
 });
+
+test.describe("the rate-limit store cannot be used against itself", () => {
+  test("a flood of distinct keys does not evict (and so does not reset) a client that is already being limited", () => {
+    const limiter = createSlidingWindowLimiter({ windowMs: 600_000, maxKeys: 1_000 });
+    const now = 1_000_000;
+    for (let i = 0; i < 5; i++) expect(limiter.check("heavy-client", 5, now + i).allowed).toBe(true);
+    expect(limiter.check("heavy-client", 5, now + 10).allowed).toBe(false); // at its limit
+    for (let i = 0; i < 5_000; i++) limiter.check(`flood-${i}`, 5, now + 100 + i); // five times the cap, one hit each
+    expect(limiter.size()).toBeLessThanOrEqual(1_000);
+    expect(limiter.check("heavy-client", 5, now + 6_000).allowed, "the limited client is still limited after the flood").toBe(false);
+  });
+
+  test("among keys with equal hits the least recently seen goes first, so recent legitimate clients survive an overflow", () => {
+    const limiter = createSlidingWindowLimiter({ windowMs: 600_000, maxKeys: 100 });
+    const now = 1_000_000;
+    limiter.check("old-visitor", 5, now);
+    for (let i = 0; i < 100; i++) limiter.check(`newer-${i}`, 5, now + 1 + i);
+    expect(limiter.size()).toBeLessThanOrEqual(100);
+    limiter.check("recent", 5, now + 1_000);
+    // the oldest single-hit key was the one given up; the newest keys remain counted
+    expect(limiter.check("newer-99", 1, now + 2_000).allowed).toBe(false); // still holds its one hit (limit 1)
+  });
+});

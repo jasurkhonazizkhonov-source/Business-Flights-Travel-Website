@@ -123,16 +123,78 @@ function edgeProofSecret(): string | undefined {
   return value === "" ? undefined : value;
 }
 
-/** True when the request proves it came through the edge that adds the secret; always true when no secret is configured (the feature is off). */
-export function edgeProofAccepted(headerList: Headers): boolean {
+export type EdgeProofState = "off" | "valid" | "missing" | "invalid";
+export type EdgeProofMode = "enforce" | "observe";
+
+/**
+ * What THIS request says about where it came from, as far as the edge proof is concerned:
+ *   off      no secret is configured (the feature is off);
+ *   valid    the request carries exactly the configured secret in x-bft-edge-proof;
+ *   missing  a secret is configured and the header is absent;
+ *   invalid  a secret is configured and the header is present but is not it (including a repeated header, which arrives as "a, a"), or the configured
+ *            secret is shorter than the minimum (a misconfiguration: nothing can be valid then).
+ * The comparison is constant-time and the secret is never part of a result.
+ */
+export function edgeProofState(headerList: Headers): EdgeProofState {
   const secret = edgeProofSecret();
-  if (secret === undefined) return true;
-  if (secret.length < MIN_EDGE_PROOF_SECRET_LENGTH) return false; // misconfigured: fail closed
+  if (secret === undefined) return "off";
+  if (secret.length < MIN_EDGE_PROOF_SECRET_LENGTH) return "invalid";
   const presented = headerList.get(EDGE_PROOF_HEADER);
-  if (!presented) return false;
+  if (!presented) return "missing";
   const a = createHash("sha256").update(presented).digest();
   const b = createHash("sha256").update(secret).digest();
-  return timingSafeEqual(a, b); // equal-length digests: no length leak, constant-time comparison
+  return timingSafeEqual(a, b) ? "valid" : "invalid"; // equal-length digests: no length leak, constant-time comparison
+}
+
+/**
+ * What happens to a request WITHOUT a valid proof when a secret is configured (EDGE_PROOF_MODE):
+ *   enforce  (the default) its Cloudflare headers are not believed: no trusted IP, no location, no country;
+ *   observe  its Cloudflare headers ARE still believed exactly as without a secret, but every check is counted and a value-free summary is logged
+ *            ("[edge-proof] ..."), so an operator can see that the Cloudflare rule really adds the proof BEFORE switching to enforce.
+ * Unknown values mean enforce (the safe direction); deploy/preflight.sh refuses them outright.
+ */
+export function edgeProofMode(): EdgeProofMode {
+  return process.env.EDGE_PROOF_MODE?.trim().toLowerCase() === "observe" ? "observe" : "enforce";
+}
+
+/** True when the request proves it came through the edge that adds the secret; always true when no secret is configured (the feature is off). */
+export function edgeProofAccepted(headerList: Headers): boolean {
+  const state = edgeProofState(headerList);
+  return state === "off" || state === "valid";
+}
+
+// ---- counting what the edge proof sees (per process, in memory, never the values) ----
+const COUNT_LOG_EVERY_MS = 5 * 60 * 1000;
+type EdgeProofCounters = { valid: number; missing: number; invalid: number; since: number; lastLogAt: number };
+const counterHolder = globalThis as typeof globalThis & { __bftEdgeProofCounters?: EdgeProofCounters };
+function counters(now: number): EdgeProofCounters {
+  return (counterHolder.__bftEdgeProofCounters ??= { valid: 0, missing: 0, invalid: 0, since: now, lastLogAt: 0 });
+}
+/** Test seam: the counts since the last summary. */
+export function edgeProofCounters(): { valid: number; missing: number; invalid: number } {
+  const c = counters(Date.now());
+  return { valid: c.valid, missing: c.missing, invalid: c.invalid };
+}
+export function resetEdgeProofCountersForTests() {
+  delete counterHolder.__bftEdgeProofCounters;
+}
+function recordEdgeProof(state: EdgeProofState, now: number = Date.now()) {
+  if (state === "off") return;
+  const c = counters(now);
+  c[state] += 1;
+  if (now - c.lastLogAt < COUNT_LOG_EVERY_MS) return;
+  const observe = edgeProofMode() === "observe";
+  // In enforce mode only a refusal is worth a line; in observe mode the summary is the whole point (it shows the rule works).
+  if (observe || c.missing + c.invalid > 0) {
+    const line = `[edge-proof] mode=${edgeProofMode()} checks in the last ${Math.round((now - c.since) / 1000)}s: valid=${c.valid} missing=${c.missing} invalid=${c.invalid}`;
+    if (c.missing + c.invalid > 0 && !observe) console.warn(line);
+    else console.info(line);
+  }
+  c.valid = 0;
+  c.missing = 0;
+  c.invalid = 0;
+  c.since = now;
+  c.lastLogAt = now;
 }
 
 export function trustedProxyMode(): TrustedProxyMode {
@@ -198,7 +260,7 @@ function candidateHeaderValues(mode: Exclude<TrustedProxyMode, "none">, headerLi
  */
 export function effectiveProxyMode(headerList: Headers): TrustedProxyMode {
   const mode = trustedProxyMode();
-  if (mode === "cloudflare" && !edgeProofAccepted(headerList)) return "none";
+  if (mode === "cloudflare" && !edgeProofAccepted(headerList)) return edgeProofMode() === "observe" ? mode : "none";
   return mode;
 }
 
@@ -212,6 +274,7 @@ export type ClientIpResult =
  * log). Never guesses: an unknown IP is reported as unknown.
  */
 export function resolveClientIp(headerList: Headers): ClientIpResult {
+  if (trustedProxyMode() === "cloudflare") recordEdgeProof(edgeProofState(headerList)); // one count per IP resolution (a submission resolves it twice)
   const mode = effectiveProxyMode(headerList);
   if (mode === "none") return { ok: false, reason: trustedProxyMode() === "cloudflare" ? "edge_not_proven" : "no_trusted_proxy" };
 

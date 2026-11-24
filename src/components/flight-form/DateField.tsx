@@ -8,6 +8,7 @@ import { differenceInCalendarDays, format } from "date-fns";
 import { useClickOutside } from "@/hooks/useClickOutside";
 import { usePopoverAlign } from "@/hooks/usePopoverAlign";
 import { useScrollPopoverIntoView } from "@/hooks/useScrollPopoverIntoView";
+import { useFullWidthPopover } from "@/hooks/useFullWidthPopover";
 import { cn } from "@/lib/cn";
 import { maxSelectableDate } from "@/lib/flight-date-window";
 import { FieldError } from "@/components/forms/FieldError";
@@ -81,6 +82,8 @@ export function DateField({
   useClickOutside(containerRef, close, open);
   const align = usePopoverAlign(containerRef, open, 320);
   useScrollPopoverIntoView(containerRef, open);
+  // Below 640px the open calendar spans the screen (see the hook): 44px day buttons instead of 32px, inside the viewport. Null from 640px up and while closed.
+  const phone = useFullWidthPopover(containerRef, open);
 
   const selected = parseIso(value);
   const floor = minDate ?? new Date(new Date().setHours(0, 0, 0, 0));
@@ -161,6 +164,7 @@ export function DateField({
         role="dialog"
         aria-labelledby={labelId}
         inert={!open}
+        style={phone?.popoverStyle}
         // Records HOW the visitor interacts, so a touch tap can preview the range first while a mouse click or the keyboard
         // selects at once (hover does not exist on touch screens).
         onPointerDownCapture={(e) => {
@@ -173,6 +177,8 @@ export function DateField({
         className={cn(
           "absolute z-30 mt-2 w-max max-w-[calc(100vw-2.5rem)] overflow-x-auto rounded-2xl border border-[var(--color-navy-950)]/10 bg-white p-2.5 shadow-xl sm:p-3",
           align === "right" ? "right-0" : "left-0",
+          // Closed, the popover is invisible and inert; on a phone it also leaves the layout, so it can never widen the page (it needs no measuring while closed).
+          !open && "max-sm:hidden",
         )}
       >
         <DayPickerCalendar
@@ -223,6 +229,7 @@ export function DateField({
             commit(date);
           }}
           className="bfw-daypicker"
+          style={phone?.calendarStyle}
         />
         {/* Only while open: the date depends on today, and this component is also part of the pages that are prerendered at build time. */}
         {open && <p className="mt-1 px-1 text-center text-[11px] text-[var(--color-navy-950)]/65">Flights can be requested until {format(maxDate, "MMM d, yyyy")}.</p>}

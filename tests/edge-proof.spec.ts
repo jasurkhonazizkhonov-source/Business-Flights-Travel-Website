@@ -1,8 +1,10 @@
 import { test, expect } from "@playwright/test";
 import { randomUUID } from "node:crypto";
+import { spawn, spawnSync } from "node:child_process";
+import http from "node:http";
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { effectiveProxyMode, edgeProofAccepted, resolveClientIp, EDGE_PROOF_HEADER, MIN_EDGE_PROOF_SECRET_LENGTH } from "../src/lib/client-ip";
+import { effectiveProxyMode, edgeProofAccepted, edgeProofCounters, edgeProofMode, edgeProofState, resetEdgeProofCountersForTests, resolveClientIp, EDGE_PROOF_HEADER, MIN_EDGE_PROOF_SECRET_LENGTH } from "../src/lib/client-ip";
 import { captureSubmissionInfo } from "../src/lib/submission-info";
 import { readVisitorHint } from "../src/lib/visitor-hint";
 import { standaloneBuildPresent, startStandalone, type StandaloneServer } from "./support/standalone-server";
@@ -147,6 +149,82 @@ test.describe("edge proof on: only a request that carries the secret is believed
   });
 });
 
+test.describe("edge proof state, observe versus enforce, and what is counted", () => {
+  const proof = (extra: Record<string, string> = {}) => forged({ [EDGE_PROOF_HEADER]: SECRET, ...extra });
+
+  test("the state of a request: off, valid, missing, invalid (wrong value, repeated header, or a too-short configured secret)", () => {
+    withEnv({ TRUSTED_PROXY: "cloudflare", EDGE_PROOF_SECRET: undefined }, () => expect(edgeProofState(forged())).toBe("off"));
+    withEnv({ TRUSTED_PROXY: "cloudflare", EDGE_PROOF_SECRET: SECRET }, () => {
+      expect(edgeProofState(proof())).toBe("valid");
+      expect(edgeProofState(forged())).toBe("missing");
+      expect(edgeProofState(forged({ [EDGE_PROOF_HEADER]: "wrong-" + SECRET }))).toBe("invalid");
+      expect(edgeProofState(forged({ [EDGE_PROOF_HEADER]: `${SECRET}, ${SECRET}` }))).toBe("invalid");
+      expect(edgeProofState(forged({ [EDGE_PROOF_HEADER]: "" }))).toBe("missing");
+    });
+    withEnv({ TRUSTED_PROXY: "cloudflare", EDGE_PROOF_SECRET: "x".repeat(MIN_EDGE_PROOF_SECRET_LENGTH - 1) }, () => {
+      expect(edgeProofState(forged({ [EDGE_PROOF_HEADER]: "x".repeat(MIN_EDGE_PROOF_SECRET_LENGTH - 1) }))).toBe("invalid");
+    });
+  });
+
+  test("the mode: enforce unless it says observe (anything else, including a typo, is the safe direction)", () => {
+    for (const [value, expected] of [[undefined, "enforce"], ["", "enforce"], ["enforce", "enforce"], ["observe", "observe"], [" OBSERVE ", "observe"], ["obsrve", "enforce"], ["off", "enforce"], ["false", "enforce"]] as const) {
+      withEnv({ EDGE_PROOF_MODE: value }, () => expect(edgeProofMode(), JSON.stringify(value)).toBe(expected));
+    }
+  });
+
+  test("observe: a request without the proof is still believed (nothing is refused yet); enforce refuses it; both believe a proven one", () => {
+    withEnv({ TRUSTED_PROXY: "cloudflare", EDGE_PROOF_SECRET: SECRET, EDGE_PROOF_MODE: "observe" }, () => {
+      expect(resolveClientIp(forged())).toEqual({ ok: true, address: REAL, version: "v4" });
+      expect(effectiveProxyMode(forged())).toBe("cloudflare");
+      expect(resolveClientIp(proof())).toEqual({ ok: true, address: REAL, version: "v4" });
+      // the forwarded headers are still never read, in either mode
+      expect(resolveClientIp(new Headers({ "X-Forwarded-For": "8.8.8.8", "X-Real-IP": "8.8.4.4" }))).toMatchObject({ ok: false });
+    });
+    withEnv({ TRUSTED_PROXY: "cloudflare", EDGE_PROOF_SECRET: SECRET, EDGE_PROOF_MODE: "enforce" }, () => {
+      expect(resolveClientIp(forged())).toEqual({ ok: false, reason: "edge_not_proven" });
+      expect(resolveClientIp(proof())).toEqual({ ok: true, address: REAL, version: "v4" });
+    });
+  });
+
+  test("every IP resolution is counted by what the request carried, and a value-free summary is logged at most once every five minutes", () => {
+    resetEdgeProofCountersForTests();
+    const lines: string[] = [];
+    const realInfo = console.info;
+    const realWarn = console.warn;
+    console.info = (...a: unknown[]) => void lines.push(a.join(" "));
+    console.warn = (...a: unknown[]) => void lines.push(a.join(" "));
+    try {
+      withEnv({ TRUSTED_PROXY: "cloudflare", EDGE_PROOF_SECRET: SECRET, EDGE_PROOF_MODE: "observe" }, () => {
+        for (let i = 0; i < 5; i++) resolveClientIp(proof());
+        for (let i = 0; i < 3; i++) resolveClientIp(forged());
+        resolveClientIp(forged({ [EDGE_PROOF_HEADER]: "wrong-" + SECRET }));
+      });
+    } finally {
+      console.info = realInfo;
+      console.warn = realWarn;
+    }
+    // the first check opens the summary window (a line is written and the counters restart), later ones within five minutes only count
+    expect(lines.length).toBe(1);
+    expect(lines[0]).toMatch(/^\[edge-proof\] mode=observe checks in the last \d+s: valid=\d+ missing=\d+ invalid=\d+$/);
+    for (const line of lines) {
+      expect(line).not.toContain(SECRET);
+      expect(line).not.toContain(REAL);
+    }
+    const counted = edgeProofCounters();
+    expect(counted.valid + counted.missing + counted.invalid).toBe(8); // the other 8 of the 9 checks after the first one that opened the window
+    expect(counted).toEqual({ valid: 4, missing: 3, invalid: 1 });
+    resetEdgeProofCountersForTests();
+    withEnv({ TRUSTED_PROXY: "cloudflare", EDGE_PROOF_SECRET: undefined }, () => {
+      resolveClientIp(forged());
+      expect(edgeProofCounters()).toEqual({ valid: 0, missing: 0, invalid: 0 }); // feature off: nothing is counted
+    });
+    withEnv({ TRUSTED_PROXY: "none", EDGE_PROOF_SECRET: SECRET }, () => {
+      resolveClientIp(forged());
+      expect(edgeProofCounters()).toEqual({ valid: 0, missing: 0, invalid: 0 }); // not the Cloudflare mode: nothing is counted
+    });
+  });
+});
+
 // ---- on a real production server --------------------------------------------------------------------------------------------------------------------------
 const PORT = 3263;
 const KEY = "sentinel-api-key-" + "0123456789abcdef".repeat(3);
@@ -228,5 +306,138 @@ test.describe("a real production server with the edge proof on (stub CRM)", () =
         expect(JSON.stringify([...res.headers.entries()]), `${route} headers`).not.toContain(SECRET);
       }
     }
+  });
+});
+
+// ---- the activation path: observe first, verify with /api/edge-check, then enforce ----------------------------------------------------------------------------
+test.describe("activating the edge proof safely on real production servers (observe, then enforce)", () => {
+  test.skip(!standaloneBuildPresent(), "needs a standalone build (NEXT_OUTPUT=standalone npm run build)");
+  test.setTimeout(150_000);
+  const servers: StandaloneServer[] = [];
+  const baseEnv = { TRUSTED_PROXY: "cloudflare", CRM_API_URL: "http://127.0.0.1:1", CRM_API_KEY: "k".repeat(40), CRM_COMPANY_ID: "activation-test" };
+  const cf = (extra: Record<string, string> = {}) => ({ "CF-Connecting-IP": "203.0.113.90", "CF-IPCountry": "FR", ...extra });
+  const get = async (server: StandaloneServer, route: string, headers: Record<string, string>) => {
+    const res = await fetch(`${server.origin}${route}`, { headers });
+    return { status: res.status, json: (await res.json()) as Record<string, unknown>, headers: res.headers };
+  };
+  test.afterAll(async () => {
+    for (const s of servers) await s.stop();
+  });
+
+  test("with no secret: /api/edge-check says off, whatever is sent", async () => {
+    const server = await startStandalone({ label: "edge activation: off", port: 3268, env: baseEnv });
+    servers.push(server);
+    for (const headers of [cf(), cf({ [EDGE_PROOF_HEADER]: SECRET })]) expect((await get(server, "/api/edge-check", headers)).json).toEqual({ edgeProof: "off" });
+  });
+
+  test("step 1, observe: nothing is refused (the hint is still given without the proof), and /api/edge-check shows the rule working: valid with the proof, missing without", async () => {
+    const server = await startStandalone({ label: "edge activation: observe", port: 3269, env: { ...baseEnv, EDGE_PROOF_SECRET: SECRET, EDGE_PROOF_MODE: "observe" } });
+    servers.push(server);
+    expect((await get(server, "/api/edge-check", cf({ [EDGE_PROOF_HEADER]: SECRET }))).json).toEqual({ edgeProof: "valid" });
+    expect((await get(server, "/api/edge-check", cf())).json).toEqual({ edgeProof: "missing" });
+    expect((await get(server, "/api/edge-check", cf({ [EDGE_PROOF_HEADER]: "wrong-" + SECRET }))).json).toEqual({ edgeProof: "invalid" });
+    // observe refuses nothing: a request without the proof still gets its country hint (exactly the behaviour before the secret existed)
+    expect((await get(server, "/api/visitor-hint", cf())).json).toEqual({ countryCode: "FR" });
+    // and the server says what it saw, without a value
+    await expect.poll(() => server.logs(), { timeout: 10_000 }).toMatch(/\[edge-proof\] mode=observe checks in the last \d+s: valid=\d+ missing=\d+ invalid=\d+/);
+    expect(server.logs()).not.toContain(SECRET);
+  });
+
+  test("step 2, enforce (also the default when only the secret is set): without the proof nothing is believed; with it everything is", async () => {
+    for (const [port, mode] of [[3270, "enforce"], [3271, ""]] as const) {
+      const server = await startStandalone({ label: `edge activation: enforce (${mode || "default"})`, port, env: { ...baseEnv, EDGE_PROOF_SECRET: SECRET, EDGE_PROOF_MODE: mode } });
+      servers.push(server);
+      expect((await get(server, "/api/visitor-hint", cf())).json, `${mode || "default"}: no proof`).toEqual({});
+      expect((await get(server, "/api/visitor-hint", cf({ [EDGE_PROOF_HEADER]: SECRET }))).json, `${mode || "default"}: proof`).toEqual({ countryCode: "FR" });
+      expect((await get(server, "/api/edge-check", cf())).json).toEqual({ edgeProof: "missing" });
+      expect((await get(server, "/api/edge-check", cf({ [EDGE_PROOF_HEADER]: SECRET }))).json).toEqual({ edgeProof: "valid" });
+    }
+  });
+
+  test("the diagnostic route reveals nothing about the secret, the mode or the client, is not cacheable or indexable, and accepts only GET", async () => {
+    const server = servers[servers.length - 1];
+    const ok = await get(server, "/api/edge-check", cf({ [EDGE_PROOF_HEADER]: SECRET }));
+    expect(Object.keys(ok.json)).toEqual(["edgeProof"]);
+    expect(JSON.stringify([ok.json, [...ok.headers.entries()]])).not.toContain(SECRET);
+    expect(JSON.stringify(ok.json)).not.toMatch(/203\.0\.113\.90|observe|enforce/);
+    expect(ok.headers.get("cache-control")).toBe("private, no-store");
+    expect(ok.headers.get("x-robots-tag")).toMatch(/noindex/);
+    for (const method of ["POST", "PUT", "DELETE"]) expect((await fetch(`${server.origin}/api/edge-check`, { method })).status, method).toBe(405);
+  });
+});
+
+// ---- the verification script, against a stand-in for Cloudflare ---------------------------------------------------------------------------------------------
+test.describe("deploy/check-edge-proof.sh against a stand-in edge", () => {
+  test.skip(!standaloneBuildPresent(), "needs a standalone build (NEXT_OUTPUT=standalone npm run build)");
+  test.setTimeout(150_000);
+  const script = path.resolve(__dirname, "..", "deploy", "check-edge-proof.sh");
+  let server: StandaloneServer;
+  const proxies: http.Server[] = [];
+
+  // A reverse proxy that behaves like the Cloudflare rule (sets x-bft-edge-proof, OVERWRITING anything the client sent) or like no rule at all.
+  function startEdge(port: number, addProof: boolean): Promise<void> {
+    return new Promise((resolve) => {
+      const edge = http.createServer((req, res) => {
+        const headers = { ...req.headers, host: `127.0.0.1:${server.port}` } as Record<string, string | string[] | undefined>;
+        if (addProof) headers["x-bft-edge-proof"] = SECRET;
+        headers["cf-connecting-ip"] = "203.0.113.55";
+        const upstream = http.request({ host: "127.0.0.1", port: server.port, method: req.method, path: req.url, headers }, (up) => {
+          res.writeHead(up.statusCode ?? 502, up.headers);
+          up.pipe(res);
+        });
+        upstream.on("error", () => res.writeHead(502).end());
+        req.pipe(upstream);
+      });
+      proxies.push(edge);
+      edge.listen(port, "127.0.0.1", () => resolve());
+    });
+  }
+  // ASYNCHRONOUS on purpose: the stand-in edges above run inside THIS Node process, so a blocking spawnSync would stop them from answering while the script waits for them.
+  const run = (url: string) =>
+    new Promise<{ status: number | null; stdout: string; stderr: string }>((resolve) => {
+      const child = spawn("bash", [script, url], { stdio: ["ignore", "pipe", "pipe"] });
+      let stdout = "";
+      let stderr = "";
+      child.stdout.on("data", (d) => (stdout += d));
+      child.stderr.on("data", (d) => (stderr += d));
+      const timer = setTimeout(() => child.kill(), 60_000);
+      child.on("close", (status) => (clearTimeout(timer), resolve({ status, stdout, stderr })));
+    });
+
+  test.beforeAll(async () => {
+    server = await startStandalone({
+      label: "edge check script",
+      port: 3272,
+      env: { TRUSTED_PROXY: "cloudflare", EDGE_PROOF_SECRET: SECRET, EDGE_PROOF_MODE: "observe", CRM_API_URL: "http://127.0.0.1:1", CRM_API_KEY: "k".repeat(40), CRM_COMPANY_ID: "script-test" },
+    });
+    await startEdge(3273, true); // the rule is in place
+    await startEdge(3274, false); // no rule
+  });
+  test.afterAll(async () => {
+    for (const p of proxies) await new Promise((r) => p.close(() => r(null)));
+    await server?.stop();
+  });
+
+  test("with the rule in place the script passes, including the check that a client-supplied proof is overwritten, and never prints the secret", async () => {
+    const r = await run("http://127.0.0.1:3273");
+    expect(r.status, r.stdout + r.stderr).toBe(0);
+    expect(r.stdout).toContain("PASS  through Cloudflare, nothing special sent -> valid");
+    expect(r.stdout).toContain("PASS  through Cloudflare, with a forged x-bft-edge-proof header (the rule must overwrite it) -> valid");
+    expect(r.stdout).toContain("RESULT  the edge proof behaves as designed");
+    expect(r.stdout + r.stderr).not.toContain(SECRET);
+  });
+
+  test("without the rule the script fails and says not to switch to enforce", async () => {
+    const r = await run("http://127.0.0.1:3274");
+    expect(r.status).toBe(1);
+    expect(r.stdout).toContain("FAIL  through Cloudflare, nothing special sent -> 'missing' (expected 'valid')");
+    expect(r.stdout).toContain("do not switch to enforce");
+  });
+
+  test("an unreachable address fails cleanly, and the script is valid bash", async () => {
+    const r = await run("http://127.0.0.1:9");
+    expect(r.status).toBe(1);
+    expect(r.stdout).toContain("unreachable");
+    expect(spawnSync("bash", ["-n", script], { encoding: "utf8" }).status).toBe(0);
   });
 });

@@ -98,7 +98,11 @@ for (const { name, path } of PAGES) {
 }
 
 test.describe("Keyboard and focus", () => {
-  test("skip link is the first focus stop and jumps to main content", async ({ page }) => {
+  test("skip link is the first focus stop and jumps to main content", async ({ page, browserName }) => {
+    // Safari's default setting ("Press Tab to highlight each item on a webpage" is OFF) makes Tab skip every LINK and stop only on buttons and form controls, so in WebKit the
+    // first Tab stop is the first button and a skip link is reached with Option+Tab or a screen reader. That is the browser's behaviour, not something the page can change; the
+    // skip link itself is still the first element in the document and is verified in Chromium here.
+    test.skip(browserName === "webkit", "Safari's default keyboard setting skips links when Tab is pressed");
     await page.goto("/");
     await page.keyboard.press("Tab");
     const active = page.locator(":focus");

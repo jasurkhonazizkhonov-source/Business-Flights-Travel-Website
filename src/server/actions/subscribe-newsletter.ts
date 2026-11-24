@@ -2,7 +2,7 @@
 
 import { headers } from "next/headers";
 import { checkRateLimit } from "@/lib/rate-limit";
-import { rateLimitClientKey } from "@/lib/rate-limit-client";
+import { limitFor, rateLimitClientKey } from "@/lib/rate-limit-client";
 import { newsletterSchema, type NewsletterInput } from "@/lib/validations/newsletter";
 import { postNewsletterSubscription } from "@/lib/crm-api/client";
 import { crmApiConfig } from "@/server/crm-api";
@@ -21,7 +21,7 @@ export async function subscribeToNewsletter(input: NewsletterInput): Promise<Sub
   const headerList = await headers();
   const ip = rateLimitClientKey(headerList);
 
-  const { allowed } = checkRateLimit(`newsletter:${ip}`, 6);
+  const { allowed } = checkRateLimit(`newsletter:${ip}`, limitFor(6, ip));
   if (!allowed) {
     return { ok: false, error: "Too many attempts. Please try again in a few minutes." };
   }

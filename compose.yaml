@@ -64,6 +64,12 @@ services:
       # headers above are believed only on a request that carries it, so a container that can reach this origin directly cannot forge a visitor IP or location.
       # Do not set it before that Cloudflare rule exists: without the header every visitor would be treated as unidentified. docs/IP_AND_LOCATION_CAPTURE.md section 6.
       EDGE_PROOF_SECRET: ${EDGE_PROOF_SECRET:-}
+      # With a secret set: "observe" (believe the Cloudflare headers as before, but COUNT and log whether each request carries the proof, so the rule can be verified
+      # in production) or "enforce" (the default: refuse to believe them without the proof). Activate in two steps, observe first: docs/EDGE_PROOF_ACTIVATION_RUNBOOK.md.
+      EDGE_PROOF_MODE: ${EDGE_PROOF_MODE:-}
+      # Content-Security-Policy script mode: empty or "strict" = a per-response nonce, no 'unsafe-inline' for scripts (the default). "compat" = the previous
+      # 'unsafe-inline' policy, a RUN-TIME kill switch (restart the container) if something at the edge rewrites scripts and breaks hydration. docs/CSP_HARDENING.md.
+      CSP_SCRIPT_MODE: ${CSP_SCRIPT_MODE:-}
       # --- notification email (Gmail SMTP, one sender address, app password) ---
       GMAIL_SENDER_EMAIL: ${GMAIL_SENDER_EMAIL:?Set GMAIL_SENDER_EMAIL in .env}
       GMAIL_APP_PASSWORD: ${GMAIL_APP_PASSWORD:?Set GMAIL_APP_PASSWORD in .env}

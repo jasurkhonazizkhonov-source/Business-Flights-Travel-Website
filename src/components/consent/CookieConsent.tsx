@@ -95,10 +95,23 @@ export function CookieConsent() {
 
   // Return focus to a sensible place once the dialog closes, and move it
   // into the dialog when it opens — standard modal focus management.
+  // The control that was last activated by a click or tap. Safari (and Firefox on macOS) do not give a button keyboard focus when it is clicked, so document.activeElement
+  // is then <body> and focus could not be returned to the opener. Recorded in the capture phase, i.e. before the click handler opens the dialog.
+  const lastActivatedRef = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    const record = (e: MouseEvent) => {
+      const control = e.target instanceof Element ? e.target.closest<HTMLElement>("button, a[href], [role='button']") : null;
+      if (control && !dialogRef.current?.contains(control)) lastActivatedRef.current = control;
+    };
+    document.addEventListener("click", record, true);
+    return () => document.removeEventListener("click", record, true);
+  }, []);
+
   useEffect(() => {
     if (!preferencesOpen) return;
-    // Whatever opened the dialog (the banner's "Manage Preferences", or the footer's "Cookie Settings") has focus right now.
-    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    // Whatever opened the dialog (the banner's "Manage Preferences", or the footer's "Cookie Settings") has focus right now, or, where a click does not focus a button, was just clicked.
+    const active = document.activeElement;
+    const opener = active instanceof HTMLElement && active !== document.body ? active : lastActivatedRef.current;
     dialogRef.current?.querySelector<HTMLElement>("[data-autofocus]")?.focus();
     return () => {
       if (opener?.isConnected) opener.focus();

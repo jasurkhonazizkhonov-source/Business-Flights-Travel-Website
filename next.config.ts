@@ -5,45 +5,10 @@ import bundleAnalyzer from "@next/bundle-analyzer";
 // so it never affects a normal `next build`/production deploy.
 const withBundleAnalyzer = bundleAnalyzer({ enabled: process.env.ANALYZE === "true" });
 
-// A CSP strict enough to matter, without breaking Next.js's own hydration
-// script or the JSON-LD <script> tags rendered inline throughout the app
-// (layout.tsx, destination/blog/FAQ structured data). Nonce-based script-src
-// (no 'unsafe-inline') is the stricter option, but requires threading a
-// per-request nonce through every one of those inline scripts via
-// middleware — a real future hardening step, not something to bolt on
-// without the testing that deserves. next/font self-hosts font files at
-// build time (no fonts.gstatic.com at runtime), and next/image proxies
-// remote images through same-origin /_next/image, so neither needs a CSP
-// allowance here despite Unsplash being configured below.
-// Dev-only relaxations — never applied to a production build. Turbopack's
-// hot-reload client opens a same-origin WebSocket that browsers treat as a
-// separate scheme from connect-src 'self', and React's dev-mode tooling
-// uses eval() for component stack traces (never in production — see
-// https://react.dev, this is stripped from the production build).
-const isDev = process.env.NODE_ENV !== "production";
-
-// No analytics loads anywhere in this app right now (see docs/ENVIRONMENT.md)
-// — no third-party script hosts need allowing here. If that changes, widen
-// this alongside whatever loads the script, not speculatively ahead of it.
-const csp = [
-  "default-src 'self'",
-  `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ""}`,
-  // 'unsafe-inline' above is needed for Next's inline framework scripts (docs/SECURITY_REVIEW_AND_REMAINING_LIMITATIONS.md), but it ALSO allows inline event-handler
-  // attributes (onclick="..."), which nothing here uses (0 on all 223 pages, measured). Refusing them closes the most common way an injected attribute turns into
-  // script, without touching hydration.
-  "script-src-attr 'none'",
-  "style-src 'self' 'unsafe-inline'",
-  "img-src 'self' data:",
-  "font-src 'self' data:",
-  `connect-src 'self'${isDev ? " ws://localhost:* http://localhost:*" : ""}`,
-  "frame-ancestors 'none'",
-  "base-uri 'self'",
-  "form-action 'self'",
-  "object-src 'none'",
-].join("; ");
+// The Content-Security-Policy is NOT set here any more: its script policy carries a nonce that is fresh for every request, so it is built and set per request by
+// src/proxy.ts (policy text: src/lib/csp.ts; rationale, the runtime kill switch and the remaining exceptions: docs/CSP_HARDENING.md).
 
 const securityHeaders = [
-  { key: "Content-Security-Policy", value: csp },
   { key: "X-Content-Type-Options", value: "nosniff" },
   { key: "X-Frame-Options", value: "DENY" },
   { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },

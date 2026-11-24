@@ -5,7 +5,7 @@ import { test, expect, type Browser, type BrowserContext, type Page } from "@pla
 //     44 px on a touch screen;
 //   * the fixed "Best Deals" pill never sits over a form while the form is on screen below 1024 px (and is unchanged from 1024 px up), also after a client-side navigation;
 //   * the first-visit cookie notice never takes more than about half of a screen (between 640 and 700 px it used to take 52%, and 88% of a landscape phone);
-//   * the calendar days are as large as the narrowest screens allow, and the mobile menu can be fully reached on a landscape phone.
+//   * the calendar spans the phone screen (44 px day buttons from 360 px up) and never widens the page, and the mobile menu can be fully reached on a landscape phone.
 // The spec sets its own viewports (a touch context per size), so it runs once, in the Desktop Chrome project.
 
 const CONSENT = JSON.stringify({ version: 1, decidedAt: "2026-11-01T00:00:00.000Z", preferences: { necessary: true, analytics: false, marketing: false } });
@@ -163,20 +163,36 @@ test.describe("mobile usability", () => {
     expect(tall).toEqual([]);
   });
 
-  test("the calendar days are as large as the narrowest screens allow, and the whole calendar fits the screen", async ({ browser }, testInfo) => {
-    // 32 px buttons up to 380 px wide: the largest the popover geometry allows (larger cells push its right edge past a 320 px screen); 44 px cells from 381 px
-    for (const [width, min] of [[320, 32], [360, 32], [375, 32], [390, 42]] as const) {
+  test("the calendar spans the phone screen: 44 px day buttons from 360 px up (the largest that fit below), inside the viewport, never widening the page, open or closed", async ({ browser }, testInfo) => {
+    // seven columns share the screen width minus an 8 px gutter and the popover's own padding: 38 px buttons at 320 px, 44 px from 360 px
+    for (const [width, min] of [[320, 38], [360, 44], [375, 44], [390, 44], [430, 44]] as const) {
       const context = await touchContext(browser, base(testInfo), width, 800);
       const page = await context.newPage();
       await page.goto("/flights", { waitUntil: "load" });
       await page.locator(".PhoneInput").first().waitFor({ timeout: 30_000 });
-      await page.locator("form:has(#phone)").getByText("Select date").first().click();
-      await page.waitForTimeout(600);
-      const grid = (await page.getByRole("grid").first().boundingBox())!;
-      expect(grid.x, `${width}px calendar left edge`).toBeGreaterThanOrEqual(0);
-      expect(grid.x + grid.width, `${width}px calendar right edge`).toBeLessThanOrEqual(width + 1);
-      const day = (await page.getByRole("grid").first().locator("button:not([disabled])").first().boundingBox())!;
-      expect(Math.min(day.width, day.height), `${width}px day size`).toBeGreaterThanOrEqual(min);
+      const overflow = () => page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+      const form = page.locator("form:has(#phone)");
+      expect(await overflow(), `${width}px closed`).toBeLessThanOrEqual(0);
+      expect(await form.locator("[role=dialog]").first().evaluate((el) => getComputedStyle(el).display), `${width}px: a closed calendar is out of the layout on a phone`).toBe("none");
+      for (const which of [0, 1]) {
+        // the first pass opens the departure field; once a departure is chosen only the RETURN field still says "Select date" (a round trip is the default)
+        await form.getByText("Select date").first().click({ timeout: 10_000 });
+        await expect(page.getByRole("grid").first()).toBeVisible();
+        await page.waitForTimeout(500); // the geometry is measured on the next frame
+        const grid = (await page.getByRole("grid").first().boundingBox())!;
+        expect(grid.x, `${width}px calendar ${which} left edge`).toBeGreaterThanOrEqual(0);
+        expect(grid.x + grid.width, `${width}px calendar ${which} right edge`).toBeLessThanOrEqual(width + 1);
+        const day = (await page.getByRole("grid").first().locator("button:not([disabled])").first().boundingBox())!;
+        expect(Math.min(day.width, day.height), `${width}px day size`).toBeGreaterThanOrEqual(min);
+        expect(await overflow(), `${width}px open`).toBeLessThanOrEqual(0);
+        // choosing a day still works and closes it again
+        const enabled = page.getByRole("grid").first().locator("button:not([disabled])");
+        await enabled.nth(Math.min(3, (await enabled.count()) - 1)).click(); // (only the days from today to the end of the month are enabled in the first month shown: that may be one or two)
+        await expect(page.getByRole("grid")).toHaveCount(0, { timeout: 5_000 }).catch(() => undefined);
+        await page.keyboard.press("Escape");
+        await page.waitForTimeout(300);
+        expect(await overflow(), `${width}px after`).toBeLessThanOrEqual(0);
+      }
       await context.close();
     }
   });

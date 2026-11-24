@@ -40,6 +40,19 @@ if [ -n "${edge_proof}" ]; then
   [ "$(printf '%s' "${edge_proof}" | wc -c)" -ge 24 ] || die "EDGE_PROOF_SECRET is set but shorter than 24 characters (the application would believe no visitor IP or location at all)"
   ok "EDGE_PROOF_SECRET is set (Cloudflare headers are believed only on requests that carry it; make sure the Cloudflare request-header rule is in place)"
 fi
+edge_mode="$(env_value EDGE_PROOF_MODE)"
+case "${edge_mode}" in
+  ""|enforce|observe) ;;
+  *) die "EDGE_PROOF_MODE must be empty, 'observe' or 'enforce' (a misspelling would silently mean enforce)" ;;
+esac
+if [ -n "${edge_mode}" ] && [ -z "${edge_proof}" ]; then die "EDGE_PROOF_MODE is set but EDGE_PROOF_SECRET is empty: the mode has no effect without a secret (set both, or neither)"; fi
+if [ "${edge_mode}" = "observe" ]; then ok "EDGE_PROOF_MODE=observe: nothing is refused yet; check the [edge-proof] log lines and /api/edge-check, then switch to enforce"; fi
+csp_mode="$(env_value CSP_SCRIPT_MODE)"
+case "${csp_mode}" in
+  ""|strict) ;;
+  compat) warn "CSP_SCRIPT_MODE=compat: scripts are allowed inline again ('unsafe-inline'); this is the kill switch, not the intended setting (docs/CSP_HARDENING.md)" ;;
+  *) die "CSP_SCRIPT_MODE must be empty, 'strict' or 'compat' (a misspelling would silently mean strict)" ;;
+esac
 CRM_URL="$(env_or_default CRM_API_URL http://compass-crm:3000)"
 case "${CRM_URL}" in
   http://*|https://*) ok "CRM_API_URL is an http(s) URL" ;;

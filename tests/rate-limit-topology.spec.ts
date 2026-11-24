@@ -12,7 +12,9 @@ import { standaloneBuildPresent, startStandalone, type StandaloneServer } from "
 //      limited per real client address.
 // Every request ends at the limiter or validation: no CRM is configured (an unreachable address is given to prove nothing is sent there).
 const SECRET = "edge-proof-" + "0123456789abcdef".repeat(2); // throwaway test value
+import { limitFor, UNRESOLVED_CLIENT } from "../src/lib/rate-limit-client";
 const LIMIT = 6; // newsletter: src/server/actions/subscribe-newsletter.ts
+const SHARED = limitFor(LIMIT, UNRESOLVED_CLIENT); // the larger allowance of the one shared bucket for requests that cannot be attributed
 const ALLOWED = /Please enter a valid email address\./; // reached validation: the limiter let it through
 const BLOCKED = /Too many attempts\. Please try again in a few minutes\./;
 
@@ -71,9 +73,9 @@ test.describe("rate limiting across instances and forged addresses (standalone s
   test("with the edge proof: forged rotation shares ONE bucket and is limited; a proven client is limited by its own address", async () => {
     const c = await start("topology C (edge proof)", 3266, { EDGE_PROOF_SECRET: SECRET });
     const forged: string[] = [];
-    for (let i = 0; i < LIMIT + 3; i++) forged.push(await subscribe(c, { "CF-Connecting-IP": `203.0.113.${180 + i}` }));
-    expect(forged.slice(0, LIMIT)).toEqual(Array(LIMIT).fill("allowed"));
-    expect(forged.slice(LIMIT), "rotating the claimed address did not buy a fresh allowance").toEqual(Array(3).fill("blocked"));
+    for (let i = 0; i < SHARED + 3; i++) forged.push(await subscribe(c, { "CF-Connecting-IP": `203.0.113.${(i % 60) + 180}` }));
+    expect(forged.slice(0, SHARED)).toEqual(Array(SHARED).fill("allowed"));
+    expect(forged.slice(SHARED), "rotating the claimed address did not buy a fresh allowance").toEqual(Array(3).fill("blocked"));
     // a request that carries the proof has its own bucket per real address, untouched by the exhausted shared one
     expect(await subscribe(c, { "CF-Connecting-IP": "203.0.113.200", "x-bft-edge-proof": SECRET })).toBe("allowed");
     const proven: string[] = [];
@@ -83,7 +85,7 @@ test.describe("rate limiting across instances and forged addresses (standalone s
     expect(await subscribe(c, { "CF-Connecting-IP": "203.0.113.202", "x-bft-edge-proof": SECRET })).toBe("allowed");
   });
 
-  test("with the edge proof ON but the Cloudflare rule missing, every visitor shares the one bucket: the sitewide allowance is the single client's (the misconfiguration to avoid)", async () => {
+  test("with the edge proof ON (enforce) but the Cloudflare rule missing, every visitor shares the one bucket: the sitewide allowance is the larger shared one, then refusal (the misconfiguration observe mode exists to prevent)", async () => {
     const c = servers[servers.length - 1];
     // the shared bucket is already exhausted by the previous test: an ordinary visitor (no proof header, because the rule is absent) is refused
     expect(await subscribe(c, { "CF-Connecting-IP": "198.51.100.77" })).toBe("blocked");

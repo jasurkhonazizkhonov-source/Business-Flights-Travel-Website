@@ -50,12 +50,18 @@ export function createSlidingWindowLimiter(options: SlidingWindowOptions): Slidi
       if (now - lastSweep >= sweepEveryMs) sweep(now);
       if (buckets.size > maxKeys) {
         sweep(now);
-        // Still too many live keys: forget the oldest-inserted ones (Map iteration order), down to 90% of the cap so that the next calls are not
-        // each paying for another pass (an attacker presenting a flood of distinct keys must not turn every request into an O(n) scan).
+        // Still too many live keys: give up the ones that cost an attacker the least - fewest hits in the window first, then the least recently seen - down to
+        // 90% of the cap so that the next calls are not each paying for another pass (a flood of distinct keys must not turn every request into an O(n) scan).
+        // A flood of distinct single-hit keys therefore cannot flush the bucket of a client that is ALREADY being limited (it has the most hits), which is
+        // what such a flood would be for.
         const target = Math.floor(maxKeys * 0.9);
-        for (const k of buckets.keys()) {
-          if (buckets.size <= target) break;
-          if (k !== key) buckets.delete(k);
+        const candidates: Array<[string, number, number]> = [];
+        for (const [k, v] of buckets) if (k !== key) candidates.push([k, v.length, v[v.length - 1] ?? 0]);
+        candidates.sort((a, b) => a[1] - b[1] || a[2] - b[2]);
+        let excess = buckets.size - target;
+        for (const [k] of candidates) {
+          if (excess-- <= 0) break;
+          buckets.delete(k);
         }
       }
       return { allowed: true, remaining: limit - timestamps.length };
