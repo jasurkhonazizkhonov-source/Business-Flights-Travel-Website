@@ -87,3 +87,39 @@ Read with care: the performance score and TBT swing widely between runs of **ide
 5. **Website rollback**: redeploy the previous image; the CRM tolerates both payload shapes (the old one carries only the checkbox).
 
 Peer coordination: the CRM session committed the CRM contract-test files itself as 3b469bf; the website session made no CRM commit and no push.
+
+## 8. Continuation (2026-11-24, second pass): what was found and changed
+
+Everything below was re-verified on the final tree (section 8.4). The release decision of section 1 is unchanged in kind: **ready with documented limitations, not production-verified.**
+
+### 8.1 Defects found and fixed
+
+| Finding | Evidence | Fix |
+|---|---|---|
+| **Text typed into a form before it hydrates was erased.** The fields are controlled (`useState("")`) and hydration wrote the empty value back. This is what the earlier WebKit `fill()` flake was hiding; I had changed the test helper instead of testing the behaviour. | A probe typed into `/contact` the moment the form existed: first and last name both empty after hydration, with no throttling and with 4x CPU / 400 kbps and 6x CPU / 150 kbps. On a phone the window lasts seconds; browser autofill hits the same window. | A 450-byte inline script (first in `<body>`, carrying the CSP nonce) records edits by element id; each form takes its own fields back right after hydration (`useAdoptEarlyInputs`), then closes those ids so nothing stale can return. The phone field takes back only an international (`+`) number. `tests/pre-hydration-input.spec.ts` holds the JavaScript back for 8 s, types with real keystrokes, checks the form is *not* hydrated, then checks every field survives and that submitting reports only what is really missing: 5 cases x 5 browser projects, run twice, 50 of 50. The WebKit typing helper stays (fill is not what a visitor does) and is now a second layer, not a cover. |
+| **`style-src 'unsafe-inline'` for style elements** | `CSP_HARDENING.md` section 4 | `style-src-elem 'self'` plus the hash of the toast library's one run-time `<style>` and the hash of the empty string (the library appends the element before it fills it; without the second hash every page view logged a console error in Chromium and WebKit). Only style *attributes* keep `'unsafe-inline'`. A real-browser test proves an injected `<style>` and a foreign stylesheet are refused while inline attributes still work, and a test recomputes the hash from the installed library so an update cannot silently break it. |
+| **A secret with an empty `EDGE_PROOF_MODE` means enforce** (lock-out by omission) | `client-ip.ts` default | `deploy/preflight.sh` now refuses a secret without an explicit mode (test updated). |
+| **No test proved the signing against a real CRM** | the stand-in CRM cannot | `tests/crm-signed-live.spec.ts` and `tests/crm-journey-live.spec.ts` (opt-in), results in `CRM_API_INTEGRATION.md`. They found a CRM **configuration** requirement: without `WEBSITE_SIGNATURE_REQUIRED=true` a replayed signature is accepted as unsigned. |
+
+### 8.2 Investigated and deliberately **not** changed (evidence, not opinion)
+
+* **Mobile LCP.** Lighthouse's simulated 3.1 to 5.3 s on the text-led pages is a model artefact. Under *applied* throttling (4x CPU, 1.6 Mbps, 150 ms) a real Chromium reports LCP at the same instant as first paint: `/contact` 1.3 s, `/flights` 0.9 s, `/` 1.4 to 1.5 s, `/blog` 1.2 to 1.3 s (median of six runs, stable to about 40 ms); `/destinations`, whose largest paint is a photograph on a 1.1 MB page, 2.0 s. All inside the "good" band (2.5 s). Blocking the fonts changed nothing (3.5 s vs 3.3 s simulated), so fonts are not the cause; the server HTML hides nothing with `opacity:0`. Adding `fetchpriority="high"` to the already-preloaded first images (what Lighthouse's discovery audit asks for) was tried and **made no measurable difference** (destinations 2,024 vs 2,038 ms, blog 1,268 vs 1,298 ms), so it was reverted. Lighthouse's own scores swing 10 to 40 points between runs of identical code on this machine, and in the last two passes Windows was compressing 1.8 GB of memory, which produced `CacheLimitPrunedOnCriticalMemoryPressure` (a back/forward-cache refusal that is the machine's, not the page's) and blocking times of 0.6 to 1.6 s on pages that measured 30 to 90 ms earlier. **Treat the mobile Lighthouse performance score as unreliable here; the structural audits (accessibility, best practices, SEO 100 everywhere; no layout shift; the back/forward cache passes except where memory pressure pruned it) are the dependable part.**
+* **Rate limiting.** No new store; reasoning and the exact residual risk in `SECURITY_REVIEW_AND_REMAINING_LIMITATIONS.md`.
+* **Cloudflare.** Read-only evidence from the live site: Rocket Loader shows no sign of being active; Email Address Obfuscation **is** on (it injects `email-decode.min.js` before React hydrates; no hydration error was observed, and the same-origin script is allowed by `'self'`). Nothing in Cloudflare was changed. See `CSP_HARDENING.md` section 3.
+* **HTTP methods.** GET/HEAD/POST pass, PUT/DELETE/PATCH/OPTIONS answer 405 with `Allow`, TRACE is refused with a generic 500 and no echo (`http-boundaries.spec.ts`); an optional Cloudflare TRACE block is in the runbook.
+
+### 8.3 What the throwaway real CRM proved, and what it did not
+
+A throwaway CRM built from the CRM's final commit in a scratch folder, on its own PostgreSQL 17.11 (never the CRM's database): all 85 migrations applied to an empty database; contract 6 of 6; signed path 8 of 8 with enforcement; customer journey (flight, contact, newsletter, CRM down) 4 of 4; the stored rows and the logs were inspected (`CRM_API_INTEGRATION.md`). **Not proved:** the real VPS, the Cloudflare path, Docker, a real mailbox.
+
+### 8.4 Final results on the final tree (build with `NEXT_OUTPUT=standalone`, after the last source change)
+
+| Suite | Result |
+|---|---|
+| `tsc --noEmit`, `eslint src tests scripts --max-warnings=0`, `npm audit` (all) | clean, clean, 0 vulnerabilities |
+| Chrome projects (Desktop, Mobile 320, 375, 390) | **2,769 passed, 0 failed, 0 flaky**, 35 skipped |
+| WebKit (iPhone 13, Desktop Safari) | **1,377 passed, 0 failed, 0 flaky**, 25 skipped |
+| Infrastructure | **281 passed, 0 failed, 0 flaky**, 18 skipped (the three opt-in real-CRM specs, which pass when pointed at a CRM: 6 + 8 + 4) |
+| Lighthouse (12 runs) | accessibility, best practices, SEO 100 on every page; the only non-passing audit besides memory-pruned back/forward cache is `valid-source-maps` (production builds ship no source maps, intentionally) |
+
+First-attempt failures of this pass, recorded: the contact-form pre-hydration test failed on four projects once because the 2.5 s hold was shorter than the typing (a test timing error; the hold is 8 s now); the first style-policy build logged a console error per page view (fixed with the empty-string hash, above); `deploy-scripts.spec.ts` failed once, as intended, when the new preflight rule refused a secret without a mode (test updated). No assertion was weakened; the three tests that changed now assert more.

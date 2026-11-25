@@ -1,6 +1,6 @@
 # Content Security Policy: nonce-based scripts (2026-11-24)
 
-Earlier reports kept `'unsafe-inline'` for scripts because Next.js renders inline framework scripts that differ on every page and build, so no static header can list them. This change removes `'unsafe-inline'` from **scripts** by giving every response its own nonce. Styles still need `'unsafe-inline'` (section 4). The policy is **not** "fully hardened": the remaining exception and its cause are stated exactly.
+Earlier reports kept `'unsafe-inline'` for scripts because Next.js renders inline framework scripts that differ on every page and build, so no static header can list them. This change removes `'unsafe-inline'` from **scripts** by giving every response its own nonce. Style **elements** no longer need it (section 4); only the inline `style=""` **attributes** still do. The policy is **not** "fully hardened": the remaining exception and its cause are stated exactly.
 
 ## 1. The policy
 
@@ -10,7 +10,9 @@ Built per request by `src/lib/csp.ts`, set by `src/proxy.ts` (Next.js 16's `prox
 default-src 'self'
 script-src 'self' 'nonce-<fresh per response>'
 script-src-attr 'none'
-style-src 'self' 'unsafe-inline'
+style-src 'self' 'unsafe-inline'                         (fallback only, for a browser that lacks the next two)
+style-src-elem 'self' 'sha256-<toast CSS>' 'sha256-<empty>'
+style-src-attr 'unsafe-inline'
 img-src 'self' data:        font-src 'self' data:        connect-src 'self'
 frame-src 'none'            worker-src 'none'            frame-ancestors 'none'
 base-uri 'self'             form-action 'self'           object-src 'none'
@@ -31,10 +33,15 @@ A nonce can only be stamped while a page is rendered, so the root layout is `exp
 
 Why it exists: a nonce policy blocks any script that appears **without** the nonce. Nothing in this application does that, but something between the origin and the browser can: **Cloudflare's Rocket Loader** rewrites every script and would break hydration; Cloudflare's automatic beacon injection (Web Analytics) is a foreign host and is blocked under the old policy too (the site loads no analytics). **Before the first production deployment**, confirm in Cloudflare that Rocket Loader is **Off** for the zone (Speed > Optimization > Content Optimization), and after deploying load the home page and `/flights` through the public hostname once and check that the form opens ("Add preferences") and the calendar opens. If anything is off: `CSP_SCRIPT_MODE=compat` and restart, then investigate. Nothing here was verified against the real Cloudflare zone.
 
-## 4. What remains `'unsafe-inline'`, and why
+**Rocket Loader: evidence and what it does not prove (2026-11-24).** A read-only GET of the live home page, contact, privacy and flights pages through Cloudflare (served by the *previous* build, with the old script policy) showed 21 ordinary `<script>` tags with no `type="<hash>-text/javascript"` rewriting and no `rocket-loader.min.js` reference, and Chromium loaded all four pages with no console error or hydration mismatch. That is what Rocket Loader would have changed if it were active on those responses, so **there is no sign that it is on**. It is not the dashboard setting: the authoritative check is Cloudflare > Speed > Optimization > Content Optimization > Rocket Loader = Off for the zone (and no Configuration Rule or page rule turning it on for these paths). It also proves nothing about the nonce build, which is not deployed yet: after the first deployment load `/` and `/flights` through the public hostname and look for `<script type="...-text/javascript">` in the page source. Rocket Loader would break the nonce policy (it rewrites every script, adding none of the nonces), which is why the kill switch above exists. Not changed: no Cloudflare setting was touched.
 
-* **`style-src 'unsafe-inline'`.** (a) The pages carry about 5,900 `style=""` attributes (React and framer-motion inline styles, `next/image`): blocking `style-src-attr` would break the layout. (b) The toast library (Sonner) inserts a `<style>` element at run time and offers no nonce, so `style-src-elem` cannot be narrowed either. Removing this needs the inline styles refactored into classes and a different toast library: a design-system change, not a header change. Style injection is a far smaller risk than script injection (it cannot execute code), but it can still be used to restyle or exfiltrate via CSS.
-* **JSON-LD** `<script type="application/ld+json">` blocks are inline but are data, not executed, and are not affected by `script-src`.
+## 4. What remains `'unsafe-inline'`, and why (updated 2026-11-24)
+
+* **`style-src-attr 'unsafe-inline'` (and the `style-src` fallback).** The pages carry thousands of inline `style=""` attributes (React and framer-motion inline styles, `next/image`; 38 on the home page alone). Blocking them would break the layout, and the alternative is a design-system refactor of every animated component, not a header change. **Residual risk:** an injected *attribute* can only set that element's own declarations; it has no selectors and no `@import`, so it cannot restyle other elements or read page data through CSS, which is what makes a style *element* the dangerous kind. Any image such a declaration loads is still limited by `img-src 'self' data:`.
+* **Style elements are now restricted** (new): `style-src-elem 'self' 'sha256-<toast CSS>' 'sha256-<empty>'`. The toast library (Sonner 2.0.8) creates one `<style>` element when it is imported and offers no nonce, so its exact text is allowed by a hash, and the empty string is allowed because the library inserts the element first and fills it afterwards (without that hash every page view logged a console error in Chromium and WebKit; the finished stylesheet was applied either way). An empty element does nothing and any text put into one is checked again. A `<style>` element or a stylesheet from another host that an attacker injects is refused (tested in a real browser). **Maintenance:** the hash is of the library's CSS text, so updating Sonner changes it; `tests/csp-nonce.spec.ts` recomputes it from the installed package and fails with the new value if it differs. Development builds keep the broad `style-src` (hot reload injects styles).
+* **`script-src` has no exception** in strict mode. JSON-LD `<script type="application/ld+json">` blocks are inline but are data, not executed, and are not affected by `script-src`.
+* **One inline script of our own**, which carries the nonce: `src/lib/early-input-capture.ts` (about 450 bytes) records what a visitor types or autofills before React hydrates the form, so hydration cannot wipe it. The violation spec allow-lists it by exact content, not by a pattern.
+* **Cloudflare's own injections** (observed on the live site on 2026-11-24, read-only): Email Address Obfuscation adds `/cdn-cgi/scripts/<id>/cloudflare-static/email-decode.min.js`. It is same-origin, so `'self'` allows it with no nonce, and it runs before React hydrates. No Rocket Loader rewriting was visible (section 3).
 
 ## 5. Tests
 

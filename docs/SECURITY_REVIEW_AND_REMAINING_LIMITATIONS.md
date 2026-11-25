@@ -159,3 +159,25 @@ Assessment: **optional, low priority.** (a) The report is informational and has 
 | 11 | Clock synchronisation (NTP) on both servers | The 120 s / 30 s signature window (section 6) | `timedatectl status` on both hosts |
 | 12 | Legal review of the Privacy / Cookie / Terms wording | Not a technical question | Counsel (`PRODUCTION_REDEPLOYMENT_READINESS.md`, section 8) |
 | 13 | The CI workflow covers only the browser-free subset | Browsers, Docker and PostgreSQL are not available on the runner it uses; its first run failed on a real reproducibility gap (route types not generated in a fresh checkout), which was fixed, and the second run passed all steps | Run the browser projects locally (`npm run test:ui`); add a browser job only if you want the minutes and the maintenance |
+
+## Rate limiting: does the per-process website limiter create a production risk? (assessment, 2026-11-24)
+
+**Short answer: not with the current deployment (one `bft-web` container), and no shared store (Redis or other) is justified.** The smallest reliable improvement is two configuration changes, neither made here (both are production changes that need approval).
+
+The layers a form submission actually passes, in order, as traced through the code and, for the CRM part, measured against a real CRM (`CRM_API_INTEGRATION.md`, "Real-CRM verification"):
+
+| Layer | Key | Limit | Shared across instances? | When the store fails |
+|---|---|---|---|---|
+| Cloudflare (edge) | per IP | **none configured by this work** | yes | n/a |
+| Website, in memory (`src/lib/rate-limit.ts`, `sliding-window.ts`) | trusted client IP (IPv6 by /64); unresolved clients share one bucket with a 5x allowance | flight 8, contact 8, newsletter 6 per 10 min per client; `/api/visitor-hint` and `/api/edge-check` limited too | **no** (per process) | there is no external store to fail; memory is bounded (50,000 keys, eviction removes the keys with the fewest hits first, so a flood of one-hit keys cannot push out an abuser's counter) |
+| CRM, database-backed atomic limiter | the **signed** visitor IP | flight and contact 20 per 15 min, newsletter 30 per 15 min per visitor; plus 120 per minute for the whole website credential and 30 failed-auth attempts per 15 min | **yes** (PostgreSQL) | the signature store unavailable answers 503 (the website shows its failure message and keeps the typed data): it fails **closed**, never open |
+
+Findings:
+
+1. **Per-process is a real limitation only if a second instance, or a restart under attack, appears.** Compose runs one container; an attacker cannot restart it; a deploy resets the counters once. Two containers would double every allowance, which the CRM's shared limiter would still cap at 20 per 15 minutes per visitor for flights and contact.
+2. **The CRM limiter protects the website path only when signature enforcement is on.** Its per-visitor key is the IP the website *signed*; without `WEBSITE_SIGNATURE_REQUIRED=true` an unsigned or invalid signature is accepted on the bearer key alone and nothing is keyed per visitor (the connection is the website's own server). Measured: with enforcement the 21st request from one signed IP was refused with 429 and another IP was unaffected; without it a replayed request created a second lead. **Setting `WEBSITE_SIGNATURE_REQUIRED=true` on the CRM, after the signing website is deployed, is the single most useful rate-limit and abuse change.**
+3. **Distributed abuse from many addresses is an edge problem**, not a counter problem: no in-process or in-database counter helps against thousands of source IPs, and a Redis would not change that. The recommended control is a Cloudflare rate-limiting rule for `POST` requests to the site (server actions POST to the page URL), for example 20 requests per minute per IP, action Block for 10 minutes; not created or tested against the real zone.
+4. **Spoofing the key**: the limiter keys on the trusted client IP only (`rateLimitClientKey`), never on `X-Forwarded-For`; with `TRUSTED_PROXY=cloudflare` and the edge proof in `observe`/`enforce`, a direct-to-origin request cannot choose its own key once the proof is enforced. Tested in `rate-limit-hardening`, `rate-limit-topology` (three servers) and `rate-limit-actions-e2e`.
+5. **Public routes outside the forms**: the two small JSON routes are limited as above; `/api/health` returns a fixed body and is not limited (no data, no work).
+
+If, later, more than one website container is wanted: first set `WEBSITE_SIGNATURE_REQUIRED=true` (the CRM becomes the shared limiter for flights, contact and newsletter); only then consider moving the website limiter into a shared store, and document its failure mode (fail open for a deterrent, never closed for customers) and cost before adding it. A new service is **not** recommended today.
