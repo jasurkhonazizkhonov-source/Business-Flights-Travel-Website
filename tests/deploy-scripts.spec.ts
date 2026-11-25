@@ -379,7 +379,12 @@ test.describe("deploy scripts, dry-run against a stub docker", () => {
     expect(r.code).not.toBe(0);
     expect(r.out).toMatch(/EDGE_PROOF_SECRET is set but shorter than 24 characters/);
     expect(r.out).not.toContain("e".repeat(23));
+    // A secret WITHOUT a written-down mode is refused: empty means enforce, and starting in enforce before the Cloudflare rule exists makes every visitor unattributed.
     r = run(`EDGE_PROOF_SECRET=${"e".repeat(40)}\n`);
+    expect(r.code).not.toBe(0);
+    expect(r.out).toMatch(/EDGE_PROOF_SECRET is set but EDGE_PROOF_MODE is empty, which means ENFORCE/);
+    expect(r.out).not.toContain("e".repeat(40));
+    r = run(`EDGE_PROOF_SECRET=${"e".repeat(40)}\nEDGE_PROOF_MODE=enforce\n`);
     expect(r.code, r.out).toBe(0);
     expect(r.out).toContain("EDGE_PROOF_SECRET is set");
     expect(r.out).not.toContain("e".repeat(40));

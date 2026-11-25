@@ -45,6 +45,9 @@ case "${edge_mode}" in
   ""|enforce|observe) ;;
   *) die "EDGE_PROOF_MODE must be empty, 'observe' or 'enforce' (a misspelling would silently mean enforce)" ;;
 esac
+# A secret with NO mode means enforce (the code's default): every request without a valid proof would lose its Cloudflare headers, so if the Cloudflare rule does not exist yet every visitor
+# looks unattributed. Starting that way by omission is how a lock-out happens, so the choice has to be written down: observe first, enforce only after deploy/check-edge-proof.sh passes.
+if [ -n "${edge_proof}" ] && [ -z "${edge_mode}" ]; then die "EDGE_PROOF_SECRET is set but EDGE_PROOF_MODE is empty, which means ENFORCE. Write the choice down: EDGE_PROOF_MODE=observe (nothing is refused; the first step, docs/EDGE_PROOF_ACTIVATION_RUNBOOK.md) or EDGE_PROOF_MODE=enforce (only once the Cloudflare rule is verified)"; fi
 if [ -n "${edge_mode}" ] && [ -z "${edge_proof}" ]; then die "EDGE_PROOF_MODE is set but EDGE_PROOF_SECRET is empty: the mode has no effect without a secret (set both, or neither)"; fi
 if [ "${edge_mode}" = "observe" ]; then ok "EDGE_PROOF_MODE=observe: nothing is refused yet; check the [edge-proof] log lines and /api/edge-check, then switch to enforce"; fi
 csp_mode="$(env_value CSP_SCRIPT_MODE)"

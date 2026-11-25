@@ -13,6 +13,8 @@ const INFRASTRUCTURE_SPECS = [
   /crm-api-client\.spec\.ts$/,
   /crm-api-actions-e2e\.spec\.ts$/,
   /crm-contract-live\.spec\.ts$/, // opt-in: skipped unless CRM_CONTRACT_URL / CRM_CONTRACT_KEY point at a non-production CRM
+  /crm-journey-live\.spec\.ts$/, // opt-in: the real forms of a standalone website against a real non-production CRM (same variables as crm-signed-live)
+  /crm-signed-live\.spec\.ts$/, // opt-in: signing v2 against a real non-production CRM (also needs CRM_CONTRACT_SECRET and CRM_CONTRACT_COMPANY_ID)
   /self-hosted-e2e\.spec\.ts$/,
   /deploy-scripts\.spec\.ts$/,
   /rate-limit-actions-e2e\.spec\.ts$/,

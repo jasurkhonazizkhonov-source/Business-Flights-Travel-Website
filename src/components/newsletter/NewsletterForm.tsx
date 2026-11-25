@@ -8,6 +8,7 @@ import { subscribeToNewsletter } from "@/server/actions/subscribe-newsletter";
 import { ACTION_FAILURE_MESSAGES, ACTION_TIMEOUT_MS, callAction, isNewsletterResult } from "@/lib/safe-action";
 import { cn } from "@/lib/cn";
 import { checkEmail, emailProblemMessage } from "@/lib/validate";
+import { useAdoptEarlyInputs } from "@/hooks/useAdoptEarlyInputs";
 
 // `idPrefix` must be unique per instance on a page: the home page renders this form twice (the
 // newsletter band and the footer), and fixed ids made the second email field's <label for> point at the
@@ -22,6 +23,8 @@ export function NewsletterForm({ variant = "dark", idPrefix = "newsletter" }: { 
   const [error, setError] = useState("");
   const emailId = `${idPrefix}-email`;
   const websiteId = `${idPrefix}-website`;
+  // An address typed or autofilled before the form hydrated comes back (hydration used to wipe it).
+  useAdoptEarlyInputs({ [emailId]: setEmail });
   const errorId = `${idPrefix}-error`;
 
   function handleSubmit(e: React.FormEvent) {

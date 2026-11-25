@@ -207,3 +207,96 @@ test.describe("on real production servers", () => {
     expect(result).toEqual([]);
   });
 });
+
+// ---- styles: elements are restricted to this origin and the one known toast stylesheet; the style="" attributes stay allowed ----------------------------------------------
+import { createHash } from "node:crypto";
+import { pathToFileURL } from "node:url";
+import path from "node:path";
+import { EMPTY_STYLE_HASH, SONNER_STYLE_HASH } from "../src/lib/csp";
+
+test.describe("style policy", () => {
+  test("style elements and stylesheets are limited to this origin plus two hashes; style attributes stay allowed; the broad directive is only the fallback; development keeps it simple", () => {
+    for (const mode of ["strict", "compat"] as const) {
+      const policy = contentSecurityPolicy({ nonce: "abc123", mode });
+      expect(policy).toContain(`style-src-elem 'self' '${SONNER_STYLE_HASH}' '${EMPTY_STYLE_HASH}'`);
+      expect(policy).toContain("style-src-attr 'unsafe-inline'");
+      expect(policy).toContain("style-src 'self' 'unsafe-inline'"); // the fallback for a browser that does not know style-src-elem / style-src-attr
+      expect(policy.match(/style-src-elem [^;]*/)![0]).not.toContain("unsafe-inline");
+      expect(policy.match(/style-src-elem [^;]*/)![0]).not.toMatch(/nonce-|https?:|\*/);
+    }
+    const dev = contentSecurityPolicy({ nonce: "abc123", dev: true });
+    expect(dev).not.toContain("style-src-elem");
+    expect(dev).toContain("style-src 'self' 'unsafe-inline'");
+  });
+
+  test("the hash in the policy is the hash of the CSS the INSTALLED toast library really inserts (updating the library must update the hash)", async () => {
+    const created: string[] = [];
+    const g = globalThis as unknown as { document?: unknown };
+    const previous = g.document;
+    g.document = {
+      head: { appendChild() {} },
+      getElementsByTagName: () => [{ appendChild() {} }],
+      createElement: () => ({ appendChild: (node: { data: string }) => created.push(node.data), styleSheet: undefined, type: "" }),
+      createTextNode: (data: string) => ({ data }),
+    };
+    try {
+      const file = pathToFileURL(path.resolve(__dirname, "..", "node_modules", "sonner", "dist", "index.mjs")).href;
+      await (new Function("u", "return import(u)") as (u: string) => Promise<unknown>)(file);
+    } finally {
+      g.document = previous;
+    }
+    expect(created.length, "the library creates exactly one style element when it is imported").toBe(1);
+    expect(`sha256-${createHash("sha256").update(created[0], "utf8").digest("base64")}`).toBe(SONNER_STYLE_HASH);
+    expect(`sha256-${createHash("sha256").update("", "utf8").digest("base64")}`).toBe(EMPTY_STYLE_HASH);
+  });
+});
+
+test.describe("style policy in a real browser", () => {
+  test.skip(!standaloneBuildPresent(), "needs a standalone build (NEXT_OUTPUT=standalone npm run build)");
+  test.setTimeout(120_000);
+  let server: StandaloneServer;
+  test.beforeAll(async () => {
+    server = await startStandalone({ label: "csp style", port: 3277, withStaticAssets: true, env: ENV });
+  });
+  test.afterAll(async () => {
+    await server?.stop();
+  });
+
+  test("the toast stylesheet is applied with no console error and no violation; an injected <style> with other text, and an injected foreign stylesheet, do nothing; an inline style attribute still works", async ({ page }) => {
+    const consoleErrors: string[] = [];
+    page.on("console", (m) => m.type() === "error" && consoleErrors.push(m.text().slice(0, 160)));
+    await page.addInitScript(() => {
+      (window as unknown as { __v: string[] }).__v = [];
+      document.addEventListener("securitypolicyviolation", (e) => (window as unknown as { __v: string[] }).__v.push(e.effectiveDirective));
+    });
+    await page.goto(`${server.origin}/contact`);
+    await page.waitForLoadState("networkidle");
+    await page.waitForTimeout(500);
+    expect(consoleErrors, "no console error from the policy on a normal page view").toEqual([]);
+    expect(await page.evaluate(() => (window as unknown as { __v: string[] }).__v), "no violation on a normal page view").toEqual([]);
+    const sonnerRules = await page.evaluate(() => [...document.styleSheets].filter((s) => s.ownerNode instanceof HTMLStyleElement).reduce((n, s) => n + s.cssRules.length, 0));
+    expect(sonnerRules, "the toast library's stylesheet is in effect").toBeGreaterThan(50);
+
+    const result = await page.evaluate(async () => {
+      const probe = document.createElement("div");
+      probe.id = "csp-style-probe";
+      probe.textContent = "probe";
+      document.body.appendChild(probe);
+      const violations: string[] = [];
+      document.addEventListener("securitypolicyviolation", (e) => violations.push(e.effectiveDirective));
+      const injected = document.createElement("style");
+      injected.textContent = "#csp-style-probe{display:none !important}";
+      document.head.appendChild(injected);
+      const foreign = document.createElement("link");
+      foreign.rel = "stylesheet";
+      foreign.href = "https://example.invalid/attack.css";
+      document.head.appendChild(foreign);
+      probe.setAttribute("style", "letter-spacing: 7px");
+      await new Promise((r) => setTimeout(r, 500));
+      return { display: getComputedStyle(probe).display, letterSpacing: getComputedStyle(probe).letterSpacing, violations };
+    });
+    expect(result.display, "an injected style element is refused, so the element is still shown").toBe("block");
+    expect(result.letterSpacing, "an inline style attribute still applies").toBe("7px");
+    expect(result.violations).toEqual(expect.arrayContaining(["style-src-elem"]));
+  });
+});

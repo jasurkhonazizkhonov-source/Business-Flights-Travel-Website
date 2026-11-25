@@ -4,7 +4,9 @@ import { Header } from "@/components/layout/Header";
 import { Footer } from "@/components/layout/Footer";
 import { DeferredFloatingDealsButton } from "@/components/layout/DeferredFloatingDealsButton";
 import { DeferredCookieConsent } from "@/components/consent/DeferredCookieConsent";
+import { headers } from "next/headers";
 import { MotionProvider } from "@/components/MotionProvider";
+import { EARLY_INPUT_CAPTURE_SCRIPT } from "@/lib/early-input-capture";
 import { Toaster } from "@/components/Toaster";
 import { getNavMenuRegions } from "@/data/destinations";
 import {
@@ -154,7 +156,9 @@ const websiteJsonLd = {
   publisher: { "@id": ORGANIZATION_ID },
 };
 
-export default function RootLayout({ children }: LayoutProps<"/">) {
+export default async function RootLayout({ children }: LayoutProps<"/">) {
+  // The per-response CSP nonce (set by src/proxy.ts) for the one inline script below.
+  const nonce = (await headers()).get("x-nonce") ?? undefined;
   // Computed server-side (this file has no "use client") and passed down as
   // a small, already-derived prop — see the comment on getNavMenuRegions
   // for why Header/DestinationsMegaMenu (both Client Components) must not
@@ -164,6 +168,9 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html lang="en" className={`${sans.variable} ${playfair.variable} h-full antialiased`}>
       <body className="flex min-h-full flex-col bg-[var(--color-cream-50)]">
+        {/* Remembers what is typed into a form before React hydrates it, so hydration cannot wipe it (src/lib/early-input-capture.ts). A plain inline script, first in the body: Next's own
+            beforeInteractive scripts wait for its JavaScript, which is exactly the window this has to cover. Carries this response's CSP nonce. */}
+        <script nonce={nonce} dangerouslySetInnerHTML={{ __html: EARLY_INPUT_CAPTURE_SCRIPT }} />
         <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLd(organizationJsonLd) }} />
         <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLd(websiteJsonLd) }} />
         {/* First focusable element on every page — invisible until

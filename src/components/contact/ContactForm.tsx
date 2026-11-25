@@ -17,6 +17,8 @@ import { checkEmail, emailProblemMessage } from "@/lib/validate";
 import { focusFieldError } from "@/lib/focus-field-error";
 import { getPhoneValidatorState, loadPhoneValidator, type PhoneErrorFor } from "@/lib/phone-validator";
 import { useVisitorHint } from "@/hooks/useVisitorHint";
+import { useAdoptEarlyInputs } from "@/hooks/useAdoptEarlyInputs";
+import { adoptEarlyPhone } from "@/lib/early-input-phone";
 import { cn } from "@/lib/cn";
 
 type FormErrors = Record<string, string>;
@@ -46,6 +48,17 @@ export function ContactForm() {
   const [subject, setSubject] = useState<ContactSubject | "">("");
   const [message, setMessage] = useState("");
   const [website, setWebsite] = useState("");
+  // What the visitor typed or autofilled before React hydrated the form comes back (it used to be wiped by hydration).
+  useAdoptEarlyInputs({
+    "c-firstName": setFirstName,
+    "c-lastName": setLastName,
+    "c-email": setEmail,
+    "c-phone": (v) => adoptEarlyPhone(v, setPhone),
+    "c-subject": (v) => {
+      if (CONTACT_SUBJECT_OPTIONS.some((s) => s.value === v)) setSubject(v as ContactSubject);
+    },
+    "c-message": setMessage,
+  });
   const [renderedAt] = useState(() => Date.now());
   // Identifies this form instance, so pressing Send again after a timeout or a lost answer is recognised by the CRM as the SAME submission and
   // stored once. Absent only where randomUUID is unavailable (insecure context); the server then sends no key.

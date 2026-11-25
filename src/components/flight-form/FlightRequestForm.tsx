@@ -33,6 +33,8 @@ import { focusFieldError } from "@/lib/focus-field-error";
 import { getPhoneValidatorState, loadPhoneValidator, type PhoneErrorFor } from "@/lib/phone-validator";
 import { PAST_MESSAGE, TOO_FAR_MESSAGE, clientDateWindow, dateProblem } from "@/lib/flight-date-window";
 import { useVisitorHint } from "@/hooks/useVisitorHint";
+import { useAdoptEarlyInputs } from "@/hooks/useAdoptEarlyInputs";
+import { adoptEarlyPhone } from "@/lib/early-input-phone";
 import { useDeviceAirport } from "@/hooks/useDeviceAirport";
 
 const TRIP_TYPE_LABELS: Record<(typeof TRIP_TYPES)[number], string> = {
@@ -97,6 +99,13 @@ export function FlightRequestForm({
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState<string | undefined>(undefined);
   const [website, setWebsite] = useState(""); // honeypot
+  // What the visitor typed or autofilled before React hydrated the form comes back (it used to be wiped by hydration).
+  useAdoptEarlyInputs({
+    firstName: setFirstName,
+    lastName: setLastName,
+    email: setEmail,
+    phone: (v) => adoptEarlyPhone(v, setPhone),
+  });
   const [renderedAt] = useState(() => Date.now());
   // One key per mounted form, identical on every attempt of this submission —
   // including the automatic retry Next.js makes of a failed Server Action

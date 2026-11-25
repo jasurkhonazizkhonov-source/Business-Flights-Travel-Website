@@ -1,10 +1,11 @@
 import { test, expect, type Page } from "@playwright/test";
+import { EARLY_INPUT_CAPTURE_SCRIPT } from "../src/lib/early-input-capture";
 
-// The Content-Security-Policy (src/lib/csp.ts, set per request by src/proxy.ts; the nonce itself is tested in csp-nonce.spec.ts) keeps 'unsafe-inline' for STYLES only. These tests pin
+// The Content-Security-Policy (src/lib/csp.ts, set per request by src/proxy.ts; the nonce itself is tested in csp-nonce.spec.ts) keeps 'unsafe-inline' only for style ATTRIBUTES (and as the fallback directive); These tests pin
 // why, and what the page is allowed to do under it:
 //  * script-src: every executable inline script is Next.js's own framework payload (the flight data and the bootstrap), which differs on every page, so it can only be
 //    allowed by a per-response nonce (which is what the policy now uses: no 'unsafe-inline' for scripts), and nothing else is inline (docs/CSP_HARDENING.md);
-//  * style-src: the toast library (sonner) inserts a <style> element when the toaster mounts, so narrowing style-src would unstyle the toasts;
+//  * style-src-elem: the toast library (sonner) inserts one <style> element when the toaster mounts; its exact text is allowed by a hash (src/lib/csp.ts), nothing else;
 //  * and nothing ELSE inline exists: no inline <style> in the server HTML, no event-handler attribute, no javascript: URL - so the broad directive is not
 //    carrying anything the application did not put there itself.
 // The browser flows below must raise no securitypolicyviolation at all: a new third-party script, font, image host, frame or inline construct that the
@@ -20,6 +21,7 @@ test.describe("what the pages inline (server HTML)", () => {
         const [, attrs, body] = m;
         if (/\bsrc=/.test(attrs)) continue; // an external file: allowed by 'self'
         if (/type="application\/(ld\+)?json"/.test(attrs)) continue; // a data block (structured data): never executed
+        if (body === EARLY_INPUT_CAPTURE_SCRIPT) continue; // the one script of this site's own: it keeps what a visitor types before hydration (src/lib/early-input-capture.ts); matched by exact content
         expect(body.trim().slice(0, 60), `${path}: unexpected inline script`).toMatch(/^(self\.__next_f|\(self\.__next_f|\(globalThis\["TURBOPACK"\]|\(self\.__next_s|self\.__next_s)/);
       }
       expect(html, "inline <style> element").not.toMatch(/<style\b/i);
