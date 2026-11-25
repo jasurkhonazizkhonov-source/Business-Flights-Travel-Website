@@ -19,20 +19,15 @@ ok "required variables are present (values not shown)"
 [ "$(env_value CRM_API_KEY | wc -c)" -gt 32 ] || die "CRM_API_KEY is shorter than 32 characters (the CRM treats a shorter key as 'not configured')"
 ok "CRM_API_KEY has at least 32 characters"
 ingest="$(env_value LEAD_INGEST_SECRET)"
-if [ -z "${ingest}" ]; then
-  # This release's contract with the CRM is signed requests (signing v2). Without the secret the website would still send, but UNSIGNED: a CRM that has the
-  # secret in STRICT mode (WEBSITE_SIGNATURE_REQUIRED=true) refuses every enquiry (visitors see a generic error), in transitional mode still accepts it but then has no verified
-  # visitor IP or location, and one without the secret records none. That must be a decision, not an accident.
-  if [ "${PREFLIGHT_ALLOW_UNSIGNED:-}" = "yes" ]; then
-    warn "LEAD_INGEST_SECRET is not set and PREFLIGHT_ALLOW_UNSIGNED=yes was given: requests to the CRM are NOT signed (a CRM in strict signature mode refuses them; otherwise they are accepted without a verified visitor IP or location)."
-  else
-    die "LEAD_INGEST_SECRET is not set, so requests to the CRM would be NOT signed (no signing v2; a CRM in strict signature mode (WEBSITE_SIGNATURE_REQUIRED=true) refuses them, otherwise they are accepted without a verified visitor IP or location). Set it, identical to the CRM's, on both sides together. Only if you knowingly run without signing: PREFLIGHT_ALLOW_UNSIGNED=yes deploy/preflight.sh"
-  fi
-elif [ "$(printf '%s' "${ingest}" | wc -c)" -lt 32 ]; then
-  die "LEAD_INGEST_SECRET is shorter than 32 characters"
-else
-  ok "LEAD_INGEST_SECRET is set (every request to the CRM is signed, signing v2; visitor IP / location travel inside the signature)"
-fi
+# Every request to the CRM must be signed (signing v2): a production website without a usable secret sends nothing (src/lib/crm-api/config.ts) and a production
+# CRM refuses unsigned requests. There is deliberately no switch that lets a deployment go ahead without it.
+[ -n "${ingest}" ] || die "LEAD_INGEST_SECRET is not set. Every request to the CRM must be signed: set it, identical to the CRM's LEAD_INGEST_SECRET, on both sides (openssl rand -base64 32)."
+case "${ingest}" in
+  *[[:space:]]*|*'<'*|*'>'*) die "LEAD_INGEST_SECRET contains a space or looks like the example placeholder: set the real random value (identical on the CRM)" ;;
+esac
+[ "$(printf '%s' "${ingest}" | wc -c)" -ge 32 ] || die "LEAD_INGEST_SECRET is shorter than 32 characters"
+[ "${ingest}" != "$(env_value CRM_API_KEY)" ] || die "LEAD_INGEST_SECRET is the same value as CRM_API_KEY: each credential needs its own value"
+ok "LEAD_INGEST_SECRET is set (every request to the CRM is signed, signing v2; visitor IP / location travel inside the signature)"
 # OPTIONAL edge proof (docs/IP_AND_LOCATION_CAPTURE.md section 6). Off while empty. A value that is set but too short is refused by the application (it fails closed: no visitor IP
 # or location would be believed), so it is caught here instead of in production.
 edge_proof="$(env_value EDGE_PROOF_SECRET)"

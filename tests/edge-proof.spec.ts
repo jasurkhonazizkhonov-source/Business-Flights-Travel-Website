@@ -57,6 +57,30 @@ test.describe("edge proof off (no EDGE_PROOF_SECRET): behaviour is exactly what 
   });
 });
 
+test.describe("enforcement asked for without a secret fails closed: a missing variable cannot switch the proof off", () => {
+  for (const mode of ["enforce", " ENFORCE ", "enforced"]) {
+    test(`EDGE_PROOF_MODE=${JSON.stringify(mode)} with no secret: nothing is believed`, () => {
+      for (const secret of [undefined, "", "  "]) {
+        withEnv({ TRUSTED_PROXY: "cloudflare", EDGE_PROOF_SECRET: secret, EDGE_PROOF_MODE: mode }, () => {
+          expect(edgeProofState(forged())).toBe("invalid");
+          expect(edgeProofState(forged({ [EDGE_PROOF_HEADER]: "" }))).toBe("invalid");
+          expect(resolveClientIp(forged())).toEqual({ ok: false, reason: "edge_not_proven" });
+          expect(captureSubmissionInfo(forged()).info.location).toBeUndefined();
+          expect(readVisitorHint(forged())).toEqual({});
+        });
+      }
+    });
+  }
+  for (const mode of [undefined, "", "observe"]) {
+    test(`EDGE_PROOF_MODE=${JSON.stringify(mode)} with no secret: the feature is off, as before`, () => {
+      withEnv({ TRUSTED_PROXY: "cloudflare", EDGE_PROOF_SECRET: undefined, EDGE_PROOF_MODE: mode }, () => {
+        expect(edgeProofState(forged())).toBe("off");
+        expect(resolveClientIp(forged()).ok).toBe(true);
+      });
+    });
+  }
+});
+
 test.describe("edge proof on: only a request that carries the secret is believed", () => {
   const on = (fn: () => void) => withEnv({ TRUSTED_PROXY: "cloudflare", EDGE_PROOF_SECRET: SECRET }, fn);
 

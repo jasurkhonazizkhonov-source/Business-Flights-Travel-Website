@@ -7,7 +7,8 @@
 //   CRM_API_KEY         bearer key for POST /api/v1/website/flight-inquiries, >= 32 characters           (required for flight requests)
 //   CRM_COMPANY_ID      the CRM Company id for the CRM's PUBLIC endpoints (contact inquiry, newsletter)  (required for those two forms; also needed to sign flight requests)
 //   LEAD_INGEST_SECRET  signs EVERY request (signing v2: method, path, company, exact body, one-time nonce, visitor IP / approximate location), >= 32 characters,
-//                       identical on both sides. Optional here, but without it requests are UNSIGNED: a CRM in strict mode (WEBSITE_SIGNATURE_REQUIRED=true) REFUSES them, a CRM in transitional mode accepts them without a verified visitor IP, so set both sides.
+//                       identical on both sides. REQUIRED in production (NODE_ENV=production): without a usable one no request is sent at all - there is no unsigned
+//                       fallback, and a production CRM refuses unsigned requests. Outside production it is optional (local work against a stand-in CRM).
 //
 // None of these is ever a NEXT_PUBLIC_* variable and none is read by client code.
 
@@ -25,7 +26,7 @@ export type CrmApiConfig = {
   apiKey?: string;
   /** Present for "public-inquiry". */
   companyId?: string;
-  /** Present only when set AND long enough. */
+  /** Present only when set AND long enough; always present in production. */
   ingestSecret?: string;
 };
 
@@ -69,13 +70,14 @@ export function resolveCrmApiConfig(env: Env, target: CrmApiTarget): CrmApiConfi
 
   let ingestSecret: string | undefined;
   const rawSecret = env.LEAD_INGEST_SECRET?.trim();
-  // Every request to the CRM is signed (signing v2: method, path, company, exact body, one-time nonce) whenever a secret is configured: the flight request,
-  // the contact inquiry and the newsletter sign-up. A secret that is too short is not used (a warning, nothing is signed): the CRM, which requires a signature
-  // as soon as IT has a secret, then refuses the request and the visitor sees the generic failure.
-  if (rawSecret) {
-    if (rawSecret.length >= MIN_SECRET_LENGTH) ingestSecret = rawSecret;
-    else warnings.push(`LEAD_INGEST_SECRET is shorter than ${MIN_SECRET_LENGTH} characters, so requests are not signed`);
-  }
+  // Every request to the CRM is signed (signing v2: method, path, company, exact body, one-time nonce): the flight request, the contact inquiry and the
+  // newsletter sign-up. In production a missing or too short secret is a configuration problem: nothing is sent unsigned, and the visitor gets the generic
+  // failure with the form kept. Outside production a secret that cannot be used is a warning and the request goes unsigned.
+  const production = env.NODE_ENV === "production";
+  if (rawSecret && rawSecret.length >= MIN_SECRET_LENGTH) ingestSecret = rawSecret;
+  else if (production) {
+    problems.push(rawSecret ? `LEAD_INGEST_SECRET must be at least ${MIN_SECRET_LENGTH} characters` : "LEAD_INGEST_SECRET is not set (every request to the CRM must be signed)");
+  } else if (rawSecret) warnings.push(`LEAD_INGEST_SECRET is shorter than ${MIN_SECRET_LENGTH} characters, so requests are not signed`);
   // The signature binds the company. The public calls already carry it; the flight call's company is fixed by the CRM's credential, so signing it needs
   // the same CRM_COMPANY_ID (the CRM's WEBSITE_API_COMPANY_ID) to be configured here as well.
   if (target === "flight-inquiry" && ingestSecret) {

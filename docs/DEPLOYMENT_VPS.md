@@ -83,8 +83,8 @@ runtime-role grants), `src/lib/{prisma,db-tls,db-error,schema-guard,…}.ts`, `s
    release layout - a separate internal API network with the `compass-crm` alias and a tunnel network without PostgreSQL (a CRM Compose change); or
    (b) accept, knowingly, that the website shares a network with PostgreSQL. The website holds no database credential, but the network route would
    exist; (b) is not implemented here and would need an explicit, reviewed relaxation of the preflight rule.
-4. `LEAD_INGEST_SECRET` (optional) is identical on both sides, or the CRM ignores the visitor context and records no IP or location. It signs the
-   visitor context for the flight request **and** the contact form (the contact form did not send it before 2026-11-13).
+4. `LEAD_INGEST_SECRET` (**required**) is identical on both sides: it signs every request to the CRM (flight request, contact form, newsletter) and carries
+   the visitor's IP and location inside the signature. Without it the website sends nothing and the CRM refuses unsigned requests.
    Redeploying over the previous, database-backed release: that release's `.env` holds `DATABASE_URL` (its compose file requires it), and
    `deploy/preflight.sh` refuses any `DATABASE_*` variable by default. Removing it from the shared `.env` would also break a rollback to the previous
    image. The one supported exception is explicit and per run: `PREFLIGHT_ALLOW_LEGACY_DATABASE_VARS=yes deploy/preflight.sh` (also for `deploy.sh`,
@@ -136,7 +136,7 @@ no tunnel ID. After the website is running and healthy (section 8):
 | `CRM_API_KEY` | yes (compose refuses to start without it) | `<same-value-as-the-CRMs-WEBSITE_API_KEY>`, at least 32 characters |
 | `CRM_COMPANY_ID` | yes | `<crm-company-id>` — used by the contact form and the newsletter only |
 | `CRM_API_URL` | no | default `http://compass-crm:3000` |
-| `LEAD_INGEST_SECRET` | no (recommended) | `<same-value-as-the-CRMs-LEAD_INGEST_SECRET>`, ≥ 32 characters; without it leads carry no visitor IP / location |
+| `LEAD_INGEST_SECRET` | **yes** (compose refuses to start without it) | `<same-value-as-the-CRMs-LEAD_INGEST_SECRET>`, ≥ 32 characters; signs every request to the CRM, which refuses unsigned ones |
 | `GMAIL_SENDER_EMAIL` | yes | `<the-single-gmail-address@example.com>` |
 | `GMAIL_APP_PASSWORD` | yes | `<google-app-password>` |
 | `CRM_API_NETWORK_NAME` | no | default `compass-tools-website-api` |
@@ -307,7 +307,7 @@ docker rmi bft-check; docker network rm compass-tools-website-api compass-tools_
 | D3 | **CRM release + migration `20261016000100_lead_ingest_fingerprint`** must be live | Otherwise every flight request fails. CRM owner's deployment. |
 | D4 | Real network and alias names on the live VPS | The live compose differs from Git; confirm with `deploy/preflight.sh` output. |
 | D5 | Canonical host (`www`) and apex routing | Section 9. |
-| D6 | `LEAD_INGEST_SECRET` on both sides | Without it leads carry no visitor IP / location. |
+| D6 | `LEAD_INGEST_SECRET` on both sides | Required: every request to the CRM is signed, and neither side works without it. |
 | D7 | Cloudflare "Add visitor location headers" transform and the privacy policy / retention for IP data | Section 10. |
 
 ## 14. Updating the base image

@@ -633,6 +633,39 @@ test.describe("the CRM settings are missing: friendly errors, the operator is to
 });
 
 // ---------------------------------------------------------------------------------------------------------------------------------------
+test.describe("a production website without a signing secret sends nothing: no unsigned fallback, against a reachable stand-in CRM", () => {
+  test.skip(!standaloneBuildPresent(), "needs a standalone build (NEXT_OUTPUT=standalone npm run build)");
+  test.setTimeout(120_000);
+  let crm: StubCrm;
+  let server: StandaloneServer;
+  let call: ReturnType<typeof actions>;
+  test.beforeAll(async () => {
+    // The stand-in CRM does not check signatures here, so an unsigned request WOULD be stored if the website sent one.
+    crm = await startStubCrm({ apiKey: KEY, companyId: COMPANY });
+    server = await startStandalone({
+      label: "crm-api no signing secret e2e",
+      port: 3242,
+      env: { TRUSTED_PROXY: "cloudflare", CRM_API_URL: crm.url, CRM_API_KEY: KEY, CRM_COMPANY_ID: COMPANY, LEAD_INGEST_SECRET: "" },
+    });
+    call = actions(server);
+  });
+  test.afterAll(async () => {
+    await server?.stop();
+    await crm?.close();
+  });
+
+  test("all three forms give the friendly error, the CRM receives not one request, and the log names the variable", async () => {
+    expect(await call("submitFlightRequest", [flightInput()])).toMatch(GENERIC_FLIGHT_ERROR);
+    expect(await call("submitContactMessage", [contactInput()])).toMatch(GENERIC_CONTACT_ERROR);
+    expect(await call("subscribeToNewsletter", [{ email: "news@example.org", website: "" }])).toMatch(NEWSLETTER_ERROR);
+    expect(crm.requests).toHaveLength(0);
+    const logs = server.logs();
+    for (const scope of ["flight request", "contact message", "newsletter"]) expect(logs).toContain(`[crm-api] ${scope}: LEAD_INGEST_SECRET is not set`);
+    for (const needle of NEEDLES) expect(logs, needle).not.toContain(needle);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------------------------------------------
 // Wrong (but present) settings against a REACHABLE CRM, and a CRM hostname that does not resolve. The website cannot know which of its settings is
 // wrong; what it must do is fail explicitly and safely: a generic message for the visitor, never a false success, one attempt, nothing sensitive in the log,
 // and the server stays healthy afterwards.

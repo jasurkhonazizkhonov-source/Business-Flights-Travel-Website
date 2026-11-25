@@ -156,7 +156,7 @@ staff about a new one. One attempt.
 
 ## Request signature v2 and the visitor IP / approximate location
 
-Every request to the CRM (flight inquiry, contact inquiry, newsletter sign-up) is signed with **signing v2** whenever `LEAD_INGEST_SECRET` is configured
+Every request to the CRM (flight inquiry, contact inquiry, newsletter sign-up) is signed with **signing v2**; a production website without a usable `LEAD_INGEST_SECRET` sends nothing at all (`src/lib/crm-api/config.ts`)
 (`src/lib/crm-api/visitor-context.ts`; the CRM's verifier is `src/server/website-request-signature.ts`, specified in the CRM's `docs/WEBSITE_LEAD_API.md`).
 The earlier v1 context vouched only for the visitor fields and bound nothing else; v2 binds the HTTP method, the request path, the company, the exact body bytes,
 a timestamp and a one-time nonce, and the CRM accepts each nonce once:
@@ -174,9 +174,7 @@ canonicalMessage = "CT-WEBSITE-REQUEST-V2" LF then the fields METHOD | path | co
   behind the tunnel; never a form field, never the visitor's own `X-Forwarded-For`). `country`/`region` are codes and `city` is percent-encoded. When nothing was
   observed the request is still signed and carries no visitor facts. The newsletter call also carries the visitor IP, **only** so the CRM can rate-limit that public
   route per visitor; the CRM stores no subscriber IP.
-* **Set the secret on both sides together.** A CRM that has `LEAD_INGEST_SECRET` **and** `WEBSITE_SIGNATURE_REQUIRED=true` (strict mode) **refuses unsigned requests** (the visitor sees the generic failure message, nothing is
-  stored); with the secret but without that flag (transitional mode, the default) it verifies a valid v2 signature and still accepts unsigned requests as before, without a verified visitor IP or location; a CRM without the secret records no visitor IP or location. Rollout order and key rotation (`LEAD_INGEST_SECRET_PREVIOUS`): `WEBSITE_VPS_DEPLOYMENT_AND_ROLLBACK_RUNBOOK.md`, section Q. The flight call also needs `CRM_COMPANY_ID` (the CRM's
-  `WEBSITE_API_COMPANY_ID`) once a secret is set, because the signature binds the company.
+* **Signing is mandatory on both sides (2026-11-25).** A production website sends nothing without a usable secret (the visitor sees the generic failure with the form kept), and a production CRM refuses a missing, v1, invalid, expired or replayed signature with `401`, and everything with `503` if it has no secret. Rollout order and key rotation (`LEAD_INGEST_SECRET_PREVIOUS`): `WEBSITE_VPS_DEPLOYMENT_AND_ROLLBACK_RUNBOOK.md`, section Q. The flight call also needs `CRM_COMPANY_ID` (the CRM's `WEBSITE_API_COMPANY_ID`), because the signature binds the company.
 * The two servers' clocks must agree: the CRM accepts a timestamp at most 120 seconds old and 30 seconds ahead (keep both on NTP).
 * **Deployment order:** the CRM first (a build that has v2, with its secret set), the website second. The signing code is in the website release; a website
   signing v2 against a CRM that predates it would be refused or ignored, which is why the CRM update comes first. See `docs/WEBSITE_VPS_DEPLOYMENT_AND_ROLLBACK_RUNBOOK.md`.
@@ -209,13 +207,16 @@ the friendly error, and the page itself keeps working (`next build` and every st
 ## Staging validation (the website against a CRM that has the pull request's code)
 
 `tests/crm-contract-live.spec.ts` sends real requests, built by the website's own validator, body builder and client, to a CRM you name. It
-**creates leads in that CRM** (fictional names, `@example.test` addresses, clearly marked `CONTRACT-CHECK`), so it is skipped unless both variables
-are set and it refuses anything but a loopback address unless you also confirm the target is a non-production CRM:
+**creates leads in that CRM** (fictional names, `@example.test` addresses, clearly marked `CONTRACT-CHECK`), so it is skipped unless all of the
+first four variables are set (a production-mode CRM accepts signed requests only), and it refuses anything but a loopback address unless you also
+confirm the target is a non-production CRM:
 
 ```
-CRM_CONTRACT_URL=http://127.0.0.1:3411         # the CRM's origin
-CRM_CONTRACT_KEY=<that CRM's WEBSITE_API_KEY>   # never a production key
-CRM_CONTRACT_ALLOW_REMOTE=staging               # only for a non-loopback, NON-production CRM (a staging stack)
+CRM_CONTRACT_URL=http://127.0.0.1:3411                 # the CRM's origin
+CRM_CONTRACT_KEY=<that CRM's WEBSITE_API_KEY>           # never a production key
+CRM_CONTRACT_SECRET=<that CRM's LEAD_INGEST_SECRET>     # never a production secret
+CRM_CONTRACT_COMPANY_ID=<that CRM's WEBSITE_API_COMPANY_ID>
+CRM_CONTRACT_ALLOW_REMOTE=staging                       # only for a non-loopback, NON-production CRM (a staging stack)
 ```
 
 It checks: create, then the same key and body (`duplicate:true`, same lead), then the same key with a changed request (`409`), a wrong key (`401`),
@@ -235,6 +236,6 @@ Run against the CRM's final commit `d48c7f1`, **built from a clean `git archive`
 | What the CRM stored | The flight lead: company `staging-company`, source `WEBSITE`, `flexibleDates = true`, `dateFlexibilityDays = 2`, airline and budget intact, status `ATTEMPTING_TO_CONTACT`, the signed visitor IP recorded in `LeadSubmissionInfo`, one idempotency fingerprint per lead. The contact inquiry (`ContactInquiry`, status `NEW`) and the subscriber (`Subscriber`, `SUBSCRIBED`) under the same company |
 | CRM down (website pointed at a closed port) | The visitor saw the failure message about 8 seconds after pressing the button (3 s of that was the test's own anti-bot wait), kept everything typed, and the button was usable again |
 
-**A production configuration finding.** With a `LEAD_INGEST_SECRET` configured but `WEBSITE_SIGNATURE_REQUIRED` **not** `true` (the transitional mode meant for deploying the CRM *before* the website), the CRM treats an invalid, expired or **replayed** signature as an unsigned request and accepts it on the bearer key alone: the first run of the replay test created a second lead. Enforcement only exists with `WEBSITE_SIGNATURE_REQUIRED=true`. **After the website carrying signing v2 is deployed and a real submission shows a signed visitor IP in the CRM, set `WEBSITE_SIGNATURE_REQUIRED=true` on the CRM** (an approved production change, not made here). Until then replay protection and the signed-IP rate limit are not in force, only the bearer key is.
+**A production configuration finding (fixed in code on 2026-11-25).** With a `LEAD_INGEST_SECRET` configured but `WEBSITE_SIGNATURE_REQUIRED` not `true`, the CRM of that date treated an invalid, expired or **replayed** signature as unsigned and accepted it on the bearer key alone: the first run of the replay test created a second lead. The CRM now requires a valid signature in production whatever the flag says, and its deploy script refuses a configuration without the secret and the flag. Nothing was deployed by that change.
 
 To repeat it: start a CRM against a disposable database, then `CRM_CONTRACT_URL=… CRM_CONTRACT_KEY=… CRM_CONTRACT_SECRET=… CRM_CONTRACT_COMPANY_ID=… npx playwright test tests/crm-signed-live.spec.ts tests/crm-journey-live.spec.ts --project=Infrastructure --no-deps` (with `NEXT_OUTPUT=standalone npm run build` first for the journey spec). **What this is not:** a staging CRM on the real VPS, the real Cloudflare path, or the real mailbox; it is the real CRM code and a real PostgreSQL on this machine.

@@ -65,7 +65,7 @@ No secret was generated here. There is no existing one to reuse: the feature has
 
 **Step 3: enforce.** Only when step 2 is clean for the traffic you care about: set `EDGE_PROOF_MODE=enforce` (or delete the line: enforce is the default) and redeploy. Re-run `deploy/check-edge-proof.sh`, and submit a test enquiry.
 
-**Back out at any time** without touching Cloudflare: `EDGE_PROOF_MODE=observe` (nothing refused) or empty `EDGE_PROOF_SECRET` (feature off), redeploy.
+**Back out at any time** without touching Cloudflare: `EDGE_PROOF_MODE=observe` (nothing refused), or empty **both** `EDGE_PROOF_SECRET` and `EDGE_PROOF_MODE` (feature off), redeploy. Emptying only the secret while the mode still says `enforce` does **not** switch the feature off: since 2026-11-25 that combination believes no Cloudflare header at all (a missing or misspelt secret must not quietly disable the proof), and `deploy/preflight.sh` refuses it.
 
 **Never** set the secret without the mode while the rule is absent or unverified: with no mode, a secret means `enforce`, and without the rule every visitor would be unproven (they would share one bucket and, after its allowance, be refused). `deploy/preflight.sh` refuses an unknown mode word, and a mode without a secret.
 
@@ -103,9 +103,48 @@ Written from the code (`src/lib/client-ip.ts`, `src/app/api/edge-check/route.ts`
 | Can the app tell Cloudflare from a direct request? | **Only with the proof.** Without it the app can see headers but not who set them; `TRUSTED_PROXY=cloudflare` alone trusts the network. That is the gap the proof closes. A stronger alternative if the origin were ever internet-reachable: Cloudflare Access service tokens or a Worker that signs per request; neither is needed while the tunnel is the only path. |
 | Missing or invalid proof, `observe` | Nothing changes for the request: its Cloudflare headers are believed as before; the check is counted (`valid`/`missing`/`invalid`) and a value-free summary line is logged every five minutes. |
 | Missing or invalid proof, `enforce` (the default for an empty `EDGE_PROOF_MODE`) | Its Cloudflare headers are **not** believed: no trusted IP, no location. Visitors then share the "unresolved client" rate-limit bucket (5x allowance) and the CRM receives no visitor IP for the lead. Forms keep working. |
-| No `EDGE_PROOF_SECRET` | The feature is off; behaviour is as before it existed. |
+| No `EDGE_PROOF_SECRET`, mode empty or `observe` | The feature is off; behaviour is as before it existed. |
+| No `EDGE_PROOF_SECRET`, mode `enforce` (or any other word) | Misconfiguration, fails closed (since 2026-11-25): no Cloudflare header is believed, `/api/edge-check` answers `invalid`, the `[edge-proof]` log counts it. `deploy/preflight.sh` refuses it before a deploy. |
 | Can a lock-out still happen by omission? | Not any more: `deploy/preflight.sh` now **refuses a secret without an explicit `EDGE_PROOF_MODE`** (an empty mode means enforce). Write `observe` first. |
 
 Evidence required before recommending `enforce` (all must hold): `deploy/check-edge-proof.sh` against the public URL prints PASS for "nothing special sent" and "forged header is overwritten" **and** (with `--origin bft-web` on the VPS) PASS for "straight at the container: missing" and "wrong proof: invalid"; the `[edge-proof]` log shows `missing=0 invalid=0` over at least one full day of real traffic; a real test submission shows the visitor IP in the CRM lead. **Rollback**: set `EDGE_PROOF_MODE=observe` (or remove both variables) and restart `bft-web`; nothing else changes. **Status today: no Cloudflare rule exists, nothing is activated, and nothing in this review changed Cloudflare.**
 
 The exact rule (Cloudflare dashboard, Rules > Transform Rules > Modify Request Header > Create rule): *When incoming requests match* "All incoming requests" for the hostname `www.businessflights.travel` (and the apex if it also serves traffic) > *Then* **Set static** header name `x-bft-edge-proof`, value = the secret. Place it so no earlier rule short-circuits it; "Set static" overwrites a client-supplied value, which the verification script checks.
+
+## 9. Which path reaches the origin, and what the proof adds (from the repository files, 2026-11-25)
+
+```
+Visitor --HTTPS--> Cloudflare edge --Cloudflare Tunnel (outbound connection from the VPS)--> cloudflared (CRM compose project)
+        --http://bft-web:3000 on the shared tunnel network--> website container
+Website container --http://compass-crm:3000 on the internal website-API network--> CRM
+```
+
+| Question | Answer from the files | Verified on the live system? |
+|---|---|---|
+| Is a port published on the host? | No: `compose.yaml` has no `ports:`; `deploy/preflight.sh` and `deploy/verify.sh` refuse one | **No** |
+| Who can open the origin directly? | Only a container on the `tunnel` network (the connector and, in the release layout, the CRM app), a container on the website-API network, or someone with Docker or root access on the VPS | **No** |
+| What protects the origin? | Network isolation (no published port, tunnel only) | **No** |
+| What does the proof add? | It stops a container on those networks from inventing a visitor IP or location | not activated |
+| What does it **not** protect? | It blocks no request. Pages and forms stay reachable to any caller that reaches the origin; an unproven request only loses attribution and shares one rate-limit bucket | |
+| Health checks and internal traffic | The Docker health check calls `/api/health`, which reads no visitor header: unaffected in every mode. The website's calls to the CRM do not pass through Cloudflare and do not carry the proof; they are authenticated by the API key and the request signature | tested locally |
+| Is the rule, tunnel route or DNS record in place? | No rule is confirmed to exist. DNS, tunnel routes and zone settings have not been read from the dashboard | **No** |
+
+**Is the static secret sufficient?** For this architecture, yes as defence in depth, **provided** the two isolation facts in the first two rows are confirmed on the VPS (`deploy/preflight.sh`, then `ss -ltn` and `docker ps` showing no published website port). If the origin were ever reachable from the internet, the isolation must be restored; a stronger proof at the application would not by itself make a published origin safe.
+
+## 10. Staging activation checklist (ten checks)
+
+No staging environment was available to this work: the local equivalents below ran against real production-build servers with a stand-in edge, **not** against Cloudflare or a VPS. Repeat each on staging before production.
+
+| # | Check | Local test (`tests/edge-proof.spec.ts`, `tests/rate-limit-topology.spec.ts`) | On staging / production |
+|---|---|---|---|
+| 1 | Edge traffic with a valid proof is attributed | yes (stand-in edge) | `deploy/check-edge-proof.sh` prints `valid` |
+| 2 | Missing proof | yes | `--origin bft-web`: `missing` |
+| 3 | Invalid proof | yes | `--origin bft-web`: `invalid` |
+| 4 | Direct-origin bypass with forged visitor headers is not believed (enforce) | yes | from another container on the tunnel network |
+| 5 | Legitimate pages and form submissions work in observe and enforce | yes (stand-in CRM) | one approved test submission per form |
+| 6 | API routes (`/api/visitor-hint`, `/api/edge-check`) | yes | same requests through the edge |
+| 7 | Health checks | yes | container stays healthy after the switch |
+| 8 | Website-to-CRM traffic | signed requests, stand-in CRM | the CRM receives the lead with the visitor IP |
+| 9 | Unexpected proxy behaviour: repeated header, appended value, forged `X-Forwarded-For` | yes | the forged-header line of the check script |
+| 10 | Rollback to observe, and to off | yes (mode and configuration tests) | switch, redeploy, re-run the script |
+

@@ -25,6 +25,7 @@ test.describe("the customer journey against a real CRM (opt-in)", () => {
   let nextIp = 60;
 
   test.beforeAll(async () => {
+    test.setTimeout(150_000); // two production servers are copied and started here; the default 30 s hook timeout is too short on a loaded machine
     server = await startStandalone({ label: "journey live", port: 3281, withStaticAssets: true, env: { TRUSTED_PROXY: "cloudflare", CRM_API_URL: url!, CRM_API_KEY: key!, LEAD_INGEST_SECRET: secret!, CRM_COMPANY_ID: companyId! } });
     // The same website with a CRM address nothing listens on: the "CRM is down" behaviour.
     down = await startStandalone({ label: "journey crm down", port: 3282, withStaticAssets: true, env: { TRUSTED_PROXY: "cloudflare", CRM_API_URL: "http://127.0.0.1:3399", CRM_API_KEY: key!, LEAD_INGEST_SECRET: secret!, CRM_COMPANY_ID: companyId! } });

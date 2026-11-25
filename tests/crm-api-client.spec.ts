@@ -72,7 +72,23 @@ test.describe("configuration (src/lib/crm-api/config.ts)", () => {
     expect(ok.ok && ok.config.apiKey).toBeUndefined(); // the key is never even loaded for the unauthenticated endpoints
   });
 
-  test("LEAD_INGEST_SECRET is optional; a too-short one is ignored with a warning (the lead is still sent, without the visitor's IP)", () => {
+  test.describe("in production the signing secret is mandatory: nothing can be configured to send unsigned", () => {
+    const base = { NODE_ENV: "production", CRM_API_URL: "http://crm:3000", CRM_API_KEY: KEY, CRM_COMPANY_ID: "cabc" };
+    for (const target of ["flight-inquiry", "public-inquiry"] as const) {
+      test(`${target}: a missing, blank or short secret is a configuration problem named without its value; a good one is used`, () => {
+        for (const secret of [undefined, "", "   "]) {
+          expect(resolveCrmApiConfig({ ...base, LEAD_INGEST_SECRET: secret }, target)).toEqual({ ok: false, problems: ["LEAD_INGEST_SECRET is not set (every request to the CRM must be signed)"] });
+        }
+        const short = resolveCrmApiConfig({ ...base, LEAD_INGEST_SECRET: "tiny-secret-sentinel" }, target);
+        expect(short).toEqual({ ok: false, problems: [`LEAD_INGEST_SECRET must be at least ${MIN_SECRET_LENGTH} characters`] });
+        expect(JSON.stringify(short)).not.toContain("tiny-secret-sentinel");
+        const good = resolveCrmApiConfig({ ...base, LEAD_INGEST_SECRET: INGEST }, target);
+        expect(good).toMatchObject({ ok: true, config: { ingestSecret: INGEST, companyId: "cabc" }, warnings: [] });
+      });
+    }
+  });
+
+  test("outside production LEAD_INGEST_SECRET is optional; a too-short one is ignored with a warning", () => {
     const base = { CRM_API_URL: "http://crm:3000", CRM_API_KEY: KEY, CRM_COMPANY_ID: "cabc" }; // the company is needed to SIGN a flight request
     const without = resolveCrmApiConfig(base, "flight-inquiry");
     expect(without.ok && without.config.ingestSecret).toBeUndefined();

@@ -76,8 +76,8 @@ function visitorFields(info: SubmissionInfo | undefined): Pick<SignedContextPayl
 }
 
 /**
- * A signer for this submission, or undefined when no secret is configured (nothing can be signed; the CRM then refuses the request if it has a secret, which the
- * visitor sees as a clear failure rather than an unauthenticated fallback). `info` is what this server observed; with neither an IP nor a location the
+ * A signer for this submission, or undefined when no secret is configured, which only happens outside production (config.ts refuses to send anything from a
+ * production server without one). `info` is what this server observed; with neither an IP nor a location the
  * envelope still authenticates the request, it simply carries no visitor facts.
  */
 export function createRequestSigner(

@@ -56,8 +56,8 @@ services:
       CRM_API_KEY: ${CRM_API_KEY:?Set CRM_API_KEY in .env (the same value as the CRM's WEBSITE_API_KEY)}
       # The CRM Company id the contact form and the newsletter sign-up are filed under (the CRM's public endpoints take it in the body).
       CRM_COMPANY_ID: ${CRM_COMPANY_ID:?Set CRM_COMPANY_ID in .env (the CRM's WEBSITE_API_COMPANY_ID)}
-      # Optional: signs the visitor's IP / approximate location so the CRM can record them. Identical to the CRM's LEAD_INGEST_SECRET.
-      LEAD_INGEST_SECRET: ${LEAD_INGEST_SECRET:-}
+      # REQUIRED: signs every request to the CRM (and carries the visitor's IP / approximate location inside the signature). Identical to the CRM's LEAD_INGEST_SECRET.
+      LEAD_INGEST_SECRET: ${LEAD_INGEST_SECRET:?Set LEAD_INGEST_SECRET in .env (the same value as the CRM's; at least 32 characters)}
       # --- visitor IP: the origin is reachable only through cloudflared, which carries Cloudflare's CF-Connecting-IP ---
       TRUSTED_PROXY: cloudflare
       # OPTIONAL, off while empty. When set (>= 24 characters, identical to the value a Cloudflare request-header rule adds as "x-bft-edge-proof"), the Cloudflare

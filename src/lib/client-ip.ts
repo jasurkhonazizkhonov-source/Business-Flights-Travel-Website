@@ -127,17 +127,26 @@ export type EdgeProofState = "off" | "valid" | "missing" | "invalid";
 export type EdgeProofMode = "enforce" | "observe";
 
 /**
+ * True when EDGE_PROOF_MODE asks for enforcement in words (anything set other than "observe"). With no secret to enforce, the proof must not quietly switch
+ * itself off - a misspelt or missing EDGE_PROOF_SECRET would otherwise disable it - so nothing can be valid (fail closed). An unset mode is not a request.
+ */
+function enforcementAskedFor(): boolean {
+  const mode = process.env.EDGE_PROOF_MODE?.trim().toLowerCase() ?? "";
+  return mode !== "" && mode !== "observe";
+}
+
+/**
  * What THIS request says about where it came from, as far as the edge proof is concerned:
- *   off      no secret is configured (the feature is off);
+ *   off      no secret is configured and enforcement is not asked for (the feature is off);
  *   valid    the request carries exactly the configured secret in x-bft-edge-proof;
  *   missing  a secret is configured and the header is absent;
  *   invalid  a secret is configured and the header is present but is not it (including a repeated header, which arrives as "a, a"), or the configured
- *            secret is shorter than the minimum (a misconfiguration: nothing can be valid then).
+ *            secret is shorter than the minimum, or EDGE_PROOF_MODE asks for enforcement without any secret (misconfigurations: nothing can be valid then).
  * The comparison is constant-time and the secret is never part of a result.
  */
 export function edgeProofState(headerList: Headers): EdgeProofState {
   const secret = edgeProofSecret();
-  if (secret === undefined) return "off";
+  if (secret === undefined) return enforcementAskedFor() ? "invalid" : "off";
   if (secret.length < MIN_EDGE_PROOF_SECRET_LENGTH) return "invalid";
   const presented = headerList.get(EDGE_PROOF_HEADER);
   if (!presented) return "missing";
@@ -157,7 +166,7 @@ export function edgeProofMode(): EdgeProofMode {
   return process.env.EDGE_PROOF_MODE?.trim().toLowerCase() === "observe" ? "observe" : "enforce";
 }
 
-/** True when the request proves it came through the edge that adds the secret; always true when no secret is configured (the feature is off). */
+/** True when the request proves it came through the edge that adds the secret; always true when the feature is off. */
 export function edgeProofAccepted(headerList: Headers): boolean {
   const state = edgeProofState(headerList);
   return state === "off" || state === "valid";

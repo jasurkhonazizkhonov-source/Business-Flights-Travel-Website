@@ -125,8 +125,7 @@ function baseState(over: Partial<State> = {}): State {
 // A valid .env for the API-only website. Values are fakes: 40 and 48 characters of filler.
 const KEY40 = "k".repeat(40);
 const SIGNING40 = "g".repeat(40);
-// Signing is part of this release's contract with the CRM, so a valid .env carries LEAD_INGEST_SECRET (the preflight refuses to proceed without it unless
-// PREFLIGHT_ALLOW_UNSIGNED=yes is given on purpose).
+// Every request to the CRM must be signed, so a valid .env carries LEAD_INGEST_SECRET (the preflight refuses to proceed without it, with no override).
 const ENV_OK = `CRM_API_KEY=${KEY40}\nCRM_COMPANY_ID=company-1\nGMAIL_SENDER_EMAIL=a@example.com\nGMAIL_APP_PASSWORD=not-a-real-password\nLEAD_INGEST_SECRET=${SIGNING40}\n`;
 const ENV_NO_SIGNING = ENV_OK.replace(`LEAD_INGEST_SECRET=${SIGNING40}\n`, "");
 
@@ -352,19 +351,26 @@ test.describe("deploy scripts, dry-run against a stub docker", () => {
     r = run("");
     expect(r.code, r.out).toBe(0);
     expect(r.out).toContain("LEAD_INGEST_SECRET is set");
-    // No secret: the website would send UNSIGNED requests. The deployment stops, unless the operator says so explicitly.
+    // No secret: nothing could be sent to the CRM. The deployment stops, and nothing lets it go ahead unsigned (the former override no longer exists).
     r = run("", ENV_NO_SIGNING);
     expect(r.code).not.toBe(0);
-    expect(r.out).toMatch(/LEAD_INGEST_SECRET is not set, so requests to the CRM would be NOT signed/);
-    expect(r.out).toContain("PREFLIGHT_ALLOW_UNSIGNED=yes");
+    expect(r.out).toMatch(/LEAD_INGEST_SECRET is not set\. Every request to the CRM must be signed/);
     const unsigned = sandbox(baseState(), { env: ENV_NO_SIGNING });
     r = unsigned.run("preflight.sh", [], { PREFLIGHT_ALLOW_UNSIGNED: "yes" });
     allCalls.push(...unsigned.calls());
-    expect(r.code, r.out).toBe(0);
-    expect(r.out).toMatch(/WARN: LEAD_INGEST_SECRET is not set and PREFLIGHT_ALLOW_UNSIGNED=yes was given: requests to the CRM are NOT signed/);
+    expect(r.code, r.out).not.toBe(0);
     r = run("LEAD_INGEST_SECRET=short\n", ENV_NO_SIGNING);
     expect(r.code).not.toBe(0);
     expect(r.out).toMatch(/LEAD_INGEST_SECRET is shorter than 32 characters/);
+    for (const bad of ["<same-value-as-the-CRMs-LEAD_INGEST_SECRET>", `${"s".repeat(20)} ${"t".repeat(20)}`]) {
+      r = run(`LEAD_INGEST_SECRET=${bad}\n`, ENV_NO_SIGNING);
+      expect(r.code, bad).not.toBe(0);
+      expect(r.out).toMatch(/contains a space or looks like the example placeholder/);
+    }
+    r = run(`LEAD_INGEST_SECRET=${KEY40}\n`, ENV_NO_SIGNING);
+    expect(r.code).not.toBe(0);
+    expect(r.out).toMatch(/same value as CRM_API_KEY/);
+    expect(r.out).not.toContain(KEY40);
     r = run(`LEAD_INGEST_SECRET=${"s".repeat(40)}\n`, ENV_NO_SIGNING);
     expect(r.code, r.out).toBe(0);
     expect(r.out).toContain("LEAD_INGEST_SECRET is set");

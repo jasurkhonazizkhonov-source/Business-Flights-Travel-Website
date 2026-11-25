@@ -307,7 +307,7 @@ test.describe("container files (static checks; Docker itself was not available t
     expect(composeCode).toMatch(/CRM_API_URL: \$\{CRM_API_URL:-http:\/\/compass-crm:3000\}/);
     expect(composeCode).toMatch(/CRM_API_KEY: \$\{CRM_API_KEY:\?/); // required: the container refuses to start without it
     expect(composeCode).toMatch(/CRM_COMPANY_ID: \$\{CRM_COMPANY_ID:\?/);
-    expect(composeCode).toMatch(/LEAD_INGEST_SECRET: \$\{LEAD_INGEST_SECRET:-\}/);
+    expect(composeCode).toMatch(/LEAD_INGEST_SECRET: \$\{LEAD_INGEST_SECRET:\?/); // required: every request to the CRM is signed
     expect(composeCode).toMatch(/GMAIL_APP_PASSWORD: \$\{GMAIL_APP_PASSWORD:\?/);
     expect(composeCode).not.toMatch(/DATABASE_|DIRECT_URL|postgres/i);
     expect(composeCode).not.toMatch(/postgresql:\/\/[^\s$]*:[^\s$@]+@/); // no literal user:password@ URL

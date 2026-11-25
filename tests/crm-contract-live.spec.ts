@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { parseCrmBaseUrl } from "../src/lib/crm-api/config";
 import { buildFlightInquiryBody } from "../src/lib/crm-api/flight-inquiry";
 import { postFlightInquiry } from "../src/lib/crm-api/client";
+import { createRequestSigner } from "../src/lib/crm-api/visitor-context";
 import { flightRequestSchema, type FlightRequestInput } from "../src/lib/validations/flight-request";
 import { normalizePhoneNumber } from "../src/lib/phone";
 
@@ -11,13 +12,16 @@ import { normalizePhoneNumber } from "../src/lib/phone";
 //
 //   CRM_CONTRACT_URL=http://127.0.0.1:3411     the CRM's origin
 //   CRM_CONTRACT_KEY=<that CRM's WEBSITE_API_KEY>      never a production key
+//   CRM_CONTRACT_SECRET=<that CRM's LEAD_INGEST_SECRET>   and CRM_CONTRACT_COMPANY_ID=<its WEBSITE_API_COMPANY_ID>: a production-mode CRM accepts signed requests only
 //   CRM_CONTRACT_ALLOW_REMOTE=staging          only for a non-loopback CRM that is NOT production
 //
 // It CREATES leads in that CRM (fictional names marked CONTRACT-CHECK, @example.test addresses). It never prints the key or a request body,
 // and it refuses a non-loopback target unless that is confirmed. See docs/CRM_API_INTEGRATION.md, "Staging validation".
 const url = process.env.CRM_CONTRACT_URL?.trim();
 const key = process.env.CRM_CONTRACT_KEY?.trim();
-const configured = !!url && !!key;
+const secret = process.env.CRM_CONTRACT_SECRET?.trim();
+const companyId = process.env.CRM_CONTRACT_COMPANY_ID?.trim();
+const configured = !!url && !!key && !!secret && !!companyId;
 
 const LOOPBACK = new Set(["127.0.0.1", "localhost", "[::1]", "::1"]);
 const futureDate = (days: number) => new Date(Date.now() + days * 86_400_000).toISOString().slice(0, 10);
@@ -50,13 +54,14 @@ function body(data: FlightRequestInput) {
 test.describe.configure({ mode: "serial" });
 
 test.describe("the website's CRM client against a real CRM (opt-in)", () => {
-  test.skip(!configured, "set CRM_CONTRACT_URL and CRM_CONTRACT_KEY to run this against a non-production CRM");
+  test.skip(!configured, "set CRM_CONTRACT_URL, CRM_CONTRACT_KEY, CRM_CONTRACT_SECRET and CRM_CONTRACT_COMPANY_ID to run this against a non-production CRM");
 
   const send = (requestBody: unknown, idempotencyKey: string, extra: { apiKey?: string; edgeHeader?: boolean } = {}) => {
     const base = parseCrmBaseUrl(url);
     if (!base.ok) throw new Error(`CRM_CONTRACT_URL is unusable: ${base.reason}`);
     return postFlightInquiry({
-      config: { baseUrl: base.origin, apiKey: extra.apiKey ?? key },
+      config: { baseUrl: base.origin, apiKey: extra.apiKey ?? key, companyId },
+      sign: createRequestSigner(undefined, secret),
       body: requestBody,
       idempotencyKey,
       maxAttempts: 1,

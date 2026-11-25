@@ -41,6 +41,9 @@ function accepts(host: string, port: number): Promise<boolean> {
   });
 }
 
+/** A throwaway signing secret. A production server sends nothing to a CRM without one, so every server started here has one unless a spec overrides it ("" = none). */
+export const TEST_INGEST_SECRET = "standalone-test-ingest-secret-0123456789-abcdefgh";
+
 export async function startStandalone(options: { label: string; port: number; env: Record<string, string>; withStaticAssets?: boolean; timeoutMs?: number }): Promise<StandaloneServer> {
   const { label, port } = options;
   if ((await accepts("127.0.0.1", port)) || (await accepts("::1", port))) {
@@ -72,6 +75,7 @@ export async function startStandalone(options: { label: string; port: number; en
     NODE_ENV: "production",
     HOSTNAME: "127.0.0.1",
     PORT: String(port),
+    LEAD_INGEST_SECRET: TEST_INGEST_SECRET,
     ...options.env,
   } as NodeJS.ProcessEnv;
   const child: ChildProcess = spawn(process.execPath, ["server.js"], { cwd: layout, env, stdio: ["ignore", "pipe", "pipe"] });

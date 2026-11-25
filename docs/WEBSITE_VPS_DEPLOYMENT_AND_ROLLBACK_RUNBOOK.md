@@ -18,7 +18,7 @@ Facts this runbook relies on (verified in the repositories; the **live** values 
 
 ## Why the order matters (read before anything else)
 
-1. The live **CRM is older than the updated source** and does not know signing v2. The updated website signs every request with v2, so **the CRM must be updated first** and have `LEAD_INGEST_SECRET` set; otherwise (secret unset on the CRM) it accepts unsigned requests but records no visitor IP, and (an old CRM with the secret set) it ignores `v:2` and trusts nothing.
+1. The live **CRM is older than the updated source** and does not know signing v2. The updated website signs every request with v2 and **sends nothing without `LEAD_INGEST_SECRET`**, so **the CRM must be updated first**, with the same secret and `WEBSITE_SIGNATURE_REQUIRED=true`. Since 2026-11-25 an updated production CRM **refuses every unsigned website request**: if the live website calls the CRM's website routes without a v2 signature, its enquiries are refused from the CRM update until the new website is live, so deploy the two back to back (section Q).
 2. The live **website is the old, database-backed release**. It keeps working against the database until it is replaced, so the CRM update must not break its network path (see "Network" below: use the additive path).
 3. **Rollback of the website to the old release needs the OLD compose file and the OLD `.env` values**, not the new `compose.yaml`: the old image needs `DATABASE_URL` and the old network, which the new compose does not pass. Keep a copy of the old release's checkout (step 1) before anything changes.
 
@@ -104,14 +104,14 @@ Put the reviewed release commit in a **new** directory (do not overwrite the liv
 ```bash
 git clone --branch <review-or-release-branch> --single-branch <repository URL> <new dir>      # or: git -C <new dir> fetch && git -C <new dir> checkout <commit>
 cp <old checkout>/.env <new dir>/.env && chmod 600 <new dir>/.env
-# add, by hand, the NEW variable NAMES to <new dir>/.env (values from the password manager; never typed into a shell history): CRM_API_KEY, CRM_COMPANY_ID, LEAD_INGEST_SECRET
+# add, by hand, the NEW variable NAMES to <new dir>/.env (values from the password manager; never typed into a shell history): CRM_API_KEY, CRM_COMPANY_ID, LEAD_INGEST_SECRET (all required)
 ```
 `.env` keeps `DATABASE_*` for the rollback window; the new compose does not forward them to the container.
 
 ## 5. Update the CRM  [APPROVAL: production change, brief CRM interruption]
 
 1. Build/obtain the CRM image from the updated CRM source (the commit that contains `website-request-signature.ts`).
-2. Set `LEAD_INGEST_SECRET` in the **CRM** `.env` (same value as the website's will be). Leave `WEBSITE_SIGNATURE_REQUIRED` **unset** for now (transitional mode: a valid v2 signature is verified, unsigned requests are still accepted); it is switched on in step 7 below, after the website is live and signing (see section Q). Set it only after the privacy wording decision (see the report).
+2. In the **CRM** `.env` set `LEAD_INGEST_SECRET` (same value as the website's will be) and `WEBSITE_SIGNATURE_REQUIRED=true`. The CRM's deploy script refuses to continue without both. Signed requests are mandatory in a production CRM from this moment (section Q). Do it only after the privacy wording decision (see the report).
 3. Apply Path 2 (or Path 1) from the "Network" section, recreating **only** the CRM app and the connector:
 ```bash
 cd <crm checkout>
@@ -150,7 +150,7 @@ If the old compose references a tag that no longer exists locally, set `APP_VERS
 
 **Rolling back to the previous NEW release** (a later release that failed) uses the website's own script: `deploy/rollback.sh previous` (or `deploy/rollback.sh <git short sha>`), which recreates only `bft-web` from a kept image and re-runs `verify.sh`. It cannot revive the old database-backed release (different compose).
 
-**CRM side:** if only the CRM update must be undone, remove the override (`up -d --no-deps app cloudflared` with the live compose file only) and unset the CRM's `LEAD_INGEST_SECRET`; the CRM then accepts unsigned requests again and records no visitor IP. The CRM database is not changed by any step here, so no restore is needed; `restore-db.sh --replace` is a last resort for data loss only and is outside this runbook.
+**CRM side:** if only the CRM update must be undone, remove the override (`up -d --no-deps app cloudflared` with the live compose file only), which returns to the previous CRM image and its previous behaviour. Do not "fix" refused requests by removing the secret: an updated CRM then refuses every website request. The CRM database is not changed by any step here, so no restore is needed; `restore-db.sh --replace` is a last resort for data loss only and is outside this runbook.
 
 ## 9. Things that must NOT be done
 
@@ -217,7 +217,7 @@ The commit under test is the one `git rev-parse --short HEAD` prints; `deploy/de
 ### C. Order of operations (summary; the numbered sections above give the commands)
 
 1. Read-only inspection of the live state (section 0) and the three backups (sections 1-2).
-2. Deploy the CRM **first** (signing v2 verifier, per-visitor flight limiter, `LEAD_INGEST_SECRET` set), confirm its health and that PostgreSQL did not restart.
+2. Deploy the CRM **first** (signing v2 verifier, per-visitor flight limiter, `LEAD_INGEST_SECRET` and `WEBSITE_SIGNATURE_REQUIRED=true`), confirm its health and that PostgreSQL did not restart. Continue straight to step 3: an unsigned live website is refused meanwhile.
 3. Preflight, then `deploy/deploy.sh` (website only; refuses a dirty tree; tags `:previous` from a healthy container; waits for health; runs `verify.sh`).
 4. Cloudflare changes (section E) **after** the origin is healthy, one at a time, each verified before the next.
 5. Public smoke tests and the one approved CRM test submission (sections 7 and F).
@@ -281,7 +281,7 @@ Liveness: `GET /api/health` (no CRM call, no detail); the container health check
 
 ### I. Rollback (unchanged, restated)
 
-Website-only: `deploy/rollback.sh previous` for a failed new release; the old database-backed release needs its own compose and `.env` (section 8). CRM: remove the override and unset `LEAD_INGEST_SECRET`. Cloudflare: undo each change in reverse order (E3, E2, E1).
+Website-only: `deploy/rollback.sh previous` for a failed new release; the old database-backed release needs its own compose and `.env` (section 8). CRM: return to the previous CRM image (section 8). Cloudflare: undo each change in reverse order (E3, E2, E1).
 
 
 ---
@@ -299,9 +299,9 @@ date -u +%s ; docker exec <crm-container> date -u +%s ; docker exec business-fli
 ```
 If they differ by more than ~20 s: fix NTP (do **not** widen the window). Symptoms of drift: every enquiry shows the generic error while `/api/health` stays green; the CRM log has `[website-signature] refused: expired` (website clock behind) or `... future` (website clock ahead); the website log has `the CRM refused the website's credential or route (HTTP 401)`. `bad_signature` instead means the two sides hold a different `LEAD_INGEST_SECRET` or company id; `replay` means a resent envelope. Details: `SECURITY_REVIEW_AND_REMAINING_LIMITATIONS.md`, section 6.
 
-### K. The preflight now requires the signing secret
+### K. The preflight requires the signing secret
 
-`deploy/preflight.sh` stops with an error when `LEAD_INGEST_SECRET` is missing from the website's `.env` (it used to warn). Set it, identical to the CRM's (32 characters or more; never typed into a shell history). Running without signing is possible only as a conscious decision: `PREFLIGHT_ALLOW_UNSIGNED=yes deploy/preflight.sh` (and the same variable in front of `deploy/deploy.sh`); do not use it for this release, because the CRM refuses unsigned requests once it has the secret.
+`deploy/preflight.sh` stops with an error when `LEAD_INGEST_SECRET` is missing from the website's `.env`, shorter than 32 characters, still the example placeholder or equal to `CRM_API_KEY`. There is **no override**: `PREFLIGHT_ALLOW_UNSIGNED` was removed on 2026-11-25. The running website enforces the same rule: without a usable secret it sends nothing to the CRM, every form shows the friendly error with the visitor's input kept, and the log says `[crm-api] ...: LEAD_INGEST_SECRET is not set`. `compose.yaml` also refuses to start the container without it. Set it identical to the CRM's (never typed into a shell history).
 
 ### E4. Edge rate limiting (recommended, not applied; Cloudflare change, needs your approval)
 
@@ -343,15 +343,16 @@ curl -s -H "Accept: application/json" https://www.businessflights.travel/api/vis
 ```
 Then section F (live CRM test, with approval) and the Search Console steps in `SEO_TECHNICAL_VERIFICATION.md`.
 
-### Q. Signature rollout (transitional -> strict) and secret rotation: read from the CRM source on 2026-11-22 (`website-request-signature.ts`, not modified)
+### Q. Mandatory signing: rollout order and secret rotation (updated 2026-11-25)
 
-The CRM has two modes, chosen only by its environment: **transitional** (the default: `LEAD_INGEST_SECRET` set, `WEBSITE_SIGNATURE_REQUIRED` unset) verifies a valid v2 envelope and uses it, but **still accepts unsigned and v1 requests exactly as before**; **strict** (`WEBSITE_SIGNATURE_REQUIRED=true`, which needs a configured secret) refuses a missing, v1, invalid, expired or replayed signature with `401`. An earlier revision of this runbook said that setting the secret makes the CRM refuse unsigned requests: that is true **only in strict mode**.
+**Signed requests are mandatory on both sides.** A production website sends nothing without a usable `LEAD_INGEST_SECRET`; a production CRM (`website-signing-policy.ts`) accepts a website request only with a valid, single-use v2 signature, whatever `WEBSITE_SIGNATURE_REQUIRED` says, and answers `503` if it has no secret. The CRM's `deploy.sh` refuses to deploy unless the secret is set **and** `WEBSITE_SIGNATURE_REQUIRED=true`. The earlier "transitional" mode no longer exists in production. The CRM's own runbook is `docs/WEBSITE_SIGNING_STRICT_MODE.md` in the CRM repository.
 
 **Order (nothing here was executed):**
-1. Deploy the CRM from the release commit with `LEAD_INGEST_SECRET` set and `WEBSITE_SIGNATURE_REQUIRED` **unset**. Check its health. Unsigned traffic keeps working, so the CRM can go first without breaking the live website.
-2. Put the same `LEAD_INGEST_SECRET` in the website's `.env`; run `deploy/preflight.sh` (it now stops without the secret) and deploy the website.
-3. Check the clocks (section J) and that signed requests arrive: with the approved test submission (section F) the CRM log shows no `[website-signature] refused:` line and the lead has a verified IP/location.
-4. **Only then** set `WEBSITE_SIGNATURE_REQUIRED=true` on the CRM and restart it: from now on an unsigned or invalid request is a `401` (the visitor sees the generic error). This is the state in which the website cannot silently run unsigned. Do not do this before step 3 succeeded, or a mis-set secret takes the forms down.
-5. Rollback of step 4 is unsetting the flag and restarting the CRM (transitional again); rollback of the whole release is section 8.
+1. Find out how the live website delivers enquiries today. If it calls the CRM's website routes without a v2 signature, there is a window between steps 2 and 3 in which its enquiries are refused: do them back to back in a quiet period. The visitor sees an error and keeps what they typed.
+2. Deploy the CRM from the release commit with `LEAD_INGEST_SECRET` and `WEBSITE_SIGNATURE_REQUIRED=true`. Check `deploy/verify.sh` reports `websiteSignature=required`.
+3. Put the same `LEAD_INGEST_SECRET` in the website's `.env`; run `deploy/preflight.sh` and deploy the website.
+4. Check the clocks (section J) and, with the approved test submissions (section F), that the CRM log shows no `[website-signature] refused:` line, each record arrived once, and the enquiry has a verified IP and location.
 
-**Rotating the secret** (the CRM accepts a second, older secret for the overlap; the website holds one): (a) generate a new secret (32+ characters) in your password manager; (b) on the CRM set `LEAD_INGEST_SECRET` to the NEW value and `LEAD_INGEST_SECRET_PREVIOUS` to the OLD value, restart the CRM (both are now accepted); (c) set the NEW value in the website's `.env` and redeploy/restart the website container; (d) confirm signed requests verify (log, test submission); (e) remove `LEAD_INGEST_SECRET_PREVIOUS` from the CRM and restart. Never put either value in a shell history, a ticket or Git. A website that is still on the old secret after (e) is refused in strict mode: do (c) and (d) before (e).
+**Rollback:** the website image (section 8), or the CRM image. There is no setting on the updated CRM that re-opens unsigned requests. A rolled-back **older** CRM image honours `WEBSITE_SIGNATURE_REQUIRED`; leave it `true`.
+
+**Rotating the secret** (the CRM accepts a second, older secret for the overlap; the website holds one): (a) generate a new secret (32+ characters) in your password manager; (b) on the CRM set `LEAD_INGEST_SECRET` to the NEW value and `LEAD_INGEST_SECRET_PREVIOUS` to the OLD value, recreate the CRM app (both are now accepted); (c) set the NEW value in the website's `.env` and redeploy the website container; (d) confirm signed requests verify (log, test submission); (e) remove `LEAD_INGEST_SECRET_PREVIOUS` from the CRM and recreate it. Never put either value in a shell history, a ticket or Git. A website still on the old secret after (e) is refused: do (c) and (d) before (e).
